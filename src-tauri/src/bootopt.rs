@@ -22,9 +22,9 @@ struct BcdTweak {
 static TWEAKS: &[BcdTweak] = &[
     BcdTweak {
         id:          "bcd_timeout_0",
-        name:        "Boot-Menü Timeout auf 0",
-        description: "Setzt den Boot-Menü-Timeout auf 0 Sekunden — überspringt das Auswahlmenü sofort, wenn nur ein OS vorhanden ist.",
-        impact:      "Spart 3–5 s bei jedem Booten",
+        name:        "Set Boot Menu Timeout to 0",
+        description: "Sets the boot menu timeout to 0 seconds — skips the selection menu instantly when only one OS is present.",
+        impact:      "Saves 3–5 s on every boot",
         risk:        "Low",
         apply_cmd:   "bcdedit /timeout 0",
         revert_cmd:  "bcdedit /timeout 30",
@@ -32,8 +32,8 @@ static TWEAKS: &[BcdTweak] = &[
     },
     BcdTweak {
         id:          "bcd_no_bootlog",
-        name:        "Boot-Log deaktivieren",
-        description: "Deaktiviert das Schreiben der NTOSKRNL-Boot-Log-Datei (ntbtlog.txt). Nur für Diagnose benötigt.",
+        name:        "Disable Boot Log",
+        description: "Disables writing the NTOSKRNL boot log file (ntbtlog.txt). Only needed for diagnostics.",
         impact:      "Minimal, reduziert IO beim Start",
         risk:        "Low",
         apply_cmd:   "bcdedit /set '{current}' bootlog no",
@@ -42,9 +42,9 @@ static TWEAKS: &[BcdTweak] = &[
     },
     BcdTweak {
         id:          "bcd_no_bootux",
-        name:        "Boot-Fortschrittsbalken deaktivieren",
+        name:        "Disable Boot Progress Bar",
         description: "Schaltet den animierten Windows-Ladebalken ab (quietboot). Spart etwas GPU-Initialisierungszeit.",
-        impact:      "~0.1–0.3 s",
+        impact:      "~0.1–0.3 s faster boot",
         risk:        "Low",
         apply_cmd:   "bcdedit /set '{current}' quietboot yes",
         revert_cmd:  "bcdedit /deletevalue '{current}' quietboot",
@@ -63,8 +63,8 @@ static TWEAKS: &[BcdTweak] = &[
     BcdTweak {
         id:          "bcd_standard_policy",
         name:        "Boot-Policy auf Standard setzen",
-        description: "Setzt bootmenupolicy auf 'Standard' (modernes Boot-Menü). 'Legacy' erzwingt das alte F8-Menü und verlangsamt den Start.",
-        impact:      "Schnellerer Übergang vom Bootloader",
+        description: "Sets bootmenupolicy to 'standard' (modern boot menu). 'legacy' forces the old F8 menu and slows startup.",
+        impact:      "Faster bootloader transition",
         risk:        "Low",
         apply_cmd:   "bcdedit /set '{default}' bootmenupolicy standard",
         revert_cmd:  "bcdedit /set '{default}' bootmenupolicy legacy",
@@ -73,7 +73,7 @@ static TWEAKS: &[BcdTweak] = &[
     BcdTweak {
         id:          "bcd_no_nx_alwaysoff",
         name:        "DEP: OptOut-Modus",
-        description: "Setzt DEP auf OptOut (Standard-Sicherheitsniveau, nicht deaktiviert). Verhindert langsamere AlwaysOn-Überprüfungen bei Programmen ohne DEP-Opt-in.",
+        description: "Sets DEP to OptOut (standard security level, not disabled). Prevents slower AlwaysOn checks on programs without DEP opt-in.",
         impact:      "Minimal",
         risk:        "Medium",
         apply_cmd:   "bcdedit /set '{current}' nx OptOut",
@@ -83,7 +83,7 @@ static TWEAKS: &[BcdTweak] = &[
     BcdTweak {
         id:          "bcd_disable_integrity",
         name:        "Driver-Signaturen: TESTSIGNING aus",
-        description: "Stellt sicher, dass TESTSIGNING deaktiviert ist (unsignierte Treiber blockiert). Schützt Bootzeit vor rogue-Treibern.",
+        description: "Ensures TESTSIGNING is disabled (unsigned drivers blocked). Protects boot time from rogue drivers.",
         impact:      "Sicherheits-Hygiene",
         risk:        "Low",
         apply_cmd:   "bcdedit /set testsigning off",

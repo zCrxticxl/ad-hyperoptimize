@@ -16,7 +16,7 @@ const PROFILES: &[Profile] = &[
     Profile {
         id: "esports",
         name: "Esports / Competitive",
-        desc: "Maximale Reaktionszeit: High-Performance-Power, Game DVR aus, MMCSS-Scheduler, Foreground-Boost, Maus 1:1, kein Power Throttling. Reboot danach empfohlen.",
+        desc: "Maximum responsiveness: High Performance power, Game DVR off, MMCSS scheduler, foreground boost, 1:1 mouse, no power throttling. Reboot recommended after.",
         tweaks: &[
             "power_high_performance",
             "game_dvr_off",
@@ -32,7 +32,7 @@ const PROFILES: &[Profile] = &[
     Profile {
         id: "streaming",
         name: "Streaming / OBS",
-        desc: "Spiel UND Encoder brauchen CPU: kein aggressiver Foreground-Boost, dafür DVR aus (kollidiert mit OBS-Capture), MMCSS, kein Throttling der Hintergrund-Encoder, weniger Hintergrund-Apps.",
+        desc: "Game AND encoder both need CPU: no aggressive foreground boost, DVR off (conflicts with OBS capture), MMCSS, no throttling of background encoder, fewer background apps.",
         tweaks: &[
             "power_high_performance",
             "game_dvr_off",
@@ -45,8 +45,8 @@ const PROFILES: &[Profile] = &[
     },
     Profile {
         id: "workstation",
-        name: "Workstation / Produktiv",
-        desc: "Schneller Boot, flotte UI, weniger Telemetrie/Werbung und Hintergrund-Rauschen — ohne Gaming-Scheduler-Eingriffe.",
+        name: "Workstation / Productivity",
+        desc: "Fast boot, snappy UI, less telemetry/ads and background noise — without gaming scheduler changes.",
         tweaks: &[
             "power_high_performance",
             "startup_delay_off",

@@ -165,6 +165,44 @@ export default function GpuTweaks({ admin }: { admin: boolean }) {
                 {t("gpuNoSupport")}
               </div>
             )}
+
+            {/* ReBAR / SAM status */}
+            {data.rebar && (
+              <div style={{
+                marginTop: 14,
+                padding: "10px 14px",
+                borderRadius: 6,
+                background: data.rebar.active === true
+                  ? "rgba(80,200,120,0.08)"
+                  : data.rebar.active === false
+                  ? "rgba(255,160,40,0.08)"
+                  : "var(--bg2)",
+                border: `1px solid ${data.rebar.active === true ? "var(--green)" : data.rebar.active === false ? "var(--orange)" : "var(--border)"}`,
+                display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap",
+              }}>
+                <span style={{ fontSize: 18 }}>
+                  {data.rebar.active === true ? "✅" : data.rebar.active === false ? "⚠️" : "❓"}
+                </span>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13 }}>
+                    Resizable BAR (ReBAR / SAM)
+                    {data.rebar.active === true && <span style={{ color: "var(--green)", marginLeft: 8 }}>ACTIVE</span>}
+                    {data.rebar.active === false && <span style={{ color: "var(--orange)", marginLeft: 8 }}>NOT ACTIVE</span>}
+                  </div>
+                  <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
+                    {data.rebar.note}
+                    {data.rebar.active === false && (
+                      <span> Enable in BIOS: <b>Above 4G Decoding</b> + <b>Resizable BAR / SAM</b> → +5–15% FPS in many games.</span>
+                    )}
+                  </div>
+                </div>
+                {data.rebar.bar1Mb && (
+                  <div className="muted" style={{ fontSize: 11, textAlign: "right" }}>
+                    BAR1: {data.rebar.bar1Mb} MB<br />VRAM: {data.rebar.vramMb} MB
+                  </div>
+                )}
+              </div>
+            )}
           </Card>
 
           {/* Tweak categories */}

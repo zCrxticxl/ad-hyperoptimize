@@ -47,7 +47,7 @@ pub fn list() -> Value {
 pub fn kill(pid: u32) -> Result<Value, String> {
     let mut sys = System::new();
     sys.refresh_processes();
-    let p = sys.process(Pid::from_u32(pid)).ok_or("Prozess nicht gefunden (bereits beendet?)")?;
+    let p = sys.process(Pid::from_u32(pid)).ok_or("Process not found (already terminated?)")?;
     if is_protected(p.name()) {
         return Err(format!("'{}' ist ein geschützter Systemprozess — Beenden würde Windows crashen.", p.name()));
     }

@@ -5,81 +5,81 @@
 use serde_json::{json, Value};
 use std::collections::HashMap;
 
-/// (task_path_lowercase, task_name_lowercase) → German reason string.
+/// (task_path_lowercase, task_name_lowercase) → reason string.
 fn bloat_catalog() -> HashMap<(String, String), &'static str> {
     let entries: &[(&str, &str, &str)] = &[
         // Application Experience
         ("\\microsoft\\windows\\application experience\\", "microsoft compatibility appraiser",
-            "Sendet App-Kompatibilitäts-Telemetrie an Microsoft. Läuft täglich und erzeugt Disk-I/O."),
+            "Sends app compatibility telemetry to Microsoft. Runs daily and generates disk I/O."),
         ("\\microsoft\\windows\\application experience\\", "programdataupdater",
-            "Aktualisiert die Appcompat-Telemetrie-Datenbank — reine Datensammlung für Microsoft."),
+            "Updates the appcompat telemetry database — pure data collection for Microsoft."),
         ("\\microsoft\\windows\\application experience\\", "startupapptask",
-            "Scannt Autostart-Programme für Microsoft-Analyse nach dem Login."),
+            "Scans startup programs for Microsoft analysis after login."),
         // Autochk
         ("\\microsoft\\windows\\autochk\\", "proxy",
-            "Leitet Autochk-Ergebnisse (Disk-Fehler) an Microsoft weiter (Telemetrie)."),
+            "Forwards Autochk results (disk errors) to Microsoft (telemetry)."),
         // CEIP
         ("\\microsoft\\windows\\customer experience improvement program\\", "consolidator",
-            "CEIP-Telemetrie: Sendet Systemnutzungsdaten an Microsoft. Läuft stündlich."),
+            "CEIP telemetry: Sends system usage data to Microsoft. Runs hourly."),
         ("\\microsoft\\windows\\customer experience improvement program\\", "usbceip",
-            "Sendet USB-Gerätedaten im Rahmen des Customer Experience Improvement Program."),
+            "Sends USB device data as part of the Customer Experience Improvement Program."),
         // Disk
         ("\\microsoft\\windows\\diskdiagnostic\\", "microsoft-windows-diskdiagnosticdatacollector",
-            "Sammelt Festplattendiagnosedaten und leitet sie an Microsoft weiter."),
+            "Collects disk diagnostic data and forwards it to Microsoft."),
         ("\\microsoft\\windows\\diskfootprint\\", "diagnostics",
-            "Profilt Disk-I/O-Muster im Hintergrund — erzeugt Last ohne Nutzervorteil."),
+            "Profiles disk I/O patterns in the background — generates load with no user benefit."),
         // WinSAT
         ("\\microsoft\\windows\\maintenance\\", "winsat",
-            "Windows System Assessment Tool — führt Benchmarks im Hintergrund aus und erzeugt CPU/Disk-Last."),
+            "Windows System Assessment Tool — runs benchmarks in the background and generates CPU/disk load."),
         // Maps
         ("\\microsoft\\windows\\maps\\", "mapsupdatetask",
-            "Lädt automatisch Offline-Karten-Updates für die Windows Maps App herunter."),
+            "Automatically downloads offline map updates for the Windows Maps app."),
         ("\\microsoft\\windows\\maps\\", "mapstoasttask",
-            "Sendet Benachrichtigungen der Windows Maps App."),
+            "Sends notifications from the Windows Maps app."),
         // NetTrace
         ("\\microsoft\\windows\\nettrace\\", "gathernetworkinfo",
-            "Sammelt detaillierte Netzwerkdiagnosedaten — Hintergrund-Overhead ohne erkennbaren Nutzen."),
+            "Collects detailed network diagnostic data — background overhead with no discernible benefit."),
         // Power Efficiency
         ("\\microsoft\\windows\\power efficiency diagnostics\\", "analyzesystem",
-            "Führt Stromeffizienz-Analyse durch und sendet Ergebnisse an Microsoft."),
+            "Runs power efficiency analysis and sends results to Microsoft."),
         // Family Safety
         ("\\microsoft\\windows\\shell\\", "familysafetyrefreshtask",
-            "Aktualisiert Family Safety / Jugendschutz-Richtlinien vom Microsoft-Server."),
+            "Updates Family Safety / parental control policies from the Microsoft server."),
         // WER
         ("\\microsoft\\windows\\windows error reporting\\", "queuereporting",
-            "Sendet gereihte Fehlerberichte an Microsoft. Unnötig wenn Windows Error Reporting deaktiviert."),
+            "Sends queued error reports to Microsoft. Unnecessary when Windows Error Reporting is disabled."),
         // Windows Update
         ("\\microsoft\\windows\\windowsupdate\\", "automatic app update",
-            "Aktualisiert Store-Apps automatisch im Hintergrund — separat vom normalen Windows Update."),
+            "Automatically updates Store apps in the background — separate from normal Windows Update."),
         ("\\microsoft\\windows\\windowsupdate\\", "scheduled start",
-            "Startet Windows Update-Scans nach einem festen Zeitplan."),
+            "Starts Windows Update scans on a fixed schedule."),
         // Workplace Join
         ("\\microsoft\\windows\\workplace join\\", "automatic-device-join",
-            "Registriert das Gerät automatisch im Azure AD / Workplace Join (Enterprise-Feature)."),
+            "Automatically registers the device in Azure AD / Workplace Join (enterprise feature)."),
         // PushToInstall
         ("\\microsoft\\windows\\pushtoinstall\\", "logincheck",
-            "Prüft beim Login Push-to-Install-Store-Aufgaben — irrelevant für Non-Enterprise."),
+            "Checks Push-to-Install Store tasks at login — irrelevant for non-enterprise."),
         // MUI language packs
         ("\\microsoft\\windows\\mui\\", "lpremove",
-            "Entfernt nicht genutzte Sprachpakete automatisch — kann unbeabsichtigt Sprachpakete löschen."),
+            "Automatically removes unused language packs — may unintentionally delete language packs."),
         // Subscription / license
         ("\\microsoft\\windows\\subscription\\", "enablelicenseacquisition",
-            "Versucht Windows-Aktivierungslizenzen im Hintergrund nachzuladen."),
+            "Attempts to reload Windows activation licenses in the background."),
         ("\\microsoft\\windows\\subscription\\", "licenseacquisition",
-            "Lizenz-Nachlade-Task — bei korrekt aktivierten Systemen überflüssig."),
+            "License reload task — unnecessary on correctly activated systems."),
         // Device Census
         ("\\microsoft\\windows\\device information\\", "device",
-            "Sendet detaillierte Geräteinventardaten an Microsoft (Device Census)."),
+            "Sends detailed device inventory data to Microsoft (Device Census)."),
         ("\\microsoft\\windows\\device information\\", "device user",
-            "Sendet benutzerbezogene Gerätedaten an Microsoft."),
+            "Sends user-related device data to Microsoft."),
         // Feedback
         ("\\microsoft\\windows\\feedback\\siuf\\", "dosiffeedbacktask",
-            "Windows Feedback Hub: Fragt nach Nutzerfeedback im Hintergrund."),
+            "Windows Feedback Hub: solicits user feedback in the background."),
         ("\\microsoft\\windows\\feedback\\siuf\\", "dosiffeedbacktasknonujailbreak",
-            "Feedback-Hub-Hintergrundtask für Nicht-Insider."),
+            "Feedback Hub background task for non-Insiders."),
         // Clip
         ("\\microsoft\\windows\\clip\\", "license validation",
-            "Microsoft Store Lizenzvalidierung — läuft periodisch im Hintergrund."),
+            "Microsoft Store license validation — runs periodically in the background."),
     ];
 
     entries

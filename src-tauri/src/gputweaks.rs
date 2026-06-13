@@ -109,6 +109,8 @@ enum TweakAction {
     FixedReg   { root: &'static str, path: &'static str, name: &'static str, apply: u32, revert: u32 },
     /// Windows service startup type
     Svc        { name: &'static str, apply: &'static str, revert: &'static str },
+    /// PowerShell script — check returns "True" or "1" when applied
+    Ps         { apply: &'static str, revert: &'static str, check: &'static str },
 }
 
 struct GpuTweak {
@@ -128,11 +130,11 @@ fn catalog() -> Vec<GpuTweak> {
         // ── NVIDIA ────────────────────────────────────────────────────────
         GpuTweak {
             id: "nv_power_max_perf",
-            name: "Maximum Performance (PowerMizer aus)",
-            category: "Takt & Power",
+            name: "Maximum Performance (Disable PowerMizer)",
+            category: "Clock & Power",
             vendor: "nvidia",
-            description: "Deaktiviert PowerMizer — NVIDIA senkt sonst im Leerlauf und unter Last die GPU-Takte aggressiv.",
-            impact: "GPU bleibt dauerhaft auf maximalen Taktraten; Stromsparfunktion komplett deaktiviert. Nicht für Laptops im Akkubetrieb.",
+            description: "Disables PowerMizer — NVIDIA otherwise aggressively lowers GPU clocks at idle and under load.",
+            impact: "GPU stays at maximum clocks permanently; power saving fully disabled. Not recommended for laptops on battery.",
             risk: "Low",
             reboot: false,
             actions: vec![
@@ -143,11 +145,11 @@ fn catalog() -> Vec<GpuTweak> {
         },
         GpuTweak {
             id: "nv_dynamic_pstate_off",
-            name: "Dynamic P-States deaktivieren",
-            category: "Takt & Power",
+            name: "Disable Dynamic P-States",
+            category: "Clock & Power",
             vendor: "nvidia",
-            description: "Stoppt das dynamische Wechseln zwischen GPU-Performance-States (P0–P8).",
-            impact: "Gleichmäßigere Frametimes — kein Einbruch durch P-State-Wechsel mid-Frame. Etwas höherer Idle-Verbrauch.",
+            description: "Stops dynamic switching between GPU performance states (P0–P8).",
+            impact: "Smoother frametimes — eliminates clock dips from mid-frame P-state transitions. Slightly higher idle power draw.",
             risk: "Medium",
             reboot: true,
             actions: vec![
@@ -156,11 +158,11 @@ fn catalog() -> Vec<GpuTweak> {
         },
         GpuTweak {
             id: "nv_fts_telemetry_off",
-            name: "NVIDIA FTS-Telemetrie deaktivieren",
-            category: "Datenschutz",
+            name: "Disable NVIDIA FTS Telemetry",
+            category: "Privacy",
             vendor: "nvidia",
-            description: "Setzt drei FTS-Telemetrie-Flags auf 0 in HKLM\\SOFTWARE\\NVIDIA Corporation\\Global\\FTS.",
-            impact: "Kein Senden von NVIDIA-Nutzungstelemetrie. Kein Einfluss auf Spieleleistung.",
+            description: "Sets three FTS telemetry flags to 0 under HKLM\\SOFTWARE\\NVIDIA Corporation\\Global\\FTS.",
+            impact: "Stops NVIDIA usage telemetry upload. No effect on game performance.",
             risk: "Low",
             reboot: false,
             actions: vec![
@@ -171,11 +173,11 @@ fn catalog() -> Vec<GpuTweak> {
         },
         GpuTweak {
             id: "nv_telemetry_svc_off",
-            name: "NVIDIA Container Telemetrie-Dienst deaktivieren",
-            category: "Datenschutz",
+            name: "Disable NVIDIA Telemetry Container Service",
+            category: "Privacy",
             vendor: "nvidia",
-            description: "Setzt NvContainerLocalSystem auf Manual — hält NVIDIA Telemetry-Container-Prozess vom Autostart ab.",
-            impact: "Kein NVIDIA-Telemetrie-Prozess beim Booten. GeForce Experience und Treiber funktionieren weiterhin.",
+            description: "Sets NvContainerLocalSystem to Manual — prevents the NVIDIA telemetry container from auto-starting.",
+            impact: "No NVIDIA telemetry process on boot. GeForce Experience and drivers continue to work normally.",
             risk: "Low",
             reboot: false,
             actions: vec![
@@ -184,11 +186,11 @@ fn catalog() -> Vec<GpuTweak> {
         },
         GpuTweak {
             id: "nv_threaded_opt",
-            name: "NVIDIA Thread-Optimierung aktivieren",
+            name: "Enable NVIDIA Threaded Optimization",
             category: "Rendering",
             vendor: "nvidia",
-            description: "Setzt ThreadedOptimization global auf 1 — erlaubt NVIDIA Treiber Multi-Threading für OpenGL/D3D-Calls.",
-            impact: "Höherer CPU-GPU-Durchsatz in vielen Titeln. Standard sollte bereits aktiv sein; explizit setzen verhindert per-App-Override.",
+            description: "Forces ThreadedOptimization globally — allows the NVIDIA driver to use multi-threading for OpenGL/D3D calls.",
+            impact: "Higher CPU-GPU throughput in many titles. Explicitly setting this prevents per-app overrides.",
             risk: "Low",
             reboot: false,
             actions: vec![
@@ -205,11 +207,11 @@ fn catalog() -> Vec<GpuTweak> {
         // ── AMD ───────────────────────────────────────────────────────────
         GpuTweak {
             id: "amd_ulps_off",
-            name: "ULPS (Ultra Low Power State) deaktivieren",
-            category: "Takt & Power",
+            name: "Disable ULPS (Ultra Low Power State)",
+            category: "Clock & Power",
             vendor: "amd",
-            description: "Deaktiviert Ultra Low Power State — AMD-GPUs fallen sonst in einen Tiefschlaf-Zustand, aus dem sie erst wieder aufgeweckt werden müssen.",
-            impact: "Eliminiert die häufigsten AMD-Mikro-Ruckler beim ersten Frame nach einem Leerlauf. Kein messbarer Mehrverbrauch bei Gaming.",
+            description: "Disables Ultra Low Power State — AMD GPUs otherwise enter a deep sleep that requires a wake-up cycle.",
+            impact: "Eliminates the most common AMD micro-stutters on the first frame after idle. No measurable power increase during gaming.",
             risk: "Low",
             reboot: false,
             actions: vec![
@@ -219,11 +221,11 @@ fn catalog() -> Vec<GpuTweak> {
         },
         GpuTweak {
             id: "amd_sclk_sleep_off",
-            name: "Shader-Takt Deep Sleep deaktivieren",
-            category: "Takt & Power",
+            name: "Disable Shader Clock Deep Sleep",
+            category: "Clock & Power",
             vendor: "amd",
-            description: "Verhindert, dass der Shader-Takt während kurzer Lücken zwischen Frames in Deep Sleep fällt.",
-            impact: "Gleichmäßigere Shader-Performance; weniger Latenz-Spitzen zwischen Frames.",
+            description: "Prevents the shader clock from entering deep sleep during short inter-frame gaps.",
+            impact: "More consistent shader performance; fewer latency spikes between frames.",
             risk: "Low",
             reboot: false,
             actions: vec![
@@ -232,11 +234,11 @@ fn catalog() -> Vec<GpuTweak> {
         },
         GpuTweak {
             id: "amd_compute_preemption_off",
-            name: "Compute-Preemption deaktivieren",
+            name: "Disable Compute Preemption",
             category: "Rendering",
             vendor: "amd",
-            description: "Deaktiviert das unterbrechende Preemption von Compute-Workloads — reduziert Treiber-Overhead.",
-            impact: "Geringere Treiber-Latenz bei Compute-Aufgaben; weniger Frametime-Varianz in DX12/Vulkan-Spielen.",
+            description: "Disables preemptive interruption of compute workloads — reduces driver overhead.",
+            impact: "Lower driver latency for compute tasks; less frametime variance in DX12/Vulkan titles.",
             risk: "Medium",
             reboot: true,
             actions: vec![
@@ -245,11 +247,11 @@ fn catalog() -> Vec<GpuTweak> {
         },
         GpuTweak {
             id: "amd_dma_power_off",
-            name: "DMA Power Gating deaktivieren",
-            category: "Takt & Power",
+            name: "Disable DMA Power Gating",
+            category: "Clock & Power",
             vendor: "amd",
-            description: "Hält den DMA-Engine der GPU dauerhaft aktiv statt ihn bei Inaktivität abzuschalten.",
-            impact: "Reduziert Latenz beim GPU-Treiber-DMA-Transfer; merkbar bei schnellen Textur-Uploads und Asset-Streaming.",
+            description: "Keeps the GPU DMA engine permanently active instead of gating it during inactivity.",
+            impact: "Reduces latency on GPU driver DMA transfers; noticeable with fast texture uploads and asset streaming.",
             risk: "Low",
             reboot: false,
             actions: vec![
@@ -258,15 +260,91 @@ fn catalog() -> Vec<GpuTweak> {
         },
         GpuTweak {
             id: "amd_rx_tex_cache",
-            name: "Texture-Cache-Prefetch aktivieren",
+            name: "Enable Texture Cache Prefetch",
             category: "Rendering",
             vendor: "amd",
-            description: "Aktiviert AMD Texture Cache Prefetching für RX-GPUs.",
-            impact: "Höherer Textur-Durchsatz in Open-World-Spielen mit vielen Asset-Streams.",
+            description: "Enables AMD Texture Cache Prefetching for RX GPUs.",
+            impact: "Higher texture throughput in open-world games with heavy asset streaming.",
             risk: "Low",
             reboot: false,
             actions: vec![
                 TweakAction::DriverReg { name: "EnableAsyncComputeForGames", apply: 1, revert: 0 },
+            ],
+        },
+
+        // ── NVIDIA Low Latency ────────────────────────────────────────────
+        GpuTweak {
+            id:          "nv_prerender_limit_1",
+            name:        "Max Pre-Rendered Frames = 1",
+            category:    "Low Latency",
+            vendor:      "nvidia",
+            description: "Limits NVIDIA frame queue to 1 pre-rendered frame (default: 3). Reduces buffering between CPU and GPU — less input lag, especially at high FPS.",
+            impact:      "3–10 ms lower input lag. May cause minor stutter if CPU is the bottleneck.",
+            risk:        "Low",
+            reboot:      false,
+            actions: vec![
+                TweakAction::FixedReg {
+                    root:   "HKCU",
+                    path:   "Software\\NVIDIA Corporation\\Global\\NVTweak",
+                    name:   "Prerenderlimit",
+                    apply:  1,
+                    revert: 3,
+                },
+            ],
+        },
+        GpuTweak {
+            id:          "nv_low_latency_ultra",
+            name:        "NVIDIA Low Latency Ultra Mode",
+            category:    "Low Latency",
+            vendor:      "nvidia",
+            description: "Sets NVIDIA frame submission to Ultra Low Latency (RTHM_MODE=2). GPU renders frames just-in-time — minimises the CPU→GPU pipeline delay.",
+            impact:      "Lowest possible input lag in GPU-bound games. Best effect at 60–144 Hz with VSYNC off.",
+            risk:        "Low",
+            reboot:      false,
+            actions: vec![
+                TweakAction::FixedReg {
+                    root:   "HKCU",
+                    path:   "Software\\NVIDIA Corporation\\Global\\NVTweak",
+                    name:   "NVPCFLatencyPolicy",
+                    apply:  2,
+                    revert: 0,
+                },
+                TweakAction::DriverReg { name: "RTHM_MODE", apply: 2, revert: 0 },
+            ],
+        },
+
+        // ── Shader Cache ──────────────────────────────────────────────────
+        GpuTweak {
+            id:          "dx_shader_cache_unlimited",
+            name:        "Unlimited DirectX Shader Cache",
+            category:    "Rendering",
+            vendor:      "any",
+            description: "Removes the default 10 GB cap on the DirectX shader cache. Larger cache = fewer in-game shader compilation stalls (the \"stutters\" on first visit to an area).",
+            impact:      "Eliminates shader compilation stutter in DX11/DX12 games after first run. Uses more disk space.",
+            risk:        "Low",
+            reboot:      false,
+            actions: vec![
+                TweakAction::Ps {
+                    apply: r#"
+$p = 'HKLM:\SOFTWARE\Microsoft\DirectX'
+if (-not (Test-Path $p)) { New-Item -Path $p -Force | Out-Null }
+Set-ItemProperty $p 'MaxShaderCacheSizeInBytes' ([int64]::MaxValue) -Type QWord -EA SilentlyContinue
+# NVIDIA OGL shader cache
+$nv = 'HKCU:\Software\NVIDIA Corporation\Global\NVTweak'
+if (-not (Test-Path $nv)) { New-Item -Path $nv -Force | Out-Null }
+Set-ItemProperty $nv 'OglCplShaderDiskCacheMaxSize' 0x7FFFFFFF -Type DWord -EA SilentlyContinue
+'Shader cache limit removed'
+"#,
+                    revert: r#"
+Remove-ItemProperty 'HKLM:\SOFTWARE\Microsoft\DirectX' 'MaxShaderCacheSizeInBytes' -EA SilentlyContinue
+Remove-ItemProperty 'HKCU:\Software\NVIDIA Corporation\Global\NVTweak' 'OglCplShaderDiskCacheMaxSize' -EA SilentlyContinue
+'Shader cache reverted to default'
+"#,
+                    check: r#"
+$v = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\DirectX' -EA SilentlyContinue).MaxShaderCacheSizeInBytes
+if ($v -and $v -gt 10GB) { 'True' } else { 'False' }
+"#,
+                },
             ],
         },
     ]
@@ -300,6 +378,12 @@ fn detect_status(tweak: &GpuTweak, driver_key: &str) -> &'static str {
                     matching += 1;
                 }
             }
+            TweakAction::Ps { check, .. } => {
+                checkable += 1;
+                let out = crate::ps::run(check).unwrap_or_default();
+                let out = out.trim().to_lowercase();
+                if out == "true" || out == "1" { matching += 1; }
+            }
         }
     }
 
@@ -311,6 +395,43 @@ fn detect_status(tweak: &GpuTweak, driver_key: &str) -> &'static str {
 
 #[cfg(not(windows))]
 fn detect_status(_: &GpuTweak, _: &str) -> &'static str { "unknown" }
+
+// ── ReBAR detection ─────────────────────────────────────────────────────────
+
+fn detect_rebar(driver_key: &str, vendor: &Vendor) -> Value {
+    // Check if Resizable BAR (SAM) is active by looking at reported BAR1 size vs VRAM size.
+    // NVIDIA exposes NvGpuBAR1Size in some driver versions; AMD via KMD_EnableRebar.
+    #[cfg(windows)]
+    {
+        // NVIDIA: NvGpuBAR1Size should equal VRAM size when ReBAR is active
+        if *vendor == Vendor::Nvidia && !driver_key.is_empty() {
+            if let Some(bar1) = reg_read_dword("HKLM", driver_key, "NvGpuBAR1Size") {
+                if let Some(vram) = reg_read_dword("HKLM", driver_key, "HardwareInformation.qwMemorySize")
+                    .or_else(|| reg_read_dword("HKLM", driver_key, "HardwareInformation.MemorySize")) {
+                    let active = bar1 >= vram / 2;
+                    return json!({ "active": active, "bar1Mb": bar1, "vramMb": vram / (1024*1024), "note": if active { "ReBAR active" } else { "ReBAR not detected — enable in BIOS (Above 4G Decoding + Resizable BAR)" } });
+                }
+            }
+        }
+        // AMD: KMD_EnableRebar = 1 in driver key
+        if *vendor == Vendor::Amd && !driver_key.is_empty() {
+            if let Some(v) = reg_read_dword("HKLM", driver_key, "KMD_EnableRebar") {
+                return json!({ "active": v == 1, "note": if v == 1 { "Smart Access Memory (ReBAR) active" } else { "SAM/ReBAR not enabled — enable in BIOS" } });
+            }
+        }
+        // Fallback: query via WMI/PowerShell
+        let ps_out = crate::ps::run(r#"
+$gpu = Get-CimInstance -ClassName Win32_VideoController -EA SilentlyContinue | Select-Object -First 1
+if ($gpu) {
+    $vram = [math]::Round($gpu.AdapterRAM / 1MB)
+    "VRAM:$vram"
+} else { "unknown" }
+"#).unwrap_or_default();
+        return json!({ "active": null, "note": "Could not detect ReBAR status — check BIOS settings", "raw": ps_out.trim() });
+    }
+    #[cfg(not(windows))]
+    json!({ "active": null, "note": "Windows only" })
+}
 
 // ── Public API ──────────────────────────────────────────────────────────────
 
@@ -339,12 +460,15 @@ pub fn scan() -> Value {
         })
         .collect();
 
+    let rebar = detect_rebar(&driver_key, &vendor);
+
     json!({
         "vendor":    vendor.as_str(),
         "name":      name,
         "driverKey": driver_key,
         "tweaks":    applicable_tweaks,
         "supported": vendor != Vendor::Unknown,
+        "rebar":     rebar,
     })
 }
 
@@ -360,14 +484,14 @@ fn do_tweak(id: &str, driver_key: &str, applying: bool) -> Result<Value, String>
     let tweak = catalog()
         .into_iter()
         .find(|t| t.id == id)
-        .ok_or_else(|| format!("unbekannter Tweak: {id}"))?;
+        .ok_or_else(|| format!("Unknown tweak: {id}"))?;
 
     for action in &tweak.actions {
         #[cfg(windows)]
         match action {
             TweakAction::DriverReg { name, apply, revert } => {
                 if driver_key.is_empty() {
-                    return Err("GPU-Treiber-Key nicht gefunden — GPU nicht unterstützt oder nicht erkannt.".into());
+                    return Err("GPU driver registry key not found — GPU not supported or not detected.".into());
                 }
                 let val = if applying { *apply } else { *revert };
                 reg_write_dword("HKLM", driver_key, name, val)
@@ -381,6 +505,10 @@ fn do_tweak(id: &str, driver_key: &str, applying: bool) -> Result<Value, String>
             TweakAction::Svc { name, apply, revert } => {
                 let mode = if applying { apply } else { revert };
                 svc_set(name, mode).map_err(|e| format!("Svc {name}: {e}"))?;
+            }
+            TweakAction::Ps { apply, revert, .. } => {
+                let script = if applying { apply } else { revert };
+                crate::ps::run(script).map_err(|e| format!("Ps: {e}"))?;
             }
         }
         #[cfg(not(windows))]

@@ -1,9 +1,16 @@
 mod analysis;
+mod autoopt;
 mod bootopt;
+mod ctxmenu;
+mod debloater;
+mod drivers;
+mod gameboost;
 mod diskanalyzer;
 mod healthcheck;
 mod hwmonitor;
 mod perftweaks;
+mod powerplan;
+mod uninstaller;
 mod privacy;
 mod services;
 mod gputweaks;
@@ -80,7 +87,7 @@ fn cmd_revert_tweak(id: String) -> Result<Value, String> { tweaks::revert(&id) }
 #[tauri::command(async)]
 fn cmd_history() -> Value { tweaks::history() }
 
-// ---- safety ----
+// ---- safety / restore points ----
 #[tauri::command(async)]
 fn cmd_create_restore_point(description: String) -> Result<String, String> {
     safety::create_restore_point(&description)
@@ -88,6 +95,24 @@ fn cmd_create_restore_point(description: String) -> Result<String, String> {
 
 #[tauri::command(async)]
 fn cmd_list_restore_points() -> Value { safety::list_restore_points() }
+
+#[tauri::command(async)]
+fn cmd_delete_restore_point(sequence_number: u32) -> Result<String, String> {
+    safety::delete_restore_point(sequence_number)
+}
+
+#[tauri::command(async)]
+fn cmd_launch_rstrui() -> Result<String, String> { safety::launch_rstrui() }
+
+// ---- auto optimizer ----
+#[tauri::command(async)]
+fn cmd_autoopt_scan() -> Value { autoopt::scan() }
+
+#[tauri::command(async)]
+fn cmd_autoopt_score() -> Value { autoopt::score() }
+
+#[tauri::command(async)]
+fn cmd_autoopt_apply(items: Vec<Value>) -> Value { autoopt::apply_selected(items) }
 
 // ---- cleanup ----
 #[tauri::command(async)]
@@ -308,6 +333,139 @@ fn cmd_schedtask_toggle(path: String, name: String, enable: bool) -> Result<Valu
     schedtasks::toggle(path, name, enable)
 }
 
+// ---- debloater ----
+#[tauri::command(async)]
+fn cmd_debloater_uwp_list() -> Value { debloater::list_uwp() }
+
+#[tauri::command(async)]
+fn cmd_debloater_remove_uwp(package_full_name: String) -> Result<String, String> {
+    debloater::remove_uwp(package_full_name)
+}
+
+#[tauri::command(async)]
+fn cmd_debloater_remove_provisioned(package_name: String) -> Result<String, String> {
+    debloater::remove_uwp_provisioned(package_name)
+}
+
+#[tauri::command(async)]
+fn cmd_debloater_tweaks_list() -> Value { debloater::list_tweaks() }
+
+#[tauri::command(async)]
+fn cmd_debloater_tweak_apply(id: String) -> Result<String, String> { debloater::apply_tweak(id) }
+
+#[tauri::command(async)]
+fn cmd_debloater_tweak_revert(id: String) -> Result<String, String> { debloater::revert_tweak(id) }
+
+// ---- driver manager ----
+#[tauri::command(async)]
+fn cmd_drivers_list() -> Value { drivers::list_drivers() }
+
+#[tauri::command(async)]
+fn cmd_drivers_open_devmgr() -> Result<String, String> { drivers::open_device_manager() }
+
+#[tauri::command(async)]
+fn cmd_drivers_open_windows_update() -> Result<String, String> { drivers::open_windows_update() }
+
+#[tauri::command(async)]
+fn cmd_drivers_check_winget(package_id: String) -> Value {
+    drivers::check_winget_package(package_id)
+}
+
+#[tauri::command(async)]
+fn cmd_drivers_install_winget(package_id: String) -> Result<String, String> {
+    drivers::install_via_winget(package_id)
+}
+
+#[tauri::command(async)]
+fn cmd_drivers_open_vendor_url(url: String) -> Result<String, String> {
+    drivers::open_vendor_url(url)
+}
+
+#[tauri::command(async)]
+fn cmd_drivers_scan_windows_update() -> Result<String, String> {
+    drivers::update_via_pnputil(String::new())
+}
+
+// ---- game booster ----
+#[tauri::command(async)]
+fn cmd_gameboost_background_procs() -> Value { gameboost::list_background_procs() }
+
+#[tauri::command(async)]
+fn cmd_gameboost_running_games() -> Value { gameboost::list_running_games() }
+
+#[tauri::command(async)]
+fn cmd_gameboost_boost_process(pid: u32) -> Result<String, String> {
+    gameboost::boost_process(pid)
+}
+
+#[tauri::command(async)]
+fn cmd_gameboost_kill_background(pids: Vec<u32>) -> Result<String, String> {
+    gameboost::kill_background(pids)
+}
+
+#[tauri::command(async)]
+fn cmd_gameboost_start(pid: u32) -> Result<String, String> { gameboost::boost_start(pid) }
+
+#[tauri::command(async)]
+fn cmd_gameboost_stop() -> Result<String, String> { gameboost::boost_stop() }
+
+#[tauri::command(async)]
+fn cmd_gameboost_gpu_perf(enable: bool) -> Result<String, String> {
+    gameboost::set_gpu_max_perf(enable)
+}
+
+// ---- app uninstaller ----
+#[tauri::command(async)]
+fn cmd_uninstaller_list() -> Value { uninstaller::list_apps() }
+
+#[tauri::command(async)]
+fn cmd_uninstall_app(uninstall_string: String) -> Result<String, String> {
+    uninstaller::uninstall_app(uninstall_string)
+}
+
+#[tauri::command(async)]
+fn cmd_scan_leftovers(app_name: String, publisher: String, install_location: String) -> Value {
+    uninstaller::scan_leftovers(app_name, publisher, install_location)
+}
+
+#[tauri::command(async)]
+fn cmd_clean_leftovers(paths: Vec<String>) -> Result<String, String> {
+    uninstaller::clean_leftovers(paths)
+}
+
+// ---- context menu cleaner ----
+#[tauri::command(async)]
+fn cmd_ctxmenu_list() -> Value { ctxmenu::list_entries() }
+
+#[tauri::command(async)]
+fn cmd_ctxmenu_toggle(path: String, enable: bool) -> Result<String, String> {
+    ctxmenu::toggle_entry(path, enable)
+}
+
+#[tauri::command(async)]
+fn cmd_ctxmenu_disable_all() -> Result<String, String> { ctxmenu::disable_all_bloat() }
+
+#[tauri::command(async)]
+fn cmd_ctxmenu_enable_all() -> Result<String, String> { ctxmenu::enable_all() }
+
+// ---- power plan ----
+#[tauri::command(async)]
+fn cmd_powerplan_list() -> Value { powerplan::list_plans() }
+
+#[tauri::command(async)]
+fn cmd_powerplan_set(guid: String) -> Result<String, String> { powerplan::set_active(guid) }
+
+#[tauri::command(async)]
+fn cmd_powerplan_unlock_ultimate() -> Result<String, String> { powerplan::unlock_ultimate() }
+
+#[tauri::command(async)]
+fn cmd_powerplan_delete(guid: String) -> Result<String, String> { powerplan::delete_plan(guid) }
+
+#[tauri::command(async)]
+fn cmd_powerplan_create(name: String, base_guid: String) -> Result<String, String> {
+    powerplan::create_custom(name, base_guid)
+}
+
 // ---- performance tweaks ----
 #[tauri::command(async)]
 fn cmd_timer_get() -> Value { perftweaks::timer_get() }
@@ -425,6 +583,11 @@ pub fn run() {
             cmd_history,
             cmd_create_restore_point,
             cmd_list_restore_points,
+            cmd_delete_restore_point,
+            cmd_launch_rstrui,
+            cmd_autoopt_scan,
+            cmd_autoopt_score,
+            cmd_autoopt_apply,
             cmd_scan_cleanup,
             cmd_run_cleanup,
             cmd_security_scan,
@@ -480,6 +643,19 @@ pub fn run() {
             cmd_analyze,
             cmd_generate_report,
             cmd_open_path,
+            cmd_uninstaller_list,
+            cmd_uninstall_app,
+            cmd_scan_leftovers,
+            cmd_clean_leftovers,
+            cmd_ctxmenu_list,
+            cmd_ctxmenu_toggle,
+            cmd_ctxmenu_disable_all,
+            cmd_ctxmenu_enable_all,
+            cmd_powerplan_list,
+            cmd_powerplan_set,
+            cmd_powerplan_unlock_ultimate,
+            cmd_powerplan_delete,
+            cmd_powerplan_create,
             cmd_timer_get,
             cmd_timer_set,
             cmd_timer_reset,
@@ -501,6 +677,26 @@ pub fn run() {
             cmd_hosts_list_all,
             cmd_hosts_disable_entries,
             cmd_hosts_enable_entries,
+            cmd_debloater_uwp_list,
+            cmd_debloater_remove_uwp,
+            cmd_debloater_remove_provisioned,
+            cmd_debloater_tweaks_list,
+            cmd_debloater_tweak_apply,
+            cmd_debloater_tweak_revert,
+            cmd_drivers_list,
+            cmd_drivers_open_devmgr,
+            cmd_drivers_open_windows_update,
+            cmd_drivers_check_winget,
+            cmd_drivers_install_winget,
+            cmd_drivers_open_vendor_url,
+            cmd_drivers_scan_windows_update,
+            cmd_gameboost_background_procs,
+            cmd_gameboost_running_games,
+            cmd_gameboost_boost_process,
+            cmd_gameboost_kill_background,
+            cmd_gameboost_start,
+            cmd_gameboost_stop,
+            cmd_gameboost_gpu_perf,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

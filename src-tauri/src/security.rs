@@ -67,7 +67,7 @@ pub fn defender_quick_scan() -> Result<String, String> {
     ps::run(
         "Start-Process powershell -WindowStyle Hidden -ArgumentList '-NoProfile','-Command','Start-MpScan -ScanType QuickScan'; 'OK'",
     )
-    .map(|_| "Defender Quick-Scan gestartet — Ergebnis erscheint im Windows-Sicherheit-Center.".into())
+    .map(|_| "Defender Quick Scan started — result will appear in Windows Security Center.".into())
 }
 
 fn autoruns() -> Value {
@@ -95,83 +95,61 @@ fn hosts_entries() -> Value {
             for line in s.lines() {
                 let t = line.trim();
                 if t.starts_with(HO_PREFIX) {
-                    ho_disabled.push(t[HO_PREFIX.len()..].to_string());
+                    // disabled by us: "# [ADHYPER] 0.0.0.0 tracker.example.com"
+                    ho_disabled.push(t.trim_start_matches(HO_PREFIX).to_string());
                 } else if !t.is_empty() && !t.starts_with('#') {
                     active.push(t.to_string());
                 }
             }
-            let count = active.len();
-            let ho_count = ho_disabled.len();
-            let active_preview: Vec<&str> = active.iter().take(20).map(|s| s.as_str()).collect();
-            let ho_preview: Vec<&str> = ho_disabled.iter().take(20).map(|s| s.as_str()).collect();
-            json!({
-                "count": count,
-                "hoDisabledCount": ho_count,
-                "activeEntries": active_preview,
-                "hoDisabledEntries": ho_preview,
-            })
+            json!({ "active": active, "disabled": ho_disabled })
         }
         Err(e) => json!({ "error": e.to_string() }),
     }
 }
 
-pub fn hosts_list_all() -> Value {
-    match fs::read_to_string(hosts_path()) {
-        Ok(s) => {
-            let mut active: Vec<String> = Vec::new();
-            let mut ho_disabled: Vec<String> = Vec::new();
-            for line in s.lines() {
-                let t = line.trim();
-                if t.starts_with(HO_PREFIX) {
-                    ho_disabled.push(t[HO_PREFIX.len()..].to_string());
-                } else if !t.is_empty() && !t.starts_with('#') {
-                    active.push(t.to_string());
-                }
-            }
-            json!({ "active": active, "hoDisabled": ho_disabled })
-        }
-        Err(e) => json!({ "error": e.to_string() }),
-    }
+/// Returns all hosts entries: managed (ADHYPER-prefixed) + rest
+pub fn hosts_list_all() -> serde_json::Value {
+    hosts_entries()
 }
 
+/// Disable (comment out) entries by prepending HO_PREFIX
 pub fn hosts_disable_entries(entries: Vec<String>) -> Result<String, String> {
     let path = hosts_path();
     let content = fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    let set: std::collections::HashSet<&str> = entries.iter().map(|s| s.as_str()).collect();
-    let new_content = content
-        .lines()
-        .map(|line| {
+    let mut lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
+    let mut changed = 0usize;
+    for entry in &entries {
+        let target = entry.trim();
+        for line in lines.iter_mut() {
             let t = line.trim();
-            if !t.starts_with('#') && !t.is_empty() && set.contains(t) {
-                format!("{HO_PREFIX}{t}")
-            } else {
-                line.to_string()
+            if t == target {
+                *line = format!("{HO_PREFIX}{target}");
+                changed += 1;
+                break;
             }
-        })
-        .collect::<Vec<_>>()
-        .join("\r\n");
-    fs::write(&path, new_content).map_err(|e| e.to_string())?;
-    Ok(format!("{} entries disabled", entries.len()))
+        }
+    }
+    fs::write(&path, lines.join("\n")).map_err(|e| e.to_string())?;
+    Ok(format!("Disabled {changed} entries"))
 }
 
+/// Re-enable entries previously disabled by hosts_disable_entries
 pub fn hosts_enable_entries(entries: Vec<String>) -> Result<String, String> {
     let path = hosts_path();
     let content = fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    let set: std::collections::HashSet<&str> = entries.iter().map(|s| s.as_str()).collect();
-    let new_content = content
-        .lines()
-        .map(|line| {
-            let t = line.trim();
-            if t.starts_with(HO_PREFIX) {
-                let inner = &t[HO_PREFIX.len()..];
-                if set.contains(inner) {
-                    return inner.to_string();
-                }
+    let mut lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
+    let mut changed = 0usize;
+    for entry in &entries {
+        let target = entry.trim();
+        let prefixed = format!("{HO_PREFIX}{target}");
+        for line in lines.iter_mut() {
+            if line.trim() == prefixed.trim() {
+                *line = target.to_string();
+                changed += 1;
+                break;
             }
-            line.to_string()
-        })
-        .collect::<Vec<_>>()
-        .join("\r\n");
-    fs::write(&path, new_content).map_err(|e| e.to_string())?;
-    Ok(format!("{} entries re-enabled", entries.len()))
+        }
+    }
+    fs::write(&path, lines.join("\n")).map_err(|e| e.to_string())?;
+    Ok(format!("Enabled {changed} entries"))
 }
