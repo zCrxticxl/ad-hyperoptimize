@@ -1,0 +1,286 @@
+import React, { useEffect, useState, useMemo } from "react";
+import { api } from "../api";
+import { Card, Spinner, Badge } from "../components/ui";
+import { useLang } from "../i18n";
+
+type GpuTweak = {
+  id: string;
+  name: string;
+  category: string;
+  vendor: string;
+  description: string;
+  impact: string;
+  risk: string;
+  reboot: boolean;
+  status: "applied" | "not_applied" | "partial" | "unknown";
+  needsDriverKey: boolean;
+  driverKeyMissing: boolean;
+};
+
+type ScanData = {
+  vendor: "nvidia" | "amd" | "intel" | "unknown";
+  name: string;
+  driverKey: string;
+  tweaks: GpuTweak[];
+  supported: boolean;
+};
+
+const VENDOR_COLOR: Record<string, string> = {
+  nvidia: "#76b900",
+  amd:    "#ed1c24",
+  intel:  "#0071c5",
+  unknown:"var(--muted)",
+};
+
+const STATUS_CLS: Record<string, string> = {
+  applied:     "st-applied",
+  not_applied: "st-unknown",
+  partial:     "st-partial",
+  unknown:     "st-unknown",
+};
+
+export default function GpuTweaks({ admin }: { admin: boolean }) {
+  const { t } = useLang();
+  const [data, setData]   = useState<ScanData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy]   = useState<string | null>(null);
+  const [log, setLog]     = useState<string[]>([]);
+  const [open, setOpen]   = useState<string | null>(null);
+  const [err, setErr]     = useState("");
+
+  const VENDOR_LABEL: Record<string, string> = {
+    nvidia: "NVIDIA",
+    amd:    "AMD",
+    intel:  "Intel",
+    unknown: t("unknown"),
+  };
+
+  const STATUS_LABEL: Record<string, string> = {
+    applied:     t("gpuStatusApplied"),
+    not_applied: t("gpuStatusNot"),
+    partial:     t("gpuStatusPartial"),
+    unknown:     t("unknown"),
+  };
+
+  const push = (m: string) =>
+    setLog((l) => [`[${new Date().toLocaleTimeString()}] ${m}`, ...l.slice(0, 49)]);
+
+  const refresh = () => {
+    setLoading(true);
+    setErr("");
+    api.gpuScan()
+      .then(setData)
+      .catch((e) => setErr(String(e)))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => { refresh(); }, []);
+
+  const doApply = async (tw: GpuTweak) => {
+    if (!data) return;
+    setBusy(tw.id);
+    push(`Applying: ${tw.name}…`);
+    try {
+      await api.gpuTweakApply(tw.id, data.driverKey);
+      push(`✔ ${tw.name} ${t("gpuLogApplied")}${tw.reboot ? ` ${t("gpuRebootLog")}` : ""}`);
+    } catch (e: any) {
+      push(`✘ ${tw.name}: ${e}`);
+    } finally {
+      setBusy(null);
+      refresh();
+    }
+  };
+
+  const doRevert = async (tw: GpuTweak) => {
+    if (!data) return;
+    setBusy(tw.id);
+    push(`Reverting: ${tw.name}…`);
+    try {
+      await api.gpuTweakRevert(tw.id, data.driverKey);
+      push(`↩ ${tw.name} ${t("gpuLogReset")}`);
+    } catch (e: any) {
+      push(`✘ ${tw.name}: ${e}`);
+    } finally {
+      setBusy(null);
+      refresh();
+    }
+  };
+
+  const cats = useMemo(() => {
+    if (!data) return [];
+    return [...new Set(data.tweaks.map((tw) => tw.category))];
+  }, [data]);
+
+  const appliedCount = data?.tweaks.filter((tw) => tw.status === "applied").length ?? 0;
+  const totalCount   = data?.tweaks.length ?? 0;
+
+  return (
+    <>
+      <div className="page-title">GPU Tweaks</div>
+      <div className="page-sub">{t("gpuSub")}</div>
+
+      {loading && <><Spinner /> <span className="muted">{t("gpuLoading")}</span></>}
+      {err && <div style={{ color: "var(--red)", marginBottom: 10 }}>{err}</div>}
+
+      {data && (
+        <>
+          {/* GPU info card */}
+          <Card title={t("gpuDetected")}>
+            <div style={{ display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap" }}>
+              <div
+                style={{
+                  background: `${VENDOR_COLOR[data.vendor]}22`,
+                  border: `1px solid ${VENDOR_COLOR[data.vendor]}66`,
+                  borderRadius: 10,
+                  padding: "8px 18px",
+                  fontWeight: 700,
+                  fontSize: 18,
+                  color: VENDOR_COLOR[data.vendor],
+                  letterSpacing: 1,
+                }}
+              >
+                {VENDOR_LABEL[data.vendor]}
+              </div>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 15 }}>{data.name}</div>
+                {data.driverKey && (
+                  <div className="mono muted" style={{ fontSize: 11, marginTop: 2 }}>
+                    HKLM\{data.driverKey}
+                  </div>
+                )}
+              </div>
+              <div style={{ marginLeft: "auto", textAlign: "right" }}>
+                <div style={{ fontSize: 22, fontWeight: 800, color: "var(--accent)" }}>
+                  {appliedCount}/{totalCount}
+                </div>
+                <div className="muted" style={{ fontSize: 11 }}>{t("gpuActiveCount")}</div>
+              </div>
+              <button className="btn ghost small" onClick={refresh} disabled={loading}>
+                {loading ? <Spinner /> : "↻ Rescan"}
+              </button>
+            </div>
+
+            {!data.supported && (
+              <div style={{ color: "var(--yellow)", marginTop: 14, fontSize: 13 }}>
+                {t("gpuNoSupport")}
+              </div>
+            )}
+          </Card>
+
+          {/* Tweak categories */}
+          {data.supported && cats.map((cat) => {
+            const tweaks = data.tweaks.filter((tw) => tw.category === cat);
+            return (
+              <div key={cat} className="mt">
+                <h3
+                  style={{
+                    color: "var(--muted)",
+                    textTransform: "uppercase",
+                    fontSize: 11,
+                    letterSpacing: ".5px",
+                    marginBottom: 8,
+                    fontWeight: 600,
+                  }}
+                >
+                  {cat}
+                </h3>
+                {tweaks.map((tw) => {
+                  const isBusy   = busy === tw.id;
+                  const isOpen   = open === tw.id;
+                  const applied  = tw.status === "applied";
+                  const blocked  = tw.driverKeyMissing;
+                  const needsAdmin = !admin && tw.risk === "Medium";
+
+                  return (
+                    <div className="tweak" key={tw.id} style={{ opacity: blocked ? 0.5 : 1 }}>
+                      <div className="tweak-head">
+                        <span
+                          className="tweak-name"
+                          style={{ color: applied ? VENDOR_COLOR[data.vendor] : undefined }}
+                        >
+                          {tw.name}
+                        </span>
+                        <Badge cls={`risk-${tw.risk}`}>{tw.risk}</Badge>
+                        <Badge cls={STATUS_CLS[tw.status]}>{STATUS_LABEL[tw.status]}</Badge>
+                        {tw.reboot && (
+                          <Badge cls="st-partial">{t("gpuRebootBadge")}</Badge>
+                        )}
+                        <button
+                          className="btn small ghost"
+                          onClick={() => setOpen(isOpen ? null : tw.id)}
+                        >
+                          {isOpen ? "▲" : "▼"}
+                        </button>
+                        {/* Apply / Revert */}
+                        {applied ? (
+                          <button
+                            className="btn small ghost"
+                            disabled={isBusy || blocked}
+                            onClick={() => doRevert(tw)}
+                            title={blocked ? t("gpuNoKey") : ""}
+                          >
+                            {isBusy ? <Spinner /> : t("bootUndo")}
+                          </button>
+                        ) : (
+                          <button
+                            className="btn small"
+                            disabled={isBusy || blocked || needsAdmin}
+                            onClick={() => doApply(tw)}
+                            title={
+                              blocked    ? t("gpuNoKey") :
+                              needsAdmin ? t("bootAdminNeeded") : ""
+                            }
+                          >
+                            {isBusy ? <Spinner /> : t("bootApply")}
+                          </button>
+                        )}
+                      </div>
+
+                      {isOpen && (
+                        <div className="tweak-detail">
+                          <p>{tw.description}</p>
+                          <p><b>{t("gpuImpact")}</b> {tw.impact}</p>
+                          {blocked && (
+                            <p style={{ color: "var(--yellow)" }}>
+                              {t("gpuNoKeyDesc")}
+                            </p>
+                          )}
+                          {needsAdmin && (
+                            <p style={{ color: "var(--yellow)" }}>
+                              {t("gpuNeedsAdmin")}
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+
+          {/* Activity log */}
+          {log.length > 0 && (
+            <div className="mt">
+              <Card title={t("log")}>
+                <div
+                  className="mono muted"
+                  style={{ fontSize: 11, lineHeight: 1.8, maxHeight: 160, overflowY: "auto" }}
+                >
+                  {log.map((l, i) => (
+                    <div
+                      key={i}
+                      style={{ color: l.includes("✔") ? "var(--green)" : l.includes("✘") ? "var(--red)" : undefined }}
+                    >
+                      {l}
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            </div>
+          )}
+        </>
+      )}
+    </>
+  );
+}

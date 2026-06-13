@@ -1,0 +1,37 @@
+[package]
+name = "ad-hyperoptimize"
+version = "0.1.0"
+description = "AD HyperOptimize — PC Optimization & Deep Diagnostic Suite"
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "pc_opt_suite_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sysinfo = "0.30"
+chrono = { version = "0.4", features = ["serde"] }
+dirs = "5"
+sha2 = "0.10"
+rayon = "1.10"
+rand = "0.8"
+# Pin: time >=0.3.44 conflicts with cookie 0.18.1 (E0119 in expiration.rs).
+# Remove once cookie ships a fix and tauri picks it up.
+time = "=0.3.41"
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.52"
+
+[profile.release]
+opt-level = 3
+lto = "thin"        # near-identical performance, links in a fraction of the time
+codegen-units = 4
+strip = true
+panic = "abort"
