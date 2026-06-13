@@ -461,6 +461,7 @@ pub fn scan() -> serde_json::Value {
         "vendor":    format!("{:?}", vendor).to_lowercase(),
         "name":      gpu_name,
         "driverKey": driver_key,
+        "supported": !matches!(vendor, Vendor::Unknown),
         "tweaks":    tweaks,
     })
 }
