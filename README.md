@@ -47,7 +47,7 @@ optimize app/
 ## Build
 
 ```powershell
-cd "E:\CLAUDE\optimize app"
+cd "E:\optimize app"
 npm install
 
 # one-time: generate app icons from any 1024px PNG
