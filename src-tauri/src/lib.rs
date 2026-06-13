@@ -33,7 +33,7 @@ mod tweaks;
 mod updates;
 
 use serde_json::Value;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
 
 struct AppState {
     monitor: monitor::MonitorState,
@@ -238,29 +238,6 @@ fn cmd_install_driver_updates() -> Result<Value, String> { updates::install_driv
 #[tauri::command(async)]
 fn cmd_gpu_vendor() -> Value { updates::gpu_vendor_hint() }
 
-// ---- gpu tweaks ----
-#[tauri::command(async)]
-fn cmd_gpu_scan() -> Value { gputweaks::scan() }
-
-#[tauri::command(async)]
-fn cmd_gpu_tweak_apply(id: String, driver_key: String) -> Result<Value, String> {
-    gputweaks::apply_tweak(id, driver_key)
-}
-
-#[tauri::command(async)]
-fn cmd_gpu_tweak_revert(id: String, driver_key: String) -> Result<Value, String> {
-    gputweaks::revert_tweak(id, driver_key)
-}
-
-// ---- registry orphan cleaner ----
-#[tauri::command(async)]
-fn cmd_regclean_scan() -> Value { regclean::scan() }
-
-#[tauri::command(async)]
-fn cmd_regclean_clean(entries: Vec<Value>) -> Result<Value, String> {
-    regclean::clean(entries)
-}
-
 // ---- privacy center ----
 #[tauri::command(async)]
 fn cmd_privacy_scan() -> Value { privacy::scan() }
@@ -414,7 +391,8 @@ fn cmd_gameboost_gpu_perf(enable: bool) -> Result<String, String> {
     gameboost::set_gpu_max_perf(enable)
 }
 
-// ---- app uninstaller ----
+
+// ---- uninstaller ----
 #[tauri::command(async)]
 fn cmd_uninstaller_list() -> Value { uninstaller::list_apps() }
 
@@ -433,7 +411,71 @@ fn cmd_clean_leftovers(paths: Vec<String>) -> Result<String, String> {
     uninstaller::clean_leftovers(paths)
 }
 
-// ---- context menu cleaner ----
+// ---- gpu tweaks ----
+#[tauri::command(async)]
+fn cmd_gpu_scan() -> Value { gputweaks::scan() }
+
+#[tauri::command(async)]
+fn cmd_gpu_tweak_apply(id: String, driver_key: String) -> Result<String, String> {
+    gputweaks::do_tweak(id, driver_key, true)
+}
+
+#[tauri::command(async)]
+fn cmd_gpu_tweak_revert(id: String, driver_key: String) -> Result<String, String> {
+    gputweaks::do_tweak(id, driver_key, false)
+}
+
+// ---- registry clean ----
+#[tauri::command(async)]
+fn cmd_regclean_scan() -> Value { regclean::scan() }
+
+#[tauri::command(async)]
+fn cmd_regclean_clean(entries: Vec<Value>) -> Result<Value, String> { regclean::clean(entries) }
+
+// ---- disk organizer ----
+#[tauri::command(async)]
+fn cmd_disk_organize_preview(folder: String, recurse: bool) -> Value {
+    diskanalyzer::organize_preview(folder, recurse)
+}
+
+#[tauri::command(async)]
+fn cmd_disk_organize_apply(items: Vec<Value>) -> Value {
+    diskanalyzer::organize_apply(items)
+}
+
+// ---- analysis / report ----
+#[tauri::command(async)]
+fn cmd_analyze(force: bool) -> Value {
+    cache::get_or("analysis", force, || {
+        let scan     = cache::data_or("scan",     force, crate::scan::full_scan);
+        let security = cache::data_or("security", force, crate::security::scan);
+        let cleanup  = cache::data_or("cleanup",  force, crate::cleanup::scan);
+        analysis::analyze(&scan, &security, &cleanup)
+    })
+}
+
+#[tauri::command(async)]
+fn cmd_generate_report() -> Result<Value, String> {
+    let scan     = cache::data_or("scan",      false, crate::scan::full_scan);
+    let security = cache::data_or("security",  false, crate::security::scan);
+    let analysis = cache::data_or("analysis",  false, || {
+        crate::analysis::analyze(&scan, &security, &serde_json::json!({}))
+    });
+    let history  = crate::tweaks::history();
+    report::generate(&scan, &analysis, &security, &history)
+}
+
+// ---- misc ----
+#[tauri::command(async)]
+fn cmd_open_path(path: String) -> Result<(), String> {
+    std::process::Command::new("explorer")
+        .arg(&path)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+// ---- context menu ----
 #[tauri::command(async)]
 fn cmd_ctxmenu_list() -> Value { ctxmenu::list_entries() }
 
@@ -466,12 +508,12 @@ fn cmd_powerplan_create(name: String, base_guid: String) -> Result<String, Strin
     powerplan::create_custom(name, base_guid)
 }
 
-// ---- performance tweaks ----
+// ---- perf tweaks ----
 #[tauri::command(async)]
 fn cmd_timer_get() -> Value { perftweaks::timer_get() }
 
 #[tauri::command(async)]
-fn cmd_timer_set(target_100ns: u32) -> Result<String, String> { perftweaks::timer_set(target_100ns) }
+fn cmd_timer_set(target100ns: u32) -> Result<String, String> { perftweaks::timer_set(target100ns) }
 
 #[tauri::command(async)]
 fn cmd_timer_reset() -> Result<String, String> { perftweaks::timer_reset() }
@@ -518,7 +560,7 @@ fn cmd_pagefile_set_custom(path: String, init_mb: u32, max_mb: u32) -> Result<St
 #[tauri::command(async)]
 fn cmd_pagefile_disable() -> Result<String, String> { perftweaks::pagefile_disable() }
 
-// ---- hardware monitor ----
+// ---- hw monitor ----
 #[tauri::command(async)]
 fn cmd_hw_temps() -> Value { hwmonitor::temps() }
 
@@ -528,46 +570,16 @@ fn cmd_hw_smart() -> Value { hwmonitor::smart() }
 #[tauri::command(async)]
 fn cmd_hw_full() -> Value { hwmonitor::full() }
 
-// ---- analysis & reports ----
-#[tauri::command(async)]
-fn cmd_analyze(force: Option<bool>) -> Value {
-    let force = force.unwrap_or(false);
-    if !force {
-        if let Some(mut hit) = cache::load("analysis") {
-            hit["fromCache"] = serde_json::json!(true);
-            return hit;
-        }
-    }
-    let s = cache::data_or("scan", force, scan::full_scan);
-    let sec = cache::data_or("security", force, security::scan);
-    let cl = cache::data_or("cleanup", force, cleanup::scan);
-    cache::store("analysis", analysis::analyze(&s, &sec, &cl))
-}
-
-#[tauri::command(async)]
-fn cmd_generate_report() -> Result<Value, String> {
-    let s = cache::data_or("scan", false, scan::full_scan);
-    let sec = cache::data_or("security", false, security::scan);
-    let cl = cache::data_or("cleanup", false, cleanup::scan);
-    let a = analysis::analyze(&s, &sec, &cl);
-    let h = tweaks::history();
-    report::generate(&s, &a, &sec, &h)
-}
-
-#[tauri::command]
-fn cmd_open_path(path: String) -> Result<(), String> {
-    // Open report/backup in the default app (explorer handles both).
-    ps::exec("cmd.exe", &["/C", "start", "", &path]).map(|_| ())
-}
+// ═══════════════════════════════════════════════════════════════════════════
+// Tauri entry point
+// ═══════════════════════════════════════════════════════════════════════════
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .setup(|app| {
-            app.manage(AppState { monitor: monitor::MonitorState::default() });
-            Ok(())
-        })
+        .manage(AppState { monitor: monitor::MonitorState::default() })
         .invoke_handler(tauri::generate_handler![
+            // system scan
             cmd_is_admin,
             cmd_full_scan,
             cmd_boot_analysis,
@@ -575,87 +587,45 @@ pub fn run() {
             cmd_component_health,
             cmd_dns_benchmark,
             cmd_network_diag,
+            // monitor
             cmd_start_monitor,
             cmd_stop_monitor,
+            // tweaks
             cmd_list_tweaks,
             cmd_apply_tweak,
             cmd_revert_tweak,
             cmd_history,
+            // safety
             cmd_create_restore_point,
             cmd_list_restore_points,
             cmd_delete_restore_point,
             cmd_launch_rstrui,
-            cmd_autoopt_scan,
-            cmd_autoopt_score,
-            cmd_autoopt_apply,
+            // cleanup
             cmd_scan_cleanup,
             cmd_run_cleanup,
+            // security
             cmd_security_scan,
             cmd_defender_quick_scan,
-            cmd_run_benchmark,
-            cmd_bench_history,
-            cmd_profile_list,
-            cmd_profile_apply,
-            cmd_profile_revert,
-            cmd_startup_list,
-            cmd_startup_toggle,
-            cmd_proc_list,
-            cmd_proc_kill,
-            cmd_proc_priority,
-            cmd_proc_affinity,
-            cmd_proc_detail,
-            cmd_perm_priority_list,
-            cmd_perm_priority_set,
-            cmd_perm_priority_remove,
-            cmd_scan_app_updates,
-            cmd_update_apps,
-            cmd_scan_driver_updates,
-            cmd_install_driver_updates,
-            cmd_gpu_vendor,
-            cmd_latency_counters,
-            cmd_stall_probe,
-            cmd_wpr_start,
-            cmd_wpr_stop,
-            cmd_wpr_cancel,
-            cmd_gpu_scan,
-            cmd_gpu_tweak_apply,
-            cmd_gpu_tweak_revert,
-            cmd_regclean_scan,
-            cmd_regclean_clean,
-            cmd_privacy_scan,
-            cmd_privacy_apply,
-            cmd_privacy_revert,
-            cmd_services_list,
-            cmd_service_set_startup,
-            cmd_service_control,
-            cmd_health_run,
-            cmd_boot_scan,
-            cmd_boot_tweak_apply,
-            cmd_boot_tweak_revert,
-            cmd_disk_drives,
-            cmd_disk_largest,
-            cmd_disk_duplicates,
-            cmd_disk_temp_age,
-            cmd_disk_delete,
-            cmd_disk_move,
-            cmd_schedtasks_list,
-            cmd_schedtask_toggle,
-            cmd_analyze,
-            cmd_generate_report,
-            cmd_open_path,
+            cmd_hosts_list_all,
+            cmd_hosts_disable_entries,
+            cmd_hosts_enable_entries,
+            // uninstaller
             cmd_uninstaller_list,
             cmd_uninstall_app,
             cmd_scan_leftovers,
             cmd_clean_leftovers,
+            // context menu
             cmd_ctxmenu_list,
             cmd_ctxmenu_toggle,
             cmd_ctxmenu_disable_all,
             cmd_ctxmenu_enable_all,
+            // power plan
             cmd_powerplan_list,
             cmd_powerplan_set,
             cmd_powerplan_unlock_ultimate,
             cmd_powerplan_delete,
             cmd_powerplan_create,
+            // perf tweaks
             cmd_timer_get,
             cmd_timer_set,
             cmd_timer_reset,
@@ -671,18 +641,18 @@ pub fn run() {
             cmd_pagefile_set_auto,
             cmd_pagefile_set_custom,
             cmd_pagefile_disable,
+            // hw monitor
             cmd_hw_temps,
             cmd_hw_smart,
             cmd_hw_full,
-            cmd_hosts_list_all,
-            cmd_hosts_disable_entries,
-            cmd_hosts_enable_entries,
+            // debloater
             cmd_debloater_uwp_list,
             cmd_debloater_remove_uwp,
             cmd_debloater_remove_provisioned,
             cmd_debloater_tweaks_list,
             cmd_debloater_tweak_apply,
             cmd_debloater_tweak_revert,
+            // drivers
             cmd_drivers_list,
             cmd_drivers_open_devmgr,
             cmd_drivers_open_windows_update,
@@ -690,6 +660,7 @@ pub fn run() {
             cmd_drivers_install_winget,
             cmd_drivers_open_vendor_url,
             cmd_drivers_scan_windows_update,
+            // game booster
             cmd_gameboost_background_procs,
             cmd_gameboost_running_games,
             cmd_gameboost_boost_process,
@@ -697,7 +668,81 @@ pub fn run() {
             cmd_gameboost_start,
             cmd_gameboost_stop,
             cmd_gameboost_gpu_perf,
+            // privacy
+            cmd_privacy_scan,
+            cmd_privacy_apply,
+            cmd_privacy_revert,
+            // services
+            cmd_services_list,
+            cmd_service_set_startup,
+            cmd_service_control,
+            // health
+            cmd_health_run,
+            // process manager
+            cmd_proc_list,
+            cmd_proc_kill,
+            cmd_proc_priority,
+            cmd_proc_affinity,
+            cmd_perm_priority_list,
+            cmd_perm_priority_set,
+            cmd_perm_priority_remove,
+            // updates
+            cmd_scan_app_updates,
+            cmd_update_apps,
+            cmd_scan_driver_updates,
+            cmd_install_driver_updates,
+            cmd_gpu_vendor,
+            // latency / WPR
+            cmd_latency_counters,
+            cmd_stall_probe,
+            cmd_wpr_start,
+            cmd_wpr_stop,
+            cmd_wpr_cancel,
+            // GPU tweaks
+            cmd_gpu_scan,
+            cmd_gpu_tweak_apply,
+            cmd_gpu_tweak_revert,
+            // registry clean
+            cmd_regclean_scan,
+            cmd_regclean_clean,
+            // boot
+            cmd_boot_scan,
+            cmd_boot_tweak_apply,
+            cmd_boot_tweak_revert,
+            // disk analyzer
+            cmd_disk_drives,
+            cmd_disk_largest,
+            cmd_disk_duplicates,
+            cmd_disk_temp_age,
+            cmd_disk_delete,
+            cmd_disk_move,
+            cmd_disk_organize_preview,
+            cmd_disk_organize_apply,
+            // sched tasks
+            cmd_schedtasks_list,
+            cmd_schedtask_toggle,
+            // benchmarks / profiles
+            cmd_run_benchmark,
+            cmd_bench_history,
+            cmd_profile_list,
+            cmd_profile_apply,
+            cmd_profile_revert,
+            // startup / proc
+            cmd_startup_list,
+            cmd_startup_toggle,
+            // analysis / report
+            cmd_analyze,
+            cmd_generate_report,
+            // auto optimizer
+            cmd_autoopt_scan,
+            cmd_autoopt_score,
+            cmd_autoopt_apply,
+            // misc
+            cmd_open_path,
         ])
+        .setup(move |_app| {
+            Ok(())
+        })
         .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .expect("error running tauri app");
 }

@@ -18,7 +18,7 @@ type DupGroup    = { hash: string; size: number; sizeFmt: string; count: number;
 type DupData     = { groups: DupGroup[]; totalWasted: number; totalWastedFmt: string; checked: number };
 type TempBucket  = { label: string; count: number; size: number; sizeFmt: string; pct: number };
 type TempData    = { buckets: TempBucket[]; totalCount: number; totalSize: number; totalSizeFmt: string; dirs: string[] };
-type Tab         = "largest" | "duplicates" | "temp";
+type Tab         = "largest" | "duplicates" | "temp" | "organizer";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -513,6 +513,238 @@ function TempTab() {
   );
 }
 
+// ── Organizer tab ─────────────────────────────────────────────────────────────
+
+const CAT_COLORS: Record<string, string> = {
+  "Images":      "#3b9edd",
+  "Videos":      "#9b59b6",
+  "Music":       "#e74c3c",
+  "Documents":   "#27ae60",
+  "Archives":    "#e67e22",
+  "Code":        "#1abc9c",
+  "Executables": "#e91e63",
+  "Fonts":       "#795548",
+  "3D & CAD":    "#607d8b",
+  "Torrents":    "#009688",
+};
+
+type OrgItem = { src: string; dest: string; name: string; size: number; sizeFmt: string; cat: string; catFolder: string; icon: string };
+type OrgPreview = { items: OrgItem[]; uncategorized: any[]; uncatCount: number; totalFiles: number };
+
+function OrganizerTab({ defaultFolder }: { defaultFolder: string }) {
+  const [folder, setFolder]     = useState(defaultFolder);
+  const [recurse, setRecurse]   = useState(false);
+  const [preview, setPreview]   = useState<OrgPreview | null>(null);
+  const [loading, setLoading]   = useState(false);
+  const [applying, setApplying] = useState(false);
+  const [result, setResult]     = useState<any>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  const scan = async () => {
+    if (!folder.trim()) return;
+    setLoading(true); setPreview(null); setResult(null); setSelected(new Set());
+    try { setPreview(await api.diskOrganizePreview(folder.trim(), recurse)); }
+    finally { setLoading(false); }
+  };
+
+  const apply = async () => {
+    if (!preview) return;
+    const items = preview.items.filter(i => selected.has(i.src));
+    if (!items.length) return;
+    setApplying(true); setResult(null);
+    try {
+      const r = await api.diskOrganizeApply(items);
+      setResult(r);
+      // Re-scan to show updated state
+      const fresh = await api.diskOrganizePreview(folder.trim(), recurse);
+      setPreview(fresh);
+      setSelected(new Set());
+    } catch (e: any) { setResult({ error: String(e) }); }
+    finally { setApplying(false); }
+  };
+
+  // Group preview items by category
+  const grouped = useMemo(() => {
+    if (!preview) return {} as Record<string, OrgItem[]>;
+    return preview.items.reduce((acc, item) => {
+      (acc[item.cat] ??= []).push(item);
+      return acc;
+    }, {} as Record<string, OrgItem[]>);
+  }, [preview]);
+
+  const toggleCat = (cat: string) => {
+    const catItems = grouped[cat] ?? [];
+    const allSel = catItems.every(i => selected.has(i.src));
+    setSelected(prev => {
+      const n = new Set(prev);
+      catItems.forEach(i => allSel ? n.delete(i.src) : n.add(i.src));
+      return n;
+    });
+  };
+
+  const toggleItem = (src: string) => setSelected(prev => {
+    const n = new Set(prev); n.has(src) ? n.delete(src) : n.add(src); return n;
+  });
+
+  const selectAll   = () => setSelected(new Set(preview?.items.map(i => i.src) ?? []));
+  const deselectAll = () => setSelected(new Set());
+
+  const COMMON_FOLDERS = [
+    { label: "Downloads", path: (p: string) => p.replace(/^[A-Z]:\\/, (m) => m) },
+  ];
+
+  return (
+    <div>
+      {/* Folder picker */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
+        <input
+          value={folder}
+          onChange={e => setFolder(e.target.value)}
+          placeholder="C:\Users\YourName\Downloads"
+          style={{ flex: 1, minWidth: 220, background: "var(--input-bg)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)", padding: "6px 10px", fontSize: 12 }}
+        />
+        <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, cursor: "pointer", userSelect: "none" }}>
+          <input type="checkbox" checked={recurse} onChange={e => setRecurse(e.target.checked)} style={{ accentColor: "var(--accent)" }} />
+          Include subfolders
+        </label>
+        <button className="btn small" onClick={scan} disabled={loading || !folder.trim()}>
+          {loading ? <><Spinner /> Scanning…</> : "🔍 Scan"}
+        </button>
+      </div>
+
+      {/* Quick path buttons */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+        {[
+          { label: "🏠 Desktop", sub: "Desktop" },
+          { label: "⬇ Downloads", sub: "Downloads" },
+          { label: "📄 Documents", sub: "Documents" },
+          { label: "🖼 Pictures", sub: "Pictures" },
+          { label: "🎵 Music", sub: "Music" },
+          { label: "🎬 Videos", sub: "Videos" },
+        ].map(({ label, sub }) => (
+          <button key={sub} className="btn small ghost" onClick={() => {
+            const base = folder.match(/^[A-Z]:\\Users\\[^\\]+/)?.[0]
+              ?? "C:\\Users\\" + (folder.split("\\")[2] ?? "User");
+            setFolder(`${base}\\${sub}`);
+          }}>{label}</button>
+        ))}
+      </div>
+
+      {/* Result banner */}
+      {result && (
+        <div style={{
+          marginBottom: 12, padding: "10px 14px", borderRadius: 6, fontSize: 13,
+          background: result.error ? "rgba(255,80,80,0.08)" : "rgba(80,200,120,0.08)",
+          border: `1px solid ${result.error ? "var(--red)" : "var(--green)"}`,
+          color: result.error ? "var(--red)" : "var(--green)",
+        }}>
+          {result.error ? `✗ ${result.error}` : `✓ Moved ${result.moved} files${result.failed ? ` · ${result.failed} failed` : ""}`}
+        </div>
+      )}
+
+      {preview && (
+        <>
+          {/* Summary + action bar */}
+          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 14, padding: "10px 14px", borderRadius: 8, background: "var(--card)", border: "1px solid var(--border)" }}>
+            <span style={{ fontSize: 13 }}>
+              <b style={{ color: "var(--accent)" }}>{preview.totalFiles}</b>
+              <span className="muted"> files to sort</span>
+              {preview.uncatCount > 0 && <span className="muted"> · {preview.uncatCount} unrecognized (skipped)</span>}
+            </span>
+            <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+              <button className="btn small ghost" onClick={selectAll}>Select all</button>
+              <button className="btn small ghost" onClick={deselectAll}>Clear</button>
+              <button className="btn small" disabled={!selected.size || applying} onClick={apply}>
+                {applying ? <><Spinner /> Moving…</> : `📁 Move (${selected.size})`}
+              </button>
+            </div>
+          </div>
+
+          {preview.totalFiles === 0 && (
+            <div className="muted" style={{ textAlign: "center", padding: 30 }}>
+              ✓ No unsorted files found in this folder.
+            </div>
+          )}
+
+          {/* Category groups */}
+          {Object.entries(grouped).map(([cat, items]) => {
+            const catColor = CAT_COLORS[cat] ?? "var(--accent)";
+            const catIcon  = items[0]?.icon ?? "📁";
+            const allSel   = items.every(i => selected.has(i.src));
+            const someSel  = !allSel && items.some(i => selected.has(i.src));
+            const catSize  = items.reduce((a, i) => a + i.size, 0);
+
+            return (
+              <div key={cat} style={{ marginBottom: 10, border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden" }}>
+                {/* Category header */}
+                <div
+                  onClick={() => toggleCat(cat)}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 10, padding: "10px 14px",
+                    background: `${catColor}11`, borderBottom: "1px solid var(--border)",
+                    cursor: "pointer", userSelect: "none",
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={allSel}
+                    ref={el => { if (el) el.indeterminate = someSel; }}
+                    onChange={() => toggleCat(cat)}
+                    onClick={e => e.stopPropagation()}
+                    style={{ accentColor: catColor, width: 14, height: 14 }}
+                  />
+                  <span style={{ fontSize: 18 }}>{catIcon}</span>
+                  <span style={{ fontWeight: 700, fontSize: 13, color: catColor }}>{cat}</span>
+                  <span className="muted" style={{ fontSize: 11 }}>→ {items[0]?.catFolder}\</span>
+                  <span style={{ marginLeft: "auto", fontSize: 11, color: catColor }}>{items.length} files · {fmtBytes(catSize)}</span>
+                </div>
+
+                {/* File list */}
+                <div style={{ maxHeight: 200, overflowY: "auto" }}>
+                  {items.map(item => (
+                    <div
+                      key={item.src}
+                      onClick={() => toggleItem(item.src)}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 10, padding: "6px 14px",
+                        borderBottom: "1px solid var(--border-subtle, #282828)",
+                        background: selected.has(item.src) ? `${catColor}0d` : undefined,
+                        cursor: "pointer",
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selected.has(item.src)}
+                        onChange={() => toggleItem(item.src)}
+                        onClick={e => e.stopPropagation()}
+                        style={{ accentColor: catColor, width: 13, height: 13, flexShrink: 0 }}
+                      />
+                      <div style={{ flex: 1, overflow: "hidden" }}>
+                        <div style={{ fontSize: 12, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</div>
+                        <div className="mono muted" style={{ fontSize: 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.src}</div>
+                      </div>
+                      <span style={{ fontSize: 11, fontWeight: 600, flexShrink: 0, color: "var(--muted)" }}>{item.sizeFmt}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Unrecognized files */}
+          {preview.uncatCount > 0 && (
+            <div style={{ marginTop: 10, padding: "8px 14px", borderRadius: 6, background: "var(--bg2)", border: "1px solid var(--border)" }}>
+              <div className="muted" style={{ fontSize: 12 }}>
+                ⚠ {preview.uncatCount} unrecognized file{preview.uncatCount !== 1 ? "s" : ""} (unknown extension) — not moved.
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function DiskAnalyzer() {
@@ -537,6 +769,7 @@ export default function DiskAnalyzer() {
     { id: "largest",    label: `⬛ ${t("diskTabLargest")}` },
     { id: "duplicates", label: `⬛ ${t("diskTabDupes")}` },
     { id: "temp",       label: `⬛ ${t("diskTabTemp")}` },
+    { id: "organizer",  label: "📁 File Organizer" },
   ];
 
   return (
@@ -565,6 +798,7 @@ export default function DiskAnalyzer() {
             {tab === "largest"    && <LargestTab    key={selected.root} path={selected.root} drives={drives} currentRoot={selected.root} />}
             {tab === "duplicates" && <DuplicatesTab key={selected.root} path={selected.root} drives={drives} currentRoot={selected.root} />}
             {tab === "temp"       && <TempTab />}
+            {tab === "organizer"  && <OrganizerTab  key={selected.root} defaultFolder={selected.root} />}
           </Card>
         </div>
       )}

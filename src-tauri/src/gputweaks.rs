@@ -361,8 +361,11 @@ fn detect_status(tweak: &GpuTweak, driver_key: &str) -> &'static str {
         match action {
             TweakAction::DriverReg { name, apply, .. } => {
                 checkable += 1;
-                if driver_key.is_empty() { continue; }
-                if reg_read_dword("HKLM", driver_key, name) == Some(*apply) {
+                let driver_path = format!(
+                    "SYSTEM\\CurrentControlSet\\Control\\Class\\{{4d36e968-e325-11ce-bfc1-08002be10318}}\\{}",
+                    driver_key
+                );
+                if reg_read_dword("HKLM", &driver_path, name) == Some(*apply) {
                     matching += 1;
                 }
             }
@@ -374,7 +377,7 @@ fn detect_status(tweak: &GpuTweak, driver_key: &str) -> &'static str {
             }
             TweakAction::Svc { name, apply, .. } => {
                 checkable += 1;
-                if svc_start_type(name).eq_ignore_ascii_case(apply) {
+                if svc_start_type(name).trim().eq_ignore_ascii_case(apply) {
                     matching += 1;
                 }
             }
@@ -386,134 +389,91 @@ fn detect_status(tweak: &GpuTweak, driver_key: &str) -> &'static str {
             }
         }
     }
-
     if checkable == 0 { return "unknown"; }
-    if matching == checkable { return "applied"; }
-    if matching > 0 { return "partial"; }
-    "not_applied"
+    if matching == checkable { "applied" }
+    else if matching == 0    { "not_applied" }
+    else                     { "partial" }
 }
 
 #[cfg(not(windows))]
-fn detect_status(_: &GpuTweak, _: &str) -> &'static str { "unknown" }
+fn detect_status(_tweak: &GpuTweak, _driver_key: &str) -> &'static str { "unknown" }
 
-// ── ReBAR detection ─────────────────────────────────────────────────────────
+// ── Apply / Revert ──────────────────────────────────────────────────────────
 
-fn detect_rebar(driver_key: &str, vendor: &Vendor) -> Value {
-    // Check if Resizable BAR (SAM) is active by looking at reported BAR1 size vs VRAM size.
-    // NVIDIA exposes NvGpuBAR1Size in some driver versions; AMD via KMD_EnableRebar.
-    #[cfg(windows)]
-    {
-        // NVIDIA: NvGpuBAR1Size should equal VRAM size when ReBAR is active
-        if *vendor == Vendor::Nvidia && !driver_key.is_empty() {
-            if let Some(bar1) = reg_read_dword("HKLM", driver_key, "NvGpuBAR1Size") {
-                if let Some(vram) = reg_read_dword("HKLM", driver_key, "HardwareInformation.qwMemorySize")
-                    .or_else(|| reg_read_dword("HKLM", driver_key, "HardwareInformation.MemorySize")) {
-                    let active = bar1 >= vram / 2;
-                    return json!({ "active": active, "bar1Mb": bar1, "vramMb": vram / (1024*1024), "note": if active { "ReBAR active" } else { "ReBAR not detected — enable in BIOS (Above 4G Decoding + Resizable BAR)" } });
-                }
-            }
+#[cfg(windows)]
+fn apply_action(action: &TweakAction, driver_key: &str, applying: bool) -> Result<(), String> {
+    let driver_path = format!(
+        "SYSTEM\\CurrentControlSet\\Control\\Class\\{{4d36e968-e325-11ce-bfc1-08002be10318}}\\{}",
+        driver_key
+    );
+    match action {
+        TweakAction::DriverReg { name, apply, revert } => {
+            reg_write_dword("HKLM", &driver_path, name, if applying { *apply } else { *revert })
         }
-        // AMD: KMD_EnableRebar = 1 in driver key
-        if *vendor == Vendor::Amd && !driver_key.is_empty() {
-            if let Some(v) = reg_read_dword("HKLM", driver_key, "KMD_EnableRebar") {
-                return json!({ "active": v == 1, "note": if v == 1 { "Smart Access Memory (ReBAR) active" } else { "SAM/ReBAR not enabled — enable in BIOS" } });
-            }
+        TweakAction::FixedReg { root, path, name, apply, revert } => {
+            reg_write_dword(root, path, name, if applying { *apply } else { *revert })
         }
-        // Fallback: query via WMI/PowerShell
-        let ps_out = crate::ps::run(r#"
-$gpu = Get-CimInstance -ClassName Win32_VideoController -EA SilentlyContinue | Select-Object -First 1
-if ($gpu) {
-    $vram = [math]::Round($gpu.AdapterRAM / 1MB)
-    "VRAM:$vram"
-} else { "unknown" }
-"#).unwrap_or_default();
-        return json!({ "active": null, "note": "Could not detect ReBAR status — check BIOS settings", "raw": ps_out.trim() });
+        TweakAction::Ps { apply, revert, .. } => {
+            let script = if applying { apply } else { revert };
+            crate::ps::run(script).map(|_| ()).map_err(|e| format!("PS: {e}"))
+        }
+        TweakAction::Svc { name, apply, revert } => {
+            svc_set(name, if applying { apply } else { revert })
+        }
     }
-    #[cfg(not(windows))]
-    json!({ "active": null, "note": "Windows only" })
+}
+
+#[cfg(not(windows))]
+fn apply_action(_action: &TweakAction, _driver_key: &str, _applying: bool) -> Result<(), String> {
+    Ok(())
 }
 
 // ── Public API ──────────────────────────────────────────────────────────────
 
-pub fn scan() -> Value {
-    let (vendor, name, driver_key) = detect_gpu();
-
-    let applicable_tweaks: Vec<Value> = catalog()
-        .iter()
-        .filter(|t| t.vendor == vendor.as_str() || t.vendor == "any")
-        .map(|t| {
-            let status = detect_status(t, &driver_key);
-            let needs_driver_key = t.actions.iter().any(|a| matches!(a, TweakAction::DriverReg { .. }));
-            json!({
-                "id":          t.id,
-                "name":        t.name,
-                "category":    t.category,
-                "vendor":      t.vendor,
-                "description": t.description,
-                "impact":      t.impact,
-                "risk":        t.risk,
-                "reboot":      t.reboot,
-                "status":      status,
-                "needsDriverKey": needs_driver_key,
-                "driverKeyMissing": needs_driver_key && driver_key.is_empty(),
-            })
+pub fn scan() -> serde_json::Value {
+    let (vendor, gpu_name, driver_key) = detect_gpu();
+    let tweaks_data = catalog();
+    let tweaks: Vec<serde_json::Value> = tweaks_data.iter().map(|tw| {
+        let vendor_str = format!("{:?}", vendor).to_lowercase();
+        let applicable = tw.vendor == "any" || tw.vendor == vendor_str;
+        let driver_key_needed = tw.actions.iter().any(|a| matches!(a, TweakAction::DriverReg { .. }));
+        let driver_key_missing = driver_key_needed && driver_key.is_empty();
+        let status = if applicable && !driver_key_missing {
+            detect_status(tw, &driver_key)
+        } else {
+            "unknown"
+        };
+        serde_json::json!({
+            "id":              tw.id,
+            "name":            tw.name,
+            "category":        tw.category,
+            "vendor":          tw.vendor,
+            "description":     tw.description,
+            "impact":          tw.impact,
+            "risk":            tw.risk,
+            "reboot":          tw.reboot,
+            "status":          status,
+            "applicable":      applicable,
+            "driverKeyMissing": driver_key_missing,
         })
-        .collect();
-
-    let rebar = detect_rebar(&driver_key, &vendor);
-
-    json!({
-        "vendor":    vendor.as_str(),
-        "name":      name,
+    }).collect();
+    serde_json::json!({
+        "vendor":    format!("{:?}", vendor).to_lowercase(),
+        "name":      gpu_name,
         "driverKey": driver_key,
-        "tweaks":    applicable_tweaks,
-        "supported": vendor != Vendor::Unknown,
-        "rebar":     rebar,
+        "tweaks":    tweaks,
     })
 }
 
-pub fn apply_tweak(id: String, driver_key: String) -> Result<Value, String> {
-    do_tweak(&id, &driver_key, true)
-}
-
-pub fn revert_tweak(id: String, driver_key: String) -> Result<Value, String> {
-    do_tweak(&id, &driver_key, false)
-}
-
-fn do_tweak(id: &str, driver_key: &str, applying: bool) -> Result<Value, String> {
-    let tweak = catalog()
-        .into_iter()
-        .find(|t| t.id == id)
-        .ok_or_else(|| format!("Unknown tweak: {id}"))?;
-
-    for action in &tweak.actions {
-        #[cfg(windows)]
-        match action {
-            TweakAction::DriverReg { name, apply, revert } => {
-                if driver_key.is_empty() {
-                    return Err("GPU driver registry key not found — GPU not supported or not detected.".into());
-                }
-                let val = if applying { *apply } else { *revert };
-                reg_write_dword("HKLM", driver_key, name, val)
-                    .map_err(|e| format!("DriverReg {name}: {e}"))?;
+pub fn do_tweak(id: String, driver_key: String, applying: bool) -> Result<String, String> {
+    let tweaks = catalog();
+    for tw in &tweaks {
+        if tw.id == id {
+            for action in &tw.actions {
+                apply_action(action, &driver_key, applying)?;
             }
-            TweakAction::FixedReg { root, path, name, apply, revert } => {
-                let val = if applying { *apply } else { *revert };
-                reg_write_dword(root, path, name, val)
-                    .map_err(|e| format!("FixedReg {name}: {e}"))?;
-            }
-            TweakAction::Svc { name, apply, revert } => {
-                let mode = if applying { apply } else { revert };
-                svc_set(name, mode).map_err(|e| format!("Svc {name}: {e}"))?;
-            }
-            TweakAction::Ps { apply, revert, .. } => {
-                let script = if applying { apply } else { revert };
-                crate::ps::run(script).map_err(|e| format!("Ps: {e}"))?;
-            }
+            return Ok(format!("{} {}", if applying { "Applied" } else { "Reverted" }, tw.name));
         }
-        #[cfg(not(windows))]
-        let _ = (action, applying, driver_key);
     }
-
-    Ok(json!({ "id": id, "status": if applying { "applied" } else { "reverted" } }))
+    Err(format!("Unknown GPU tweak: {id}"))
 }

@@ -15,9 +15,6 @@ export const api = {
   applyTweak: (id: string) => invoke<any>("cmd_apply_tweak", { id }),
   revertTweak: (id: string) => invoke<any>("cmd_revert_tweak", { id }),
   history: () => invoke<any[]>("cmd_history"),
-  createRestorePoint: (description: string) =>
-    invoke<string>("cmd_create_restore_point", { description }),
-  listRestorePoints: () => invoke<any>("cmd_list_restore_points"),
   scanCleanup: (force = false) => invoke<any>("cmd_scan_cleanup", { force }),
   runCleanup: (ids: string[]) => invoke<any>("cmd_run_cleanup", { ids }),
   securityScan: (force = false) => invoke<any>("cmd_security_scan", { force }),
@@ -134,6 +131,8 @@ export const api = {
   diskTempAge: () => invoke<any>("cmd_disk_temp_age"),
   diskDelete: (paths: string[]) => invoke<any>("cmd_disk_delete", { paths }),
   diskMove: (paths: string[], destDir: string) => invoke<any>("cmd_disk_move", { paths, destDir }),
+  diskOrganizePreview: (folder: string, recurse: boolean) => invoke<any>("cmd_disk_organize_preview", { folder, recurse }),
+  diskOrganizeApply: (items: any[]) => invoke<any>("cmd_disk_organize_apply", { items }),
   schedTasksList: () => invoke<any>("cmd_schedtasks_list"),
   schedTaskToggle: (path: string, name: string, enable: boolean) =>
     invoke<any>("cmd_schedtask_toggle", { path, name, enable }),
@@ -170,7 +169,10 @@ export function onMetrics(cb: (m: Metrics) => void): Promise<UnlistenFn> {
 }
 
 export const fmtAge = (iso: string) => {
-  const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
+  if (!iso) return "never";
+  const t = new Date(iso).getTime();
+  if (isNaN(t)) return "never";
+  const mins = Math.floor((Date.now() - t) / 60000);
   if (mins < 1) return "just now";
   if (mins < 60) return `${mins} min ago`;
   const h = Math.floor(mins / 60);
