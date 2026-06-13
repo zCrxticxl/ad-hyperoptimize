@@ -1,0 +1,8 @@
+# Strip local filesystem paths (incl. Windows username) out of the
+# compiled binary's panic/debug metadata before distribution.
+[build]
+rustflags = [
+  "--remap-path-prefix", "C:\\Users\\adria\\.cargo=cargo",
+  "--remap-path-prefix", "E:\\CLAUDE\\optimize app=app",
+  "--remap-path-prefix", "C:\\Users\\adria=user",
+]
