@@ -95,8 +95,7 @@ fn hosts_entries() -> Value {
             for line in s.lines() {
                 let t = line.trim();
                 if t.starts_with(HO_PREFIX) {
-                    // disabled by us: "# [ADHYPER] 0.0.0.0 tracker.example.com"
-                    ho_disabled.push(t.trim_start_matches(HO_PREFIX).to_string());
+                             ho_disabled.push(t[HO_PREFIX.len()..].to_string());
                 } else if !t.is_empty() && !t.starts_with('#') {
                     active.push(t.to_string());
                 }
@@ -107,49 +106,45 @@ fn hosts_entries() -> Value {
     }
 }
 
-/// Returns all hosts entries: managed (ADHYPER-prefixed) + rest
-pub fn hosts_list_all() -> serde_json::Value {
+pub fn hosts_list_all() -> Value {
     hosts_entries()
 }
 
-/// Disable (comment out) entries by prepending HO_PREFIX
 pub fn hosts_disable_entries(entries: Vec<String>) -> Result<String, String> {
     let path = hosts_path();
     let content = fs::read_to_string(&path).map_err(|e| e.to_string())?;
     let mut lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
-    let mut changed = 0usize;
+    let mut count = 0u32;
     for entry in &entries {
-        let target = entry.trim();
-        for line in lines.iter_mut() {
+        for line in &mut lines {
             let t = line.trim();
-            if t == target {
-                *line = format!("{HO_PREFIX}{target}");
-                changed += 1;
-                break;
+            if t == entry.trim() && !t.starts_with('#') {
+                *line = format!("{HO_PREFIX}{}", t);
+                count += 1;
             }
         }
     }
-    fs::write(&path, lines.join("\n")).map_err(|e| e.to_string())?;
-    Ok(format!("Disabled {changed} entries"))
+    let new_content = lines.join("\r\n") + "\r\n";
+    fs::write(&path, new_content).map_err(|e| e.to_string())?;
+    Ok(format!("Disabled {count} host entries"))
 }
 
-/// Re-enable entries previously disabled by hosts_disable_entries
 pub fn hosts_enable_entries(entries: Vec<String>) -> Result<String, String> {
     let path = hosts_path();
     let content = fs::read_to_string(&path).map_err(|e| e.to_string())?;
     let mut lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
-    let mut changed = 0usize;
+    let mut count = 0u32;
     for entry in &entries {
-        let target = entry.trim();
-        let prefixed = format!("{HO_PREFIX}{target}");
-        for line in lines.iter_mut() {
-            if line.trim() == prefixed.trim() {
-                *line = target.to_string();
-                changed += 1;
-                break;
+        for line in &mut lines {
+            let t = line.trim();
+            let prefixed = format!("{HO_PREFIX}{}", entry.trim());
+            if t == prefixed.trim() {
+                *line = entry.trim().to_string();
+                count += 1;
             }
         }
     }
-    fs::write(&path, lines.join("\n")).map_err(|e| e.to_string())?;
-    Ok(format!("Enabled {changed} entries"))
+    let new_content = lines.join("\r\n") + "\r\n";
+    fs::write(&path, new_content).map_err(|e| e.to_string())?;
+    Ok(format!("Enabled {count} host entries"))
 }

@@ -31,11 +31,28 @@ export default function Debloater({ admin }: { admin: boolean }) {
   };
 
   const tweak_toggle = async (t: any) => {
-    const fn = t.applied
-      ? () => api.debloaterTweakRevert(t.id)
-      : () => api.debloaterTweakApply(t.id);
-    await act(t.id, fn);
-    api.debloaterTweaksList().then(setTweaks);
+    if (!admin) { setLog({ msg: "Administrator rights required. Restart the app as admin.", ok: false }); return; }
+    setBusy(t.id);
+    setLog(null);
+    try {
+      const msg = t.applied
+        ? await api.debloaterTweakRevert(t.id)
+        : await api.debloaterTweakApply(t.id);
+      setLog({ msg, ok: true });
+      // Flip state immediately so user sees the change right away
+      setTweaks((prev: any) => prev ? ({
+        ...prev,
+        tweaks: prev.tweaks.map((tw: any) =>
+          tw.id === t.id ? { ...tw, applied: !t.applied } : tw
+        )
+      }) : prev);
+    } catch (e: any) {
+      setLog({ msg: String(e), ok: false });
+      // Re-check on error to show accurate state
+      api.debloaterTweaksList().then(setTweaks);
+    } finally {
+      setBusy(null);
+    }
   };
 
   const tweak_list: any[] = tweaks?.tweaks ?? [];
@@ -64,7 +81,7 @@ export default function Debloater({ admin }: { admin: boolean }) {
       </div>
 
       {/* Tab bar */}
-      <div className="row" style={{ gap: 8, marginBottom: 16 }}>
+      <div className="row" style={{ gap: 8, marginBottom: log ? 8 : 16 }}>
         {(["tweaks", "uwp"] as const).map(t => (
           <button
             key={t}
@@ -75,6 +92,21 @@ export default function Debloater({ admin }: { admin: boolean }) {
           </button>
         ))}
       </div>
+
+      {/* Log banner — pinned near top so it's always visible */}
+      {log && (
+        <div style={{
+          marginBottom: 14, padding: "10px 14px", borderRadius: 6, fontSize: 13,
+          background: log.ok ? "rgba(80,200,120,0.10)" : "rgba(255,80,80,0.10)",
+          border: `1px solid ${log.ok ? "var(--green)" : "var(--red)"}`,
+          color: log.ok ? "var(--green)" : "var(--red)",
+          display: "flex", alignItems: "center", gap: 10,
+        }}>
+          <span style={{ fontSize: 16 }}>{log.ok ? "✓" : "✗"}</span>
+          <span style={{ flex: 1 }}>{log.msg}</span>
+          <button onClick={() => setLog(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "inherit", opacity: 0.6, fontSize: 16, lineHeight: 1 }}>×</button>
+        </div>
+      )}
 
       {tab === "tweaks" && (
         !tweaks ? (
@@ -172,17 +204,6 @@ export default function Debloater({ admin }: { admin: boolean }) {
             </>
           )}
         </Card>
-      )}
-
-      {log && (
-        <div style={{
-          marginTop: 12, padding: "10px 14px", borderRadius: 6, fontSize: 13,
-          background: log.ok ? "rgba(80,200,120,0.08)" : "rgba(255,80,80,0.08)",
-          border: `1px solid ${log.ok ? "var(--green)" : "var(--red)"}`,
-          color: log.ok ? "var(--green)" : "var(--red)",
-        }}>
-          {log.ok ? "✓ " : "✗ "}{log.msg}
-        </div>
       )}
 
       <div className="muted" style={{ fontSize: 12, marginTop: 14 }}>

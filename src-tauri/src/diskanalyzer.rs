@@ -425,11 +425,11 @@ pub fn scan_temp_age() -> Value {
         .unwrap_or(0);
 
     const BUCKETS: &[(&str, u64)] = &[
-        ("Heute (<24h)",         86_400),
-        ("Diese Woche (<7d)",    7 * 86_400),
-        ("Dieser Monat (<30d)", 30 * 86_400),
-        ("Dieses Jahr (<365d)",365 * 86_400),
-        ("Älter als 1 Jahr",    u64::MAX),
+        ("Today (<24h)",         86_400),
+        ("This Week (<7d)",    7 * 86_400),
+        ("This Month (<30d)", 30 * 86_400),
+        ("This Year (<365d)",365 * 86_400),
+        ("Older than 1 Year",    u64::MAX),
     ];
 
     let mut counts = vec![0u64; BUCKETS.len()];
@@ -470,4 +470,146 @@ pub fn scan_temp_age() -> Value {
         "totalSizeFmt":   fmt_size(total_size),
         "dirs":           dirs.iter().map(|p| p.to_string_lossy().into_owned()).collect::<Vec<_>>(),
     })
+}
+
+// ── File Organizer ──────────────────────────────────────────────────────────
+
+struct Category {
+    name:      &'static str,
+    folder:    &'static str,
+    icon:      &'static str,
+    exts:      &'static [&'static str],
+}
+
+const CATEGORIES: &[Category] = &[
+    Category { name: "Images",      folder: "Images",      icon: "🖼",  exts: &["jpg","jpeg","png","gif","bmp","webp","svg","ico","tiff","tif","heic","heif","raw","cr2","nef","arw","dng","psd","ai","xcf"] },
+    Category { name: "Videos",      folder: "Videos",      icon: "🎬", exts: &["mp4","mkv","avi","mov","wmv","flv","webm","m4v","mpg","mpeg","3gp","ts","vob","divx","rmvb"] },
+    Category { name: "Music",       folder: "Music",       icon: "🎵", exts: &["mp3","flac","wav","aac","ogg","wma","m4a","opus","alac","aiff","ape","mid","midi"] },
+    Category { name: "Documents",   folder: "Documents",   icon: "📄", exts: &["pdf","doc","docx","xls","xlsx","ppt","pptx","txt","odt","ods","odp","rtf","csv","md","epub","djvu","pages","numbers","key"] },
+    Category { name: "Archives",    folder: "Archives",    icon: "📦", exts: &["zip","rar","7z","tar","gz","bz2","xz","iso","cab","lzh","zst","lz4"] },
+    Category { name: "Code",        folder: "Code",        icon: "💻", exts: &["py","js","ts","rs","java","cpp","c","h","cs","php","rb","go","sh","bat","ps1","json","xml","yaml","yml","html","css","sql","swift","kt","dart","lua","r","m"] },
+    Category { name: "Executables", folder: "Executables", icon: "⚙",  exts: &["exe","msi","apk","deb","rpm","pkg","dmg"] },
+    Category { name: "Fonts",       folder: "Fonts",       icon: "🔤", exts: &["ttf","otf","woff","woff2","fon","eot"] },
+    Category { name: "3D & CAD",    folder: "3D",          icon: "📐", exts: &["obj","fbx","stl","3ds","blend","dae","step","stp","iges","dwg","dxf"] },
+    Category { name: "Torrents",    folder: "Torrents",    icon: "🌊", exts: &["torrent","magnet"] },
+];
+
+pub fn organize_preview(folder: String, recurse: bool) -> Value {
+    let root = PathBuf::from(&folder);
+    let cat_folder_names: Vec<String> = CATEGORIES.iter().map(|c| c.folder.to_lowercase()).collect();
+
+    let file_paths: Vec<PathBuf> = if recurse {
+        walk(&root)
+            .into_iter()
+            .filter(|fi| {
+                // exclude files already inside one of our category subfolders
+                !cat_folder_names.iter().any(|cf| {
+                    fi.path.components().any(|c| c.as_os_str().to_string_lossy().to_lowercase() == *cf)
+                })
+            })
+            .map(|fi| fi.path)
+            .collect()
+    } else {
+        std::fs::read_dir(&root)
+            .ok()
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|e| {
+                let m = e.metadata().ok()?;
+                if m.is_file() { Some(e.path()) } else { None }
+            })
+            .collect()
+    };
+
+    let mut items: Vec<Value>          = Vec::new();
+    let mut uncategorized: Vec<Value>  = Vec::new();
+
+    for path in file_paths {
+        let ext  = path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        if name.is_empty() { continue; }
+        let size = path.metadata().map(|m| m.len()).unwrap_or(0);
+
+        if let Some(cat) = CATEGORIES.iter().find(|c| c.exts.contains(&ext.as_str())) {
+            let dest = format!("{}\\{}\\{}", folder, cat.folder, name);
+            items.push(json!({
+                "src":       path.to_string_lossy(),
+                "dest":      dest,
+                "name":      name,
+                "size":      size,
+                "sizeFmt":   fmt_size(size),
+                "cat":       cat.name,
+                "catFolder": cat.folder,
+                "icon":      cat.icon,
+            }));
+        } else {
+            uncategorized.push(json!({
+                "src":     path.to_string_lossy(),
+                "name":    name,
+                "size":    size,
+                "sizeFmt": fmt_size(size),
+                "ext":     ext,
+            }));
+        }
+    }
+
+    json!({
+        "items":      items,
+        "uncategorized": uncategorized,
+        "uncatCount": uncategorized.len(),
+        "totalFiles": items.len(),
+    })
+}
+
+pub fn organize_apply(items: Vec<Value>) -> Value {
+    let mut moved  = 0u32;
+    let mut errors: Vec<String> = Vec::new();
+
+    for item in &items {
+        let src  = item["src"].as_str().unwrap_or("");
+        let dest = item["dest"].as_str().unwrap_or("");
+        if src.is_empty() || dest.is_empty() { continue; }
+
+        let src_path  = PathBuf::from(src);
+        let dest_path = PathBuf::from(dest);
+
+        if !src_path.exists() {
+            errors.push(format!("{}: not found", src));
+            continue;
+        }
+
+        // Resolve filename conflict: append _1, _2, …
+        let dest_path = if dest_path.exists() {
+            let stem   = dest_path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+            let ext    = dest_path.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+            let parent = dest_path.parent().unwrap_or(&dest_path);
+            let mut n  = 1u32;
+            loop {
+                let c = parent.join(format!("{}_{}{}", stem, n, ext));
+                if !c.exists() { break c; }
+                n += 1;
+            }
+        } else {
+            dest_path
+        };
+
+        if let Some(parent) = dest_path.parent() {
+            if let Err(e) = std::fs::create_dir_all(parent) {
+                errors.push(format!("{}: mkdir {}", src, e));
+                continue;
+            }
+        }
+
+        let res = std::fs::rename(&src_path, &dest_path).or_else(|_| {
+            copy_file(&src_path, &dest_path).and_then(|_| std::fs::remove_file(&src_path))
+        });
+
+        match res {
+            Ok(_)  => moved += 1,
+            Err(e) => errors.push(format!("{}: {}", src, e)),
+        }
+    }
+
+    json!({ "moved": moved, "failed": errors.len(), "errors": errors })
 }
