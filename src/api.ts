@@ -22,6 +22,23 @@ export const api = {
   runCleanup: (ids: string[]) => invoke<any>("cmd_run_cleanup", { ids }),
   securityScan: (force = false) => invoke<any>("cmd_security_scan", { force }),
   defenderQuickScan: () => invoke<string>("cmd_defender_quick_scan"),
+  // app uninstaller
+  uninstallerList: () => invoke<any>("cmd_uninstaller_list"),
+  uninstallApp: (uninstallString: string) => invoke<string>("cmd_uninstall_app", { uninstallString }),
+  scanLeftovers: (appName: string, publisher: string, installLocation: string) =>
+    invoke<any>("cmd_scan_leftovers", { appName, publisher, installLocation }),
+  cleanLeftovers: (paths: string[]) => invoke<string>("cmd_clean_leftovers", { paths }),
+  // context menu
+  ctxmenuList: () => invoke<any>("cmd_ctxmenu_list"),
+  ctxmenuToggle: (path: string, enable: boolean) => invoke<string>("cmd_ctxmenu_toggle", { path, enable }),
+  ctxmenuDisableAll: () => invoke<string>("cmd_ctxmenu_disable_all"),
+  ctxmenuEnableAll: () => invoke<string>("cmd_ctxmenu_enable_all"),
+  // power plan
+  powerplanList: () => invoke<any>("cmd_powerplan_list"),
+  powerplanSet: (guid: string) => invoke<string>("cmd_powerplan_set", { guid }),
+  powerplanUnlockUltimate: () => invoke<string>("cmd_powerplan_unlock_ultimate"),
+  powerplanDelete: (guid: string) => invoke<string>("cmd_powerplan_delete", { guid }),
+  powerplanCreate: (name: string, baseGuid: string) => invoke<string>("cmd_powerplan_create", { name, baseGuid }),
   // perf tweaks
   timerGet: () => invoke<any>("cmd_timer_get"),
   timerSet: (target100ns: number) => invoke<string>("cmd_timer_set", { target100ns }),
@@ -42,6 +59,29 @@ export const api = {
   hwTemps: () => invoke<any>("cmd_hw_temps"),
   hwSmart: () => invoke<any>("cmd_hw_smart"),
   hwFull: () => invoke<any>("cmd_hw_full"),
+  // debloater
+  debloaterUwpList: () => invoke<any>("cmd_debloater_uwp_list"),
+  debloaterRemoveUwp: (packageFullName: string) => invoke<string>("cmd_debloater_remove_uwp", { packageFullName }),
+  debloaterRemoveProvisioned: (packageName: string) => invoke<string>("cmd_debloater_remove_provisioned", { packageName }),
+  debloaterTweaksList: () => invoke<any>("cmd_debloater_tweaks_list"),
+  debloaterTweakApply: (id: string) => invoke<string>("cmd_debloater_tweak_apply", { id }),
+  debloaterTweakRevert: (id: string) => invoke<string>("cmd_debloater_tweak_revert", { id }),
+  // drivers
+  driversList: () => invoke<any>("cmd_drivers_list"),
+  driversOpenDevmgr: () => invoke<string>("cmd_drivers_open_devmgr"),
+  driversOpenWindowsUpdate: () => invoke<string>("cmd_drivers_open_windows_update"),
+  driversCheckWinget: (packageId: string) => invoke<any>("cmd_drivers_check_winget", { packageId }),
+  driversInstallWinget: (packageId: string) => invoke<string>("cmd_drivers_install_winget", { packageId }),
+  driversOpenVendorUrl: (url: string) => invoke<string>("cmd_drivers_open_vendor_url", { url }),
+  driversScanWindowsUpdate: () => invoke<string>("cmd_drivers_scan_windows_update"),
+  // game booster
+  gameboostBackgroundProcs: () => invoke<any>("cmd_gameboost_background_procs"),
+  gameboostRunningGames: () => invoke<any>("cmd_gameboost_running_games"),
+  gameboostBoostProcess: (pid: number) => invoke<string>("cmd_gameboost_boost_process", { pid }),
+  gameboostKillBackground: (pids: number[]) => invoke<string>("cmd_gameboost_kill_background", { pids }),
+  gameboostStart: (pid: number) => invoke<string>("cmd_gameboost_start", { pid }),
+  gameboostStop: () => invoke<string>("cmd_gameboost_stop"),
+  gameboostGpuPerf: (enable: boolean) => invoke<string>("cmd_gameboost_gpu_perf", { enable }),
   // hosts
   hostsListAll: () => invoke<any>("cmd_hosts_list_all"),
   hostsDisableEntries: (entries: string[]) => invoke<string>("cmd_hosts_disable_entries", { entries }),
@@ -100,6 +140,15 @@ export const api = {
   analyze: (force = false) => invoke<any>("cmd_analyze", { force }),
   generateReport: () => invoke<any>("cmd_generate_report"),
   openPath: (path: string) => invoke("cmd_open_path", { path }),
+  // restore points
+  createRestorePoint: (description: string) => invoke<string>("cmd_create_restore_point", { description }),
+  listRestorePoints: () => invoke<any>("cmd_list_restore_points"),
+  deleteRestorePoint: (sequenceNumber: number) => invoke<string>("cmd_delete_restore_point", { sequenceNumber }),
+  launchRstrui: () => invoke<string>("cmd_launch_rstrui"),
+  // auto optimizer
+  autooptScan: () => invoke<any>("cmd_autoopt_scan"),
+  autooptScore: () => invoke<any>("cmd_autoopt_score"),
+  autooptApply: (items: any[]) => invoke<any>("cmd_autoopt_apply", { items }),
 };
 
 export type Metrics = {

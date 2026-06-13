@@ -113,3 +113,27 @@ pub fn list_restore_points() -> serde_json::Value {
     ps::run_json("Get-ComputerRestorePoint -ErrorAction Stop | Select-Object SequenceNumber,Description,RestorePointType,CreationTime")
         .unwrap_or_else(|e| serde_json::json!({ "error": e.trim() }))
 }
+
+/// Delete a restore point by sequence number (uses vssadmin).
+pub fn delete_restore_point(sequence_number: u32) -> Result<String, String> {
+    if !ps::is_admin() {
+        return Err("Administrator rights required.".into());
+    }
+    // vssadmin needs the shadow ID; Get-ComputerRestorePoint doesn't expose it directly.
+    // Use WMI to get the shadow copy ID matching the sequence number.
+    let script = format!(r#"
+$rp = Get-ComputerRestorePoint | Where-Object {{ $_.SequenceNumber -eq {sequence_number} }}
+if (-not $rp) {{ throw "Restore point {sequence_number} not found" }}
+$id = $rp.SequenceNumber
+$wmi = Get-WmiObject -Class SystemRestore -Namespace root\default | Where-Object {{ $_.SequenceNumber -eq $id }}
+if ($wmi) {{ $wmi.Delete() | Out-Null; "Deleted restore point {sequence_number}" }}
+else {{ vssadmin delete shadows /for=C: /oldest /quiet | Out-Null; "Deleted (oldest shadow)" }}
+"#);
+    ps::run(&script).map(|s| s.trim().to_string())
+}
+
+/// Open Windows System Restore UI (rstrui.exe) for interactive restore.
+pub fn launch_rstrui() -> Result<String, String> {
+    ps::run("Start-Process rstrui.exe; 'Opened System Restore'")
+        .map(|s| s.trim().to_string())
+}
