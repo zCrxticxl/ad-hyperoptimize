@@ -273,4 +273,47 @@ export default function GpuTweaks({ admin }: { admin: boolean }) {
                               needsAdmin ? t("bootAdminNeeded") : ""
                             }
                           >
-                       
+                                                   {isBusy ? <Spinner /> : t("apply")}
+                          </button>
+                        )}
+                      </div>
+                      {isOpen && (
+                        <div className="tweak-desc" style={{ marginTop: 6 }}>
+                          <div style={{ marginBottom: 4 }}>{tw.description}</div>
+                          <div className="muted" style={{ fontSize: 12 }}>
+                            {t("gpuImpact")} {tw.impact}
+                          </div>
+                          {tw.driverKeyMissing && (
+                            <div style={{ color: "var(--orange)", fontSize: 12, marginTop: 4 }}>
+                              {t("gpuNoKeyDesc")}
+                            </div>
+                          )}
+                          {!admin && tw.risk === "Medium" && (
+                            <div style={{ color: "var(--orange)", fontSize: 12, marginTop: 4 }}>
+                              {t("gpuNeedsAdmin")}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      {log.length > 0 && log[0].startsWith(tw.id + ":") && (
+                        <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+                          {log[0].replace(tw.id + ":", "").trim()}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+
+          {!data.supported && (
+            <div style={{ color: "var(--orange)", marginTop: 8 }}>
+              {t("gpuNoSupport")}
+            </div>
+          )}
+        </>
+      )}
+    </>
+  );
+}
