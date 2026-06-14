@@ -243,17 +243,22 @@ export default function Security({ mode }: { mode: Mode }) {
     </span>
   );
 
+  const fwArr: any[] = Array.isArray(sec.firewall) ? sec.firewall : [];
+  const fwMap: Record<string, any> = Object.fromEntries(fwArr.map((f: any) => [f.Name, f]));
+
   const rows = [
     { label: "Real-Time Protection",    val: light(d.RealTimeProtectionEnabled) },
     { label: "Cloud Protection",        val: light(d.MAPSReporting) },
     { label: "Tamper Protection",       val: light(d.TamperProtectionSource) },
-    { label: "Firewall (Domain)",       val: light(sec.firewall?.Domain) },
-    { label: "Firewall (Private)",      val: light(sec.firewall?.Private) },
-    { label: "Firewall (Public)",       val: light(sec.firewall?.Public) },
+    { label: "Firewall (Domain)",  val: light(fwMap["Domain"]?.Enabled) },
+    { label: "Firewall (Private)", val: light(fwMap["Private"]?.Enabled) },
+    { label: "Firewall (Public)",  val: light(fwMap["Public"]?.Enabled) },
   ];
 
-  const susDrivers   = (sec.drivers   ?? []).filter((dr: any) => !dr.ok);
-  const susAutoruns  = (sec.autoruns  ?? []).filter((a: any)  => a.suspicious);
+  const susDrivers   = (sec.unsigned_drivers?.items ?? []) as any[];
+  const startupItems: any[] = Array.isArray(sec.autoruns?.startup_folder) ? sec.autoruns.startup_folder : [];
+  const taskItems: any[]    = Array.isArray(sec.autoruns?.tasks_nonms)     ? sec.autoruns.tasks_nonms     : [];
+  const susAutoruns = [...startupItems, ...taskItems];
 
   return (
     <>
@@ -305,16 +310,16 @@ export default function Security({ mode }: { mode: Mode }) {
             <span className="muted" style={{ fontSize: 13 }}>✓ No suspicious startup entries found.</span>
           ) : susAutoruns.map((a: any, i: number) => (
             <div key={i} style={{ fontSize: 12, padding: "4px 0", borderBottom: "1px solid var(--border)" }}>
-              <div style={{ fontWeight: 600 }}>{a.name}</div>
-              <div className="muted" style={{ wordBreak: "break-all" }}>{a.path}</div>
+              <div style={{ fontWeight: 600 }}>{a.Name ?? a.name ?? a.TaskName}</div>
+              <div className="muted" style={{ wordBreak: "break-all" }}>{a.FullName ?? a.path ?? a.TaskPath}</div>
             </div>
           ))}
         </Card>
 
         {/* Hosts file */}
         <HostsCard
-          count={sec.hosts?.count ?? 0}
-          hoDisabledCount={sec.hosts?.disabled_count ?? 0}
+          count={sec.hosts?.active?.length ?? 0}
+          hoDisabledCount={sec.hosts?.disabled?.length ?? 0}
         />
       </div>
 

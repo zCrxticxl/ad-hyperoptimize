@@ -55,6 +55,7 @@ fn svc_set(name: &str, mode: &str) -> Result<(), String> {
 enum Vendor { Nvidia, Amd, Intel, Unknown }
 
 impl Vendor {
+    #[allow(dead_code)]
     fn as_str(&self) -> &'static str {
         match self { Self::Nvidia => "nvidia", Self::Amd => "amd", Self::Intel => "intel", Self::Unknown => "unknown" }
     }
