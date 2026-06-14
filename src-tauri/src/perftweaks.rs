@@ -15,6 +15,7 @@ $result = [PSCustomObject]@{
     maxMs            = 15.625
     current100ns     = 156250
     globalReqEnabled = $false
+    persistent       = $false
 }
 try {
     Add-Type -TypeDefinition @'
@@ -38,57 +39,74 @@ try {
         -Name 'GlobalTimerResolutionRequests' -ErrorAction Stop).GlobalTimerResolutionRequests
     $result.globalReqEnabled = ($v -eq 1)
 } catch {}
+try {
+    $task = Get-ScheduledTask -TaskPath '\ADHyperOptimize\' -TaskName 'TimerResolution' -ErrorAction Stop
+    $result.persistent = ($task.State -eq 'Running')
+} catch { $result.persistent = $false }
 $result | ConvertTo-Json -Compress
 "#;
     ps::run_json(script).unwrap_or_else(|e| json!({ "error": e }))
 }
 
 pub fn timer_set(target_100ns: u32) -> Result<String, String> {
-    let script = format!(
-        r#"
+    // Steps:
+    // 1. Call NtSetTimerResolution now to detect actual hardware minimum
+    // 2. Set GlobalTimerResolutionRequests registry key (persists across boots)
+    // 3. Write a PS1 helper script to ProgramData
+    // 4. Register a logon-trigger scheduled task that runs it as SYSTEM
+    // 5. Start the task immediately — now the process stays alive and holds the resolution
+    // 6. Sleep 800ms so timer_get() called right after sees the updated value
+    let script = format!(r#"
+$target = {target_100ns}
+$actual = 0
 $msg = "Applied"
 try {{
-    Add-Type -TypeDefinition @'
-using System;
-using System.Runtime.InteropServices;
-public class NtTimerS {{
-    [DllImport("ntdll.dll")] public static extern int NtSetTimerResolution(int desired, bool set, out int actual);
-}}
-'@ -ErrorAction Stop
-    $actual = 0
-    [NtTimerS]::NtSetTimerResolution({target_100ns}, $true, [ref]$actual) | Out-Null
-    $msg = "Set $([math]::Round($actual / 10000.0, 3)) ms"
-}} catch {{ $msg = "Set (NtDll unavailable)" }}
-try {{
-    Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\kernel' `
-        -Name 'GlobalTimerResolutionRequests' -Value 1 -Type DWord -Force
-}} catch {{}}
+    Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public class NtTimerS{{[DllImport("ntdll.dll")]public static extern int NtSetTimerResolution(int desired,bool set,out int actual);}}' -ErrorAction Stop
+    [NtTimerS]::NtSetTimerResolution($target,$true,[ref]$actual)|Out-Null
+    $achievedMs=[math]::Round($actual/10000.0,3)
+    if($actual -gt ($target+1000)){{$msg="Hardware limit: ${{achievedMs}}ms (0.5ms not supported on this CPU)"}}
+    else{{$msg="Set ${{achievedMs}}ms"}}
+}}catch{{$msg="Applied (NtDll unavailable)"}}
+try{{Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\kernel' -Name 'GlobalTimerResolutionRequests' -Value 1 -Type DWord -Force}}catch{{}}
+$dir="$env:ProgramData\ADHyperOptimize"
+$ps1="$dir\timerres.ps1"
+try{{
+    New-Item -Path $dir -ItemType Directory -Force|Out-Null
+    @'
+Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public class NtTP{{[DllImport("ntdll.dll")]public static extern int NtSetTimerResolution(int d,bool s,out int a);}}' -EA SilentlyContinue
+$a=0;[NtTP]::NtSetTimerResolution({target_100ns},$true,[ref]$a)|Out-Null;while($true){{Start-Sleep -Seconds 3600}}
+'@|Set-Content -Path $ps1 -Encoding UTF8
+    $ta=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-WindowStyle Hidden -NonInteractive -ExecutionPolicy Bypass -File `"$ps1`""
+    $tt=New-ScheduledTaskTrigger -AtLogOn
+    $ts=New-ScheduledTaskSettingsSet -Hidden -ExecutionTimeLimit (New-TimeSpan -Hours 0)
+    $tp=New-ScheduledTaskPrincipal -UserId 'SYSTEM' -RunLevel Highest
+    Register-ScheduledTask -TaskName 'ADHyperOptimize\TimerResolution' -Action $ta -Trigger $tt -Settings $ts -Principal $tp -Force|Out-Null
+    Start-ScheduledTask -TaskPath '\ADHyperOptimize\' -TaskName 'TimerResolution' -EA SilentlyContinue
+    Start-Sleep -Milliseconds 800
+}}catch{{}}
 $msg
-"#
-    );
+"#);
     ps::run(&script).map(|s| s.trim().to_string()).map_err(|e| e)
 }
 
 pub fn timer_reset() -> Result<String, String> {
     let script = r#"
-$msg = "Reset"
+# Stop and remove the persistent scheduled task
+try { Stop-ScheduledTask  -TaskPath '\ADHyperOptimize\' -TaskName 'TimerResolution' -EA SilentlyContinue } catch {}
+try { Unregister-ScheduledTask -TaskPath '\ADHyperOptimize\' -TaskName 'TimerResolution' -Confirm:$false -EA SilentlyContinue } catch {}
+# Kill any lingering timerres.ps1 powershell processes
+Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -EA SilentlyContinue | Where-Object {
+    $_.CommandLine -like '*timerres*'
+} | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -EA SilentlyContinue }
+# Remove registry key
+try { Remove-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\kernel' -Name 'GlobalTimerResolutionRequests' -EA SilentlyContinue } catch {}
+# Release NtSetTimerResolution in this process
 try {
-    Add-Type -TypeDefinition @'
-using System;
-using System.Runtime.InteropServices;
-public class NtTimerR {
-    [DllImport("ntdll.dll")] public static extern int NtSetTimerResolution(int desired, bool set, out int actual);
-}
-'@ -ErrorAction Stop
+    Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public class NtTimerR{[DllImport("ntdll.dll")]public static extern int NtSetTimerResolution(int desired,bool set,out int actual);}' -EA Stop
     $actual = 0
-    [NtTimerR]::NtSetTimerResolution(156250, $false, [ref]$actual) | Out-Null
-    $msg = "Timer reset to default ($([math]::Round($actual / 10000.0, 3)) ms)"
-} catch { $msg = "Timer resolution reset requested" }
-try {
-    Remove-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\kernel' `
-        -Name 'GlobalTimerResolutionRequests' -ErrorAction SilentlyContinue
+    [NtTimerR]::NtSetTimerResolution(156250,$false,[ref]$actual)|Out-Null
 } catch {}
-$msg
+"Timer reset to default"
 "#;
     ps::run(script).map(|s| s.trim().to_string()).map_err(|e| e)
 }
