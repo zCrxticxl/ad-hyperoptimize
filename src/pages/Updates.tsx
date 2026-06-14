@@ -1,7 +1,117 @@
 import React, { useEffect, useRef, useState } from "react";
+import { check } from "@tauri-apps/plugin-updater";
+import { relaunch } from "@tauri-apps/plugin-process";
+import { getVersion } from "@tauri-apps/api/app";
 import { api } from "../api";
 import { Card, Spinner } from "../components/ui";
 import { useLang } from "../i18n";
+
+// ─── Self-Update Card ─────────────────────────────────────────────────────────
+
+type UpdateStatus = "idle" | "checking" | "up_to_date" | "available" | "downloading" | "ready" | "error";
+
+function SelfUpdateCard() {
+  const [status, setStatus] = useState<UpdateStatus>("idle");
+  const [currentVer, setCurrentVer] = useState("…");
+  const [newVer, setNewVer]         = useState("");
+  const [notes, setNotes]           = useState("");
+  const [progress, setProgress]     = useState(0);
+  const [errMsg, setErrMsg]         = useState("");
+  const updateRef = useRef<any>(null);
+
+  useEffect(() => { getVersion().then(setCurrentVer).catch(() => {}); }, []);
+
+  const checkUpdate = async () => {
+    setStatus("checking"); setErrMsg(""); setNotes(""); setNewVer(""); setProgress(0);
+    try {
+      const update = await check();
+      if (update) {
+        updateRef.current = update;
+        setNewVer(update.version);
+        setNotes(update.body ?? "");
+        setStatus("available");
+      } else {
+        setStatus("up_to_date");
+      }
+    } catch (e: any) {
+      setErrMsg(String(e));
+      setStatus("error");
+    }
+  };
+
+  const installUpdate = async () => {
+    const update = updateRef.current;
+    if (!update) return;
+    setStatus("downloading"); setProgress(0);
+    try {
+      let downloaded = 0, total = 0;
+      await update.downloadAndInstall((evt: any) => {
+        switch (evt.event) {
+          case "Started":   total = evt.data.contentLength ?? 0; break;
+          case "Progress":  downloaded += evt.data.chunkLength; setProgress(total > 0 ? Math.round(downloaded / total * 100) : 0); break;
+          case "Finished":  setStatus("ready"); break;
+        }
+      });
+    } catch (e: any) {
+      setErrMsg(String(e));
+      setStatus("error");
+    }
+  };
+
+  const statusColor: Record<UpdateStatus, string> = {
+    idle: "var(--muted)", checking: "var(--accent)", up_to_date: "var(--green)",
+    available: "var(--accent)", downloading: "var(--accent)", ready: "var(--green)", error: "var(--red)",
+  };
+  const statusLabel: Record<UpdateStatus, string> = {
+    idle: "", checking: "Checking…", up_to_date: "✓ Already on latest version",
+    available: `v${newVer} available`, downloading: `Downloading… ${progress}%`,
+    ready: "✓ Update downloaded — restart to apply", error: `Error: ${errMsg}`,
+  };
+
+  return (
+    <Card title="⟳ AD HyperOptimize — App Update">
+      <div className="row" style={{ alignItems: "center", gap: 16, marginBottom: 10 }}>
+        <div>
+          <span className="muted" style={{ fontSize: 12 }}>Current version </span>
+          <span className="mono" style={{ fontWeight: 700 }}>v{currentVer}</span>
+        </div>
+        {newVer && (
+          <div>
+            <span className="muted" style={{ fontSize: 12 }}>Latest </span>
+            <span className="mono" style={{ fontWeight: 700, color: "var(--accent)" }}>v{newVer}</span>
+          </div>
+        )}
+        {status !== "idle" && status !== "checking" && (
+          <span style={{ fontSize: 12, color: statusColor[status] }}>{statusLabel[status]}</span>
+        )}
+      </div>
+
+      {status === "downloading" && (
+        <div style={{ background: "var(--bg2)", borderRadius: 4, height: 6, marginBottom: 10 }}>
+          <div style={{ background: "var(--accent)", width: `${progress}%`, height: "100%", borderRadius: 4, transition: "width 0.2s" }} />
+        </div>
+      )}
+
+      {notes && status === "available" && (
+        <div className="muted mono" style={{ fontSize: 11, marginBottom: 10, padding: 8, background: "var(--bg2)", borderRadius: 4, whiteSpace: "pre-wrap", maxHeight: 80, overflowY: "auto" }}>
+          {notes}
+        </div>
+      )}
+
+      <div className="row" style={{ gap: 8 }}>
+        <button className="btn small" onClick={checkUpdate} disabled={status === "checking" || status === "downloading"}>
+          {status === "checking" ? <><Spinner /> Checking…</> : "Check for updates"}
+        </button>
+        {status === "available" && (
+          <button className="btn small" onClick={installUpdate}>⬇ Download & Install</button>
+        )}
+        {status === "ready" && (
+          <button className="btn small" onClick={() => relaunch()}>↺ Restart now</button>
+        )}
+      </div>
+    </Card>
+  );
+}
 
 type AppRow = {
   name: string; id: string; version: string; available: string;
@@ -83,6 +193,8 @@ export default function Updates({ admin }: { admin: boolean }) {
     <>
       <div className="page-title">{t("updatesTitle")}</div>
       <div className="page-sub">{t("updatesSub")}</div>
+
+      <SelfUpdateCard />
 
       {/* App Updates */}
       <Card title={`${t("updatesAppTitle")} ${appsMeta != null ? `(${appsMeta.count})` : ""}`}>

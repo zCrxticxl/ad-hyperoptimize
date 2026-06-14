@@ -655,6 +655,8 @@ fn ensure_admin() {
 pub fn run() {
     ensure_admin();
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(AppState {
             monitor:       monitor::MonitorState::default(),
             game_switcher: gameprofile::new_state(),
