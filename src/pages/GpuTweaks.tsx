@@ -17,12 +17,20 @@ type GpuTweak = {
   driverKeyMissing: boolean;
 };
 
+type ReBar = {
+  active: boolean | null;
+  bar1Mb: number | null;
+  vramMb: number | null;
+  note: string;
+};
+
 type ScanData = {
   vendor: "nvidia" | "amd" | "intel" | "unknown";
   name: string;
   driverKey: string;
   tweaks: GpuTweak[];
   supported: boolean;
+  rebar?: ReBar;
 };
 
 const VENDOR_COLOR: Record<string, string> = {
