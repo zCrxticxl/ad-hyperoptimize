@@ -3,6 +3,14 @@
   "productName": "AD HyperOptimize",
   "version": "0.1.0",
   "identifier": "com.caveirashield.hyperoptimize",
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDc1QTgxNkNENDdFREU0NTcKUldSWDVPMUh6UmFvZGFUWHV4c1BOZE5ha0xFd0czQllpSzhubCt4bG9VMFNGTkswcUc1VXBOMjgK",
+      "endpoints": [
+        "https://github.com/zCrxticxl/ad-hyperoptimize/releases/latest/download/latest.json"
+      ]
+    }
+  },
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:5173",
