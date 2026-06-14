@@ -210,6 +210,7 @@ fn cmd_proc_affinity(pid: u32, mask: u64) -> Result<Value, String> {
 }
 
 #[tauri::command(async)]
+#[allow(dead_code)]
 fn cmd_proc_detail(pid: u32) -> Value { procmgr::get_detail(pid) }
 
 #[tauri::command(async)]

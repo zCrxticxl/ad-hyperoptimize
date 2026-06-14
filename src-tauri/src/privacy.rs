@@ -17,6 +17,7 @@ struct PrivacyTweak {
 }
 
 // Helper macro so long registry paths stay readable.
+#[allow(unused_macros)]
 macro_rules! regget {
     ($path:expr, $name:expr) => {
         concat!(

@@ -5,7 +5,6 @@ use crate::ps;
 use serde_json::{json, Value};
 
 #[cfg(windows)]
-use std::os::windows::process::CommandExt;
 
 /// Run a single health check and return full output + parsed result.
 pub fn run(kind: String) -> Result<Value, String> {

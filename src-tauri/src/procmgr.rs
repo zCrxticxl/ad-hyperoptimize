@@ -187,6 +187,7 @@ pub fn perm_remove(exe: String) -> Result<Value, String> {
     }
 }
 
+#[allow(dead_code)]
 pub fn get_detail(pid: u32) -> Value {
     ps::run_json(&format!(
         "Get-Process -Id {pid} -ErrorAction Stop | Select-Object Id,ProcessName,PriorityClass,@{{n='affinity';e={{[int64]$_.ProcessorAffinity}}}},StartTime,Path"

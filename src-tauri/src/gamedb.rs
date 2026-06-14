@@ -1142,6 +1142,7 @@ Game {
 ]; // end GAMES
 
 /// Find a game by any of its process names (case-insensitive).
+#[allow(dead_code)]
 pub fn find_by_process(exe: &str) -> Option<&'static Game> {
     let lower = exe.to_lowercase();
     GAMES.iter().find(|g| g.processes.iter().any(|p| *p == lower))

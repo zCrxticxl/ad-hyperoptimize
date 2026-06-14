@@ -108,6 +108,7 @@ if ($out -match 'GUID:\s+([\w-]+)') {{
         .map_err(|e| e)
 }
 
+#[allow(dead_code)]
 pub fn get_plan_details(guid: String) -> Value {
     // Get individual plan settings via powercfg /query
     let script = format!(

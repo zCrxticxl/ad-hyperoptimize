@@ -7,6 +7,7 @@ use serde_json::{json, Value};
 /// A recommendation surfaced to the UI.
 /// `module` controls which apply/revert command to call.
 #[derive(serde::Serialize)]
+#[allow(dead_code)]
 pub struct Rec {
     pub id:          String,
     pub module:      String,
