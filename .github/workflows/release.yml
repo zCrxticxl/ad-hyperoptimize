@@ -73,8 +73,14 @@ jobs:
 
           $sig     = (Get-Content $sigFile.FullName -Raw).Trim()
           $pubDate = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
-          $encodedName = [Uri]::EscapeDataString($exe.Name)
-          $url     = "https://github.com/zCrxticxl/ad-hyperoptimize/releases/download/$tag/$encodedName"
+          # Get exact browser download URL from GitHub (avoids filename/encoding guessing)
+          $url = gh release view $tag --json assets --jq '.assets[] | select(.name | endswith("-setup.exe")) | .browserDownloadUrl' 2>$null
+          if (!$url) {
+            # fallback: construct manually with encoding
+            $encodedName = [Uri]::EscapeDataString($exe.Name)
+            $url = "https://github.com/zCrxticxl/ad-hyperoptimize/releases/download/$tag/$encodedName"
+          }
+          Write-Host "Download URL: $url"
 
           $json = [ordered]@{
             version  = $version
