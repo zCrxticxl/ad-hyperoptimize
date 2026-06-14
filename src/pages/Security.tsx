@@ -238,149 +238,88 @@ export default function Security({ mode }: { mode: Mode }) {
 
   const d = sec.defender ?? {};
   const light = (on: boolean) => (
-    <span style={{ color: on ? "var(--green)" : "var(--red)", fontWeight: 700 }}>{on ? "● ON" : "● OFF"}</span>
+    <span style={{ color: on ? "var(--green)" : "var(--red)", fontWeight: 700 }}>
+      {on ? "✓ On" : "✗ Off"}
+    </span>
   );
 
-  const arr = (v: any) => (Array.isArray(v) ? v : v && !v.error ? [v] : []);
+  const rows = [
+    { label: "Real-Time Protection",    val: light(d.RealTimeProtectionEnabled) },
+    { label: "Cloud Protection",        val: light(d.MAPSReporting) },
+    { label: "Tamper Protection",       val: light(d.TamperProtectionSource) },
+    { label: "Firewall (Domain)",       val: light(sec.firewall?.Domain) },
+    { label: "Firewall (Private)",      val: light(sec.firewall?.Private) },
+    { label: "Firewall (Public)",       val: light(sec.firewall?.Public) },
+  ];
+
+  const susDrivers   = (sec.drivers   ?? []).filter((dr: any) => !dr.ok);
+  const susAutoruns  = (sec.autoruns  ?? []).filter((a: any)  => a.suspicious);
 
   return (
     <>
-      <div className="page-title">Security & Anomalies</div>
-      <div className="page-sub">
-        Read-only inspection — this page never removes anything itself.
-        {meta && <> · Scanned {fmtAge(meta.time)}{meta.fromCache ? " (cached)" : ""} · </>}
-        <a style={{ color: "var(--accent)", cursor: "pointer" }} onClick={() => load(true)}>
-          {busy ? "rescanning…" : "Re-scan now"}
-        </a>
+      <div className="page-title">🛡 Security & Anomalies</div>
+      <div className="page-sub">Defender, firewall, unsigned drivers, suspicious autoruns, and hosts file.</div>
+
+      <div className="row" style={{ gap: 8, marginBottom: 12 }}>
+        <button className="btn small" disabled={busy} onClick={() => load(false)}>
+          {busy ? <Spinner /> : "⟳ Refresh"}
+        </button>
+        <button className="btn small ghost" disabled={busy} onClick={() => load(true)}>
+          {busy ? <Spinner /> : "🛡 Quick Defender Scan"}
+        </button>
       </div>
 
-      <div className="grid grid-3">
-        <Card title="Microsoft Defender">
-          <table className="tbl"><tbody>
-            <tr><td className="muted">Real-time protection</td><td>{light(ok(d.RealTimeProtectionEnabled))}</td></tr>
-            <tr><td className="muted">Antivirus engine</td><td>{light(ok(d.AntivirusEnabled))}</td></tr>
-            <tr><td className="muted">Tamper protection</td><td>{light(ok(d.IsTamperProtected))}</td></tr>
-          </tbody></table>
-        </Card>
-        <Card title="Firewall profiles">
-          <table className="tbl"><tbody>
-            {arr(sec.firewall).map((p: any, i: number) => (
-              <tr key={i}><td className="muted">{p.Name}</td><td>{light(p.Enabled === true || p.Enabled === 1)}</td></tr>
-            ))}
-          </tbody></table>
-        </Card>
-        <Card title="Platform">
-          <table className="tbl"><tbody>
-            <tr><td className="muted">Secure Boot</td><td>{String(sec.secure_boot)}</td></tr>
-            <tr><td className="muted">UAC</td><td>{light(sec.uac?.EnableLUA === 1)}</td></tr>
-          </tbody></table>
-        </Card>
-      </div>
+      {sec.error && (
+        <div style={{ color: "var(--red)", marginBottom: 10, fontSize: 13 }}>⚠ {sec.error}</div>
+      )}
 
-      <Card title={`Unsigned drivers (${sec.unsigned_drivers?.count ?? "?"})`} style={{ marginTop: 14 }}>
-        {sec.unsigned_drivers?.count === 0 && <div className="muted">All loaded drivers are signed. ✔</div>}
-        {arr(sec.unsigned_drivers?.items).slice(0, 25).map((u: any, i: number) => (
-          <div key={i} className="row" style={{ padding: "4px 0", borderBottom: "1px solid var(--border)" }}>
-            <span className="mono" style={{ flex: 1 }}>
-              {u.device}
-              {u.count > 1 && <span className="muted"> ×{u.count}</span>}
-              {u.manufacturer && <span className="muted" style={{ fontSize: 11 }}> · {u.manufacturer}</span>}
-            </span>
-            <button
-              className="btn small ghost"
-              onClick={() => api.openPath(`https://www.google.com/search?q=${encodeURIComponent(`"${u.device}" driver unsigned`)}`)}
-            >
-              {t("secCheckOnline")}
-            </button>
-          </div>
-        ))}
-        <div className="muted mt" style={{ fontSize: 12 }}>
-          {t("secLighspeedNote")}
-        </div>
-      </Card>
-
-      <Card title={`Processes running from Temp (${arr(sec.suspicious_processes).length})`} style={{ marginTop: 14 }}>
-        {arr(sec.suspicious_processes).length === 0 ? (
-          <div className="muted">None — good. Legitimate software rarely executes from Temp.</div>
-        ) : (
-          <>
-            {arr(sec.suspicious_processes).map((p: any, i: number) => (
-              <div key={i} className="row" style={{ padding: "4px 0", borderBottom: "1px solid var(--border)" }}>
-                <span className="mono" style={{ color: "var(--orange)", flex: 1, wordBreak: "break-all" }}>
-                  PID {p.ProcessId} · {p.Name} · {p.ExecutablePath}
-                </span>
-                <button
-                  className="btn small ghost"
-                  onClick={() => api.openPath(String(p.ExecutablePath).replace(/\\[^\\]+$/, ""))}
-                >
-                  {t("secFolder")}
-                </button>
-                <button
-                  className="btn small ghost"
-                  onClick={() => api.openPath(`https://www.google.com/search?q=${encodeURIComponent(`"${p.Name}" temp folder malware`)}`)}
-                >
-                  {t("secCheckOnline")}
-                </button>
-                <button
-                  className="btn small danger"
-                  onClick={async () => {
-                    if (!window.confirm(`${p.Name} (PID ${p.ProcessId}) ${t("secKillConfirm")}`)) return;
-                    try {
-                      await api.procKill(p.ProcessId);
-                      load(true);
-                    } catch (e: any) {
-                      alert(String(e));
-                    }
-                  }}
-                >
-                  {t("secKill")}
-                </button>
-              </div>
-            ))}
-            <div className="muted mt" style={{ fontSize: 12 }}>
-              {t("secInstallerNote")}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        {/* Defender + Firewall */}
+        <Card title="Windows Defender & Firewall">
+          {rows.map(r => (
+            <div key={r.label} className="row" style={{ justifyContent: "space-between", padding: "5px 0", borderBottom: "1px solid var(--border)", fontSize: 13 }}>
+              <span className="muted">{r.label}</span>
+              {r.val}
             </div>
-          </>
-        )}
-        <div className="row mt">
-          <button
-            className="btn small ghost"
-            onClick={async () => alert(await api.defenderQuickScan())}
-          >
-            {t("secQuickScan")}
-          </button>
-        </div>
-      </Card>
-
-      <HostsCard
-        count={sec.hosts?.count ?? 0}
-        hoDisabledCount={sec.hosts?.hoDisabledCount ?? 0}
-      />
-
-      <Card title="Autorun / persistence locations" style={{ marginTop: 14 }}>
-        {(["hklm_run", "hkcu_run"] as const).map((k) => {
-          const entries = sec.autoruns?.[k];
-          const items = entries && !entries.error ? Object.entries(entries) : [];
-          return (
-            <div key={k} className="mt">
-              <b className="muted">{k === "hklm_run" ? "HKLM Run (all users)" : "HKCU Run (this user)"}</b>
-              {items.length === 0 && <div className="muted">empty</div>}
-              {items.map(([name, cmd], i) => (
-                <div key={i} className="mono muted">{name} → {String(cmd)}</div>
-              ))}
-            </div>
-          );
-        })}
-        <div className="mt">
-          <b className="muted">Non-Microsoft scheduled tasks</b>
-          {arr(sec.autoruns?.tasks_nonms).slice(0, 20).map((t: any, i: number) => (
-            <div key={i} className="mono muted">{t.TaskPath}{t.TaskName} ({t.State})</div>
           ))}
-        </div>
-      </Card>
+        </Card>
 
-      {mode === "expert" && (
-        <Card title="Raw security data (expert)" style={{ marginTop: 14 }}>
+        {/* Drivers */}
+        <Card title={`Unsigned / Suspicious Drivers (${susDrivers.length})`}>
+          {susDrivers.length === 0 ? (
+            <span className="muted" style={{ fontSize: 13 }}>✓ No suspicious drivers found.</span>
+          ) : susDrivers.map((dr: any) => (
+            <div key={dr.name} style={{ fontSize: 12, padding: "4px 0", borderBottom: "1px solid var(--border)" }}>
+              <div style={{ fontWeight: 600 }}>{dr.name}</div>
+              <div className="muted">{dr.path}</div>
+              {dr.signer && <div style={{ color: "var(--orange)" }}>Signer: {dr.signer}</div>}
+            </div>
+          ))}
+        </Card>
+      </div>
+
+      <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        {/* Autoruns */}
+        <Card title={`Suspicious Autoruns (${susAutoruns.length})`}>
+          {susAutoruns.length === 0 ? (
+            <span className="muted" style={{ fontSize: 13 }}>✓ No suspicious startup entries found.</span>
+          ) : susAutoruns.map((a: any, i: number) => (
+            <div key={i} style={{ fontSize: 12, padding: "4px 0", borderBottom: "1px solid var(--border)" }}>
+              <div style={{ fontWeight: 600 }}>{a.name}</div>
+              <div className="muted" style={{ wordBreak: "break-all" }}>{a.path}</div>
+            </div>
+          ))}
+        </Card>
+
+        {/* Hosts file */}
+        <HostsCard
+          count={sec.hosts?.count ?? 0}
+          hoDisabledCount={sec.hosts?.disabled_count ?? 0}
+        />
+      </div>
+
+      {mode === "expert" && sec && (
+        <Card title="Raw JSON" style={{ marginTop: 12 }}>
           <RawJson data={sec} />
         </Card>
       )}

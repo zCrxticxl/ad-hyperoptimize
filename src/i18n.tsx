@@ -703,7 +703,7 @@ const en: typeof de = {
 
 const TRANSLATIONS = { de, en } as const;
 
-// ── Context ───────────────────────────────────────────────────────────────────
+// ── Context ─────────────────────────────────────────────
 
 type LangCtx = { lang: Lang; setLang: (l: Lang) => void; t: (key: keyof typeof de) => string };
 const LangContext = createContext<LangCtx>({

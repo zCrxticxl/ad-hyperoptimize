@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
+use tauri::Emitter as _;
 
 // ── constants ───────────────────────────────────────────────────────────────
 
@@ -15,17 +16,20 @@ use std::time::SystemTime;
 const SKIP_DIRS: &[&str] = &[
     "$recycle.bin",
     "system volume information",
-    "winsxs",      // Windows component store — huge, untouchable
+    "winsxs",           // Windows component store — huge, untouchable
     "softwaredistribution",
     ".git",
     "node_modules",
+    "target",           // Rust build artifacts
+    "__pycache__",
+    ".cargo",
 ];
 
 /// Minimum file size for duplicate detection (100 KB — hashing tiny files wastes time).
 const DUP_MIN_BYTES: u64 = 100 * 1024;
 
 /// Maximum files to walk per drive scan (safety valve for drives with millions of files).
-const MAX_FILES: usize = 2_000_000;
+const MAX_FILES: usize = 400_000;
 
 // ── internal types ──────────────────────────────────────────────────────────
 
@@ -240,50 +244,45 @@ Get-PSDrive -PSProvider FileSystem -ErrorAction SilentlyContinue |
     json!({ "drives": list })
 }
 
-/// Walk a path and return the top-N largest files + top-20 largest folders.
-pub fn scan_largest(path: String, limit: usize) -> Value {
-    let root = PathBuf::from(&path);
-    let files = walk(&root);
+// ── helpers for scan_largest ────────────────────────────────────────────────
 
-    let total_size:  u64   = files.iter().map(|f| f.size).sum();
-    let file_count:  usize = files.len();
+fn build_top_files(files: &[FileInfo], limit: usize) -> Vec<Value> {
+    let mut refs: Vec<&FileInfo> = files.iter().collect();
+    refs.sort_unstable_by(|a, b| b.size.cmp(&a.size));
+    refs.iter().take(limit).map(|f| json!({
+        "path":     f.path.to_string_lossy(),
+        "name":     f.name,
+        "size":     f.size,
+        "sizeFmt":  fmt_size(f.size),
+        "ext":      f.ext,
+        "modified": f.modified,
+    })).collect()
+}
 
-    // ── Top N files ─────────────────────────────────────────────────────────
-    let mut sorted_refs: Vec<&FileInfo> = files.iter().collect();
-    sorted_refs.sort_unstable_by(|a, b| b.size.cmp(&a.size));
-    let top_files: Vec<Value> = sorted_refs.iter().take(limit).map(|f| {
-        json!({
-            "path":     f.path.to_string_lossy(),
-            "name":     f.name,
-            "size":     f.size,
-            "sizeFmt":  fmt_size(f.size),
-            "ext":      f.ext,
-            "modified": f.modified,
-        })
-    }).collect();
+fn build_largest_result(files: &[FileInfo], root: &Path, limit: usize) -> Value {
+    let total_size: u64   = files.iter().map(|f| f.size).sum();
+    let file_count: usize = files.len();
+    let top_files         = build_top_files(files, limit);
 
-    // ── Folder sizes (accumulate bottom-up) ─────────────────────────────────
+    // Folder sizes (accumulate bottom-up)
     let mut dir_sizes: HashMap<PathBuf, u64> = HashMap::new();
-    for f in &files {
+    for f in files {
         if let Some(p) = f.path.parent() {
             *dir_sizes.entry(p.to_path_buf()).or_insert(0) += f.size;
         }
     }
-    // Sort by depth desc so children propagate into parents correctly.
     let mut dir_keys: Vec<PathBuf> = dir_sizes.keys().cloned().collect();
     dir_keys.sort_unstable_by_key(|p| std::cmp::Reverse(p.components().count()));
     for dir in &dir_keys {
         let sz = dir_sizes[dir];
         if let Some(parent) = dir.parent() {
-            if parent.starts_with(&root) {
+            if parent.starts_with(root) {
                 *dir_sizes.entry(parent.to_path_buf()).or_insert(0) += sz;
             }
         }
     }
-    // Top 20 subdirs (exclude root itself)
-    let root_norm = root.clone();
     let mut dir_vec: Vec<(&PathBuf, u64)> = dir_sizes.iter()
-        .filter(|(p, _)| **p != root_norm && p.starts_with(&root_norm))
+        .filter(|(p, _)| **p != root && p.starts_with(root))
         .map(|(p, &s)| (p, s))
         .collect();
     dir_vec.sort_unstable_by(|a, b| b.1.cmp(&a.1));
@@ -291,8 +290,7 @@ pub fn scan_largest(path: String, limit: usize) -> Value {
         let name = p.file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| p.to_string_lossy().into_owned());
-        // Compute relative display path
-        let rel = p.strip_prefix(&root_norm)
+        let rel = p.strip_prefix(root)
             .map(|r| r.to_string_lossy().into_owned())
             .unwrap_or_else(|_| p.to_string_lossy().into_owned());
         json!({
@@ -313,6 +311,70 @@ pub fn scan_largest(path: String, limit: usize) -> Value {
         "totalSizeFmt": fmt_size(total_size),
         "capped":       file_count >= MAX_FILES,
     })
+}
+
+/// Walk a path, stream partial results via Tauri events every ~1.5 s,
+/// and return the full top-N largest files + top-20 largest folders.
+pub fn scan_largest(path: String, limit: usize, app: Option<tauri::AppHandle>) -> Value {
+    use std::time::Instant;
+
+    let root  = PathBuf::from(&path);
+    let mut stack: Vec<PathBuf> = vec![root.clone()];
+    let mut files: Vec<FileInfo> = Vec::new();
+    let mut last_emit = Instant::now();
+
+    'walk: while let Some(dir) = stack.pop() {
+        let Ok(rd) = std::fs::read_dir(&dir) else { continue };
+        for entry in rd.flatten() {
+            let Ok(meta) = entry.metadata() else { continue };
+            let fpath = entry.path();
+            let lname = fpath.file_name()
+                .map(|n| n.to_string_lossy().to_lowercase())
+                .unwrap_or_default();
+            if SKIP_DIRS.iter().any(|&s| lname == s) { continue; }
+
+            if meta.is_dir() {
+                stack.push(fpath);
+            } else if meta.is_file() {
+                if files.len() >= MAX_FILES { break 'walk; }
+                let name = fpath.file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                let ext = fpath.extension()
+                    .map(|e| e.to_string_lossy().to_uppercase().to_owned())
+                    .unwrap_or_default();
+                files.push(FileInfo {
+                    path: fpath, name, size: meta.len(), ext,
+                    modified: modified_secs(&meta),
+                });
+
+                // Stream partial results every 1.5 s
+                if let Some(ref handle) = app {
+                    if last_emit.elapsed().as_millis() >= 1500 {
+                        let partial = build_top_files(&files, limit);
+                        let _ = handle.emit("disk-scan-progress", json!({
+                            "scanned": files.len(),
+                            "files":   partial,
+                            "done":    false,
+                        }));
+                        last_emit = Instant::now();
+                    }
+                }
+            }
+        }
+    }
+
+    let result = build_largest_result(&files, &root, limit);
+
+    // Final event so frontend knows scan is complete
+    if let Some(ref handle) = app {
+        let _ = handle.emit("disk-scan-progress", json!({
+            "scanned": files.len(),
+            "done":    true,
+        }));
+    }
+
+    result
 }
 
 /// Find duplicate files (two-pass: group by size → hash within groups).
@@ -579,7 +641,6 @@ pub fn organize_apply(items: Vec<Value>) -> Value {
             continue;
         }
 
-        // Resolve filename conflict: append _1, _2, …
         let dest_path = if dest_path.exists() {
             let stem   = dest_path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
             let ext    = dest_path.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
