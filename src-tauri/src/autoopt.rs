@@ -44,6 +44,12 @@ const SAFE_TWEAK_IDS: &[&str] = &[
     "svc_wisvc_off",
     "usb_suspend_off",
     "menu_delay_fast",
+    "nagle_off",
+    "tcp_timed_wait_low",
+    "irp_stack_high",
+    "qos_bandwidth_free",
+    "tcp_autotuning_normal",
+    "net_rss_on",
 ];
 
 const SAFE_PRIVACY_IDS: &[&str] = &[
