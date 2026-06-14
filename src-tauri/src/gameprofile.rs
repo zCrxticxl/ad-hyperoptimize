@@ -9,6 +9,7 @@ use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
+use tauri::Emitter;
 
 // ── Power-plan GUIDs ─────────────────────────────────────────────────────────
 const PLAN_BALANCED:          &str = "381b4222-f694-41f0-9685-ff5bb260df2e";
@@ -154,10 +155,9 @@ pub fn cmd_game_revert(state: &SharedState) -> Value {
 // ── Internal helpers ─────────────────────────────────────────────────────────
 
 fn get_process_names() -> Vec<String> {
-    let out = std::process::Command::new("tasklist")
+    let Ok(out) = std::process::Command::new("tasklist")
         .args(["/fo", "csv", "/nh"])
-        .output()
-        .unwrap_or_default();
+        .output() else { return vec![]; };
     String::from_utf8_lossy(&out.stdout)
         .lines()
         .filter_map(|line| {

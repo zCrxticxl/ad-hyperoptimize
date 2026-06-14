@@ -35,7 +35,7 @@ mod tweaks;
 mod updates;
 
 use serde_json::Value;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 
 struct AppState {
     monitor:      monitor::MonitorState,
