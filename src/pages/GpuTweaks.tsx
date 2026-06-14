@@ -2,6 +2,7 @@ import React, { useEffect, useState, useMemo } from "react";
 import { api } from "../api";
 import { Card, Spinner, Badge } from "../components/ui";
 import { useLang } from "../i18n";
+import { HwWarnings } from "../components/HwWarnings";
 
 type GpuTweak = {
   id: string;
@@ -130,6 +131,7 @@ export default function GpuTweaks({ admin }: { admin: boolean }) {
     <>
       <div className="page-title">GPU Tweaks</div>
       <div className="page-sub">{t("gpuSub")}</div>
+      <HwWarnings page="gpu_tweaks" />
 
       {loading && <><Spinner /> <span className="muted">{t("gpuLoading")}</span></>}
       {err && <div style={{ color: "var(--red)", marginBottom: 10 }}>{err}</div>}

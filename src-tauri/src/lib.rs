@@ -33,6 +33,7 @@ mod scan;
 mod security;
 mod tweaks;
 mod updates;
+mod hwprofile;
 
 use serde_json::Value;
 use tauri::{AppHandle, Manager, State};
@@ -615,6 +616,9 @@ fn cmd_hw_smart() -> Value { hwmonitor::smart() }
 #[tauri::command(async)]
 fn cmd_hw_full() -> Value { hwmonitor::full() }
 
+#[tauri::command(async)]
+fn cmd_hw_profile() -> Value { hwprofile::hw_profile() }
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Tauri entry point
 // ═══════════════════════════════════════════════════════════════════════════
@@ -747,6 +751,7 @@ pub fn run() {
             cmd_hw_temps,
             cmd_hw_smart,
             cmd_hw_full,
+            cmd_hw_profile,
             // debloater
             cmd_debloater_uwp_list,
             cmd_debloater_remove_uwp,

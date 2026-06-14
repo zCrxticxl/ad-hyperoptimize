@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { api } from "../api";
 import { Card, ActionBtn, Bar } from "../components/ui";
+import { HwWarnings } from "../components/HwWarnings";
 
 const RATING_COLOR: Record<string, string> = {
   excellent: "var(--green)",
@@ -22,6 +23,7 @@ export default function Latency() {
       <div className="page-sub">
         Finds the stutter and audio-crackle culprits: long Deferred Procedure Calls and interrupts from misbehaving drivers.
       </div>
+      <HwWarnings page="latency" />
 
       <Card title="1 · Execution stall probe (5 s)">
         <div className="muted" style={{ marginBottom: 10 }}>
