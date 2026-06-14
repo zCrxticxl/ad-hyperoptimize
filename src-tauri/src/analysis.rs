@@ -3,7 +3,18 @@
 //! Deliberately deterministic & explainable — every finding states its
 //! evidence. (An LLM hook could be layered on top; nothing here pretends.)
 
+use chrono::Datelike;
 use serde_json::{json, Value};
+
+/// WMI returns a single object (not array) when there's only 1 result.
+/// This normalizes to a slice of refs so callers don't need to handle both.
+fn wmi_arr(v: &Value) -> Vec<&Value> {
+    match v {
+        Value::Array(a) => a.iter().collect(),
+        Value::Object(_) => vec![v],
+        _ => vec![],
+    }
+}
 
 struct Finding {
     severity: u8, // 1 info, 2 low, 3 medium, 4 high, 5 critical
@@ -143,7 +154,7 @@ pub fn analyze(scan: &Value, security: &Value, cleanup: &Value) -> Value {
         }
     }
 
-    // VBS / Memory Integrity — informational FPS tradeoff (user decides; we never toggle security)
+    // VBS / Memory Integrity — informational FPS tradeoff
     if let Some(svcs) = scan["vbs"]["SecurityServicesRunning"].as_array() {
         if svcs.iter().any(|v| v.as_i64() == Some(2)) {
             findings.push(f(1, "Memory Integrity (HVCI) is active",
@@ -162,6 +173,156 @@ pub fn analyze(scan: &Value, security: &Value, cleanup: &Value) -> Value {
                 "Run the Cleanup page (review categories first).",
                 vec![]));
         }
+    }
+
+    // Long uptime
+    if let Some(last_boot) = scan["os"]["LastBootUpTime"].as_str() {
+        if let Ok(boot_time) = chrono::DateTime::parse_from_rfc3339(last_boot)
+            .or_else(|_| chrono::DateTime::parse_from_str(last_boot, "%Y%m%d%H%M%S%.f%z"))
+        {
+            let hours = (chrono::Local::now().timestamp() - boot_time.timestamp()) / 3600;
+            if hours > 168 {
+                findings.push(f(2, "System not rebooted in over 7 days",
+                    format!("Last reboot was {hours} hours ago. Long uptimes accumulate memory leaks, pending updates, and degraded performance."),
+                    "Reboot regularly — weekly is ideal for a gaming/workstation system.",
+                    vec![]));
+            }
+        }
+    }
+
+    // Windows too old / no recent hotfixes
+    if let Some(hotfixes) = scan["hotfixes_recent"].as_array() {
+        if hotfixes.is_empty() {
+            findings.push(f(3, "No Windows updates detected",
+                "No recent hotfixes found. The system may be missing security patches or feature updates.".into(),
+                "Run Windows Update and check for pending updates.",
+                vec![]));
+        }
+    }
+
+    // Non-power-plan (not High Performance or Ultimate)
+    if let Some(plan) = scan["power_plan"].as_str() {
+        let plan_lower = plan.to_lowercase();
+        if !plan_lower.contains("high performance") && !plan_lower.contains("ultimate") && !plan_lower.contains("höchstleistung") {
+            findings.push(f(2, "Suboptimal power plan active",
+                format!("Active power plan: '{}'. Balanced/Power Saver plans throttle CPU frequency and increase latency.", plan.trim()),
+                "Switch to High Performance or Ultimate Performance on the Power Plan page.",
+                vec![]));
+        }
+    }
+
+    // SMART wear / read errors
+    {
+        for s in wmi_arr(&scan["smart"]) {
+            let wear = s["Wear"].as_u64().unwrap_or(0);
+            let read_err = s["ReadErrorsTotal"].as_u64().unwrap_or(0);
+            if wear > 90 {
+                findings.push(f(4, "SSD nearing end of life",
+                    format!("Drive wear indicator is at {wear}%. NVMe/SSD drives have a limited write endurance — beyond 90% the risk of data loss increases."),
+                    "Back up critical data immediately and plan drive replacement.",
+                    vec![]));
+            }
+            if read_err > 100 {
+                findings.push(f(3, "Drive read errors detected",
+                    format!("{read_err} total read errors on a drive. May indicate failing sectors or cable issues."),
+                    "Run chkdsk /r and monitor closely; back up data.",
+                    vec![]));
+            }
+        }
+    }
+
+    // Too many running services
+    if let Some(svcs) = scan["services_running"].as_array() {
+        if svcs.len() > 150 {
+            findings.push(f(2, "High number of running background services",
+                format!("{} services currently running. Many are Windows bloat or third-party telemetry that increase RAM usage and boot time.", svcs.len()),
+                "Review and disable unnecessary services on the Services page.",
+                vec![]));
+        }
+    }
+
+    // RAM speed low (DDR4 < 2666)
+    {
+        let speeds: Vec<u64> = wmi_arr(&scan["ram_modules"]).into_iter()
+            .filter_map(|m| m["ConfiguredClockSpeed"].as_u64())
+            .filter(|&s| s > 0)
+            .collect();
+        if !speeds.is_empty() {
+            let avg = speeds.iter().sum::<u64>() / speeds.len() as u64;
+            if avg < 2666 {
+                findings.push(f(2, "RAM running below DDR4 baseline speed",
+                    format!("Average configured RAM speed: {avg} MHz. Modern DDR4 should run at ≥2666 MHz; lower speeds bottleneck CPU-bound workloads."),
+                    "Check XMP/EXPO is enabled in BIOS — most RAM ships with a default 2133 MHz profile but supports higher speeds.",
+                    vec![]));
+            }
+        }
+    }
+
+    // GPU driver outdated (> 2 years old)
+    {
+        for gpu in wmi_arr(&scan["gpu"]) {
+            if let Some(date_str) = gpu["DriverDate"].as_str() {
+                // WMI date format: "20230415000000.000000+000"
+                if date_str.len() >= 8 {
+                    if let Ok(year) = date_str[0..4].parse::<i32>() {
+                        let current_year = chrono::Local::now().year();
+                        if current_year - year >= 2 {
+                            findings.push(f(2, "GPU driver is over 2 years old",
+                                format!("GPU driver date: {}. Outdated drivers miss performance optimizations, game-specific fixes, and may cause crashes.", &date_str[0..8]),
+                                "Update GPU drivers from the Drivers page or manufacturer website.",
+                                vec![]));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Thermal zone high (WMI returns tenths of Kelvin)
+    {
+        for zone in wmi_arr(&scan["thermal"]) {
+            if let Some(temp_raw) = zone["CurrentTemperature"].as_u64() {
+                let celsius = (temp_raw / 10).saturating_sub(273);
+                if celsius > 90 {
+                    findings.push(f(4, "Critical CPU/system temperature detected",
+                        format!("Thermal zone reports {celsius}°C. Sustained temperatures above 90°C cause thermal throttling and reduce hardware lifespan."),
+                        "Clean dust from CPU/case fans, reapply thermal paste, ensure airflow is unobstructed. Check HW Monitor page for details.",
+                        vec![]));
+                } else if celsius > 80 {
+                    findings.push(f(3, "Elevated system temperature",
+                        format!("Thermal zone reports {celsius}°C. This is above the ideal operating range and may cause instability under load."),
+                        "Check cooling solution. Consider reapplying thermal paste or adding case fans.",
+                        vec![]));
+                }
+            }
+        }
+    }
+
+    // Battery health (laptops)
+    if let Some(bat) = scan["battery"].as_object() {
+        if let Some(charge) = bat.get("EstimatedChargeRemaining").and_then(|v| v.as_u64()) {
+            if charge < 20 {
+                findings.push(f(2, "Battery critically low",
+                    format!("Battery at {charge}%. Running on low battery forces CPU/GPU power limits, causing significant performance drops."),
+                    "Plug in the charger or adjust Windows power settings for battery-saving mode.",
+                    vec![]));
+            }
+        }
+    }
+
+    // Pagefile — none configured (risky on low-RAM systems)
+    if let (Some(total), Some(free)) = (
+        scan["os"]["TotalVisibleMemorySize"].as_u64(),
+        scan["os"]["FreePhysicalMemory"].as_u64(),
+    ) {
+        let ram_gb = total as f64 / 1_048_576.0;
+        if ram_gb < 16.0 {
+            findings.push(f(2, "Low total RAM for modern workloads",
+                format!("{ram_gb:.1} GB RAM installed. 16 GB is the practical minimum for gaming + browser + background apps without constant paging."),
+                "Consider a RAM upgrade. In the meantime, enable automatic pagefile management to prevent out-of-memory crashes.",
+                vec![]));
+        }
+        let _ = free; // already used above
     }
 
     findings.sort_by(|a, b| b.severity.cmp(&a.severity));
