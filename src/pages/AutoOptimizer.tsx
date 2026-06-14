@@ -14,14 +14,14 @@ export default function AutoOptimizer({ admin }: { admin: boolean }) {
   const [busy, setBusy]       = useState(false);
   const [results, setResults] = useState<any>(null);
 
-  const load = async () => {
+  const load = async (clearResults = false) => {
     setLoading(true);
-    setResults(null);
+    if (clearResults) setResults(null);
     try { setData(await api.autooptScan()); }
     finally { setLoading(false); }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(true); }, []);
 
   const recs: Rec[] = data?.recs ?? [];
   const pending     = recs.filter(r => !r.applied);
@@ -56,7 +56,7 @@ export default function AutoOptimizer({ admin }: { admin: boolean }) {
     try {
       const res = await api.autooptApply(items);
       setResults(res);
-      await load();
+      await load(false); // keep results visible after rescan
     } catch (e: any) {
       setResults({ error: String(e) });
     } finally { setBusy(false); }
@@ -114,7 +114,7 @@ export default function AutoOptimizer({ admin }: { admin: boolean }) {
                     </button>
                   </>
                 )}
-                <button className="btn small ghost" onClick={load} disabled={loading || busy}>↺ Rescan</button>
+                <button className="btn small ghost" onClick={() => load(true)} disabled={loading || busy}>↺ Rescan</button>
               </div>
             </div>
           </Card>
