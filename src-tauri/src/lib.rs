@@ -1,5 +1,7 @@
 mod analysis;
 mod autoopt;
+mod gamedb;
+mod gameprofile;
 mod bootopt;
 mod ctxmenu;
 mod debloater;
@@ -36,7 +38,8 @@ use serde_json::Value;
 use tauri::{AppHandle, State};
 
 struct AppState {
-    monitor: monitor::MonitorState,
+    monitor:      monitor::MonitorState,
+    game_switcher: gameprofile::SharedState,
 }
 
 // ---- diagnostics ----
@@ -465,6 +468,32 @@ fn cmd_generate_report() -> Result<Value, String> {
     report::generate(&scan, &analysis, &security, &history)
 }
 
+// ---- game profiles / auto-switcher ----
+#[tauri::command(async)]
+fn cmd_game_list() -> serde_json::Value { gameprofile::cmd_game_list() }
+
+#[tauri::command(async)]
+fn cmd_game_switcher_status(state: State<AppState>) -> serde_json::Value {
+    gameprofile::cmd_game_switcher_status(&state.game_switcher)
+}
+
+#[tauri::command(async)]
+fn cmd_game_switcher_configure(
+    state: State<AppState>, enabled: bool, default_preset: String,
+) -> serde_json::Value {
+    gameprofile::cmd_game_switcher_configure(&state.game_switcher, enabled, default_preset)
+}
+
+#[tauri::command(async)]
+fn cmd_game_apply_preset(game_id: String, preset: String) -> serde_json::Value {
+    gameprofile::cmd_game_apply_preset(game_id, preset)
+}
+
+#[tauri::command(async)]
+fn cmd_game_revert(state: State<AppState>) -> serde_json::Value {
+    gameprofile::cmd_game_revert(&state.game_switcher)
+}
+
 // ---- misc ----
 #[tauri::command(async)]
 fn cmd_open_path(path: String) -> Result<(), String> {
@@ -577,7 +606,10 @@ fn cmd_hw_full() -> Value { hwmonitor::full() }
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .manage(AppState { monitor: monitor::MonitorState::default() })
+        .manage(AppState {
+            monitor:       monitor::MonitorState::default(),
+            game_switcher: gameprofile::new_state(),
+        })
         .invoke_handler(tauri::generate_handler![
             // system scan
             cmd_is_admin,
@@ -737,10 +769,19 @@ pub fn run() {
             cmd_autoopt_scan,
             cmd_autoopt_score,
             cmd_autoopt_apply,
+            // game profiles / auto-switcher
+            cmd_game_list,
+            cmd_game_switcher_status,
+            cmd_game_switcher_configure,
+            cmd_game_apply_preset,
+            cmd_game_revert,
             // misc
             cmd_open_path,
         ])
-        .setup(move |_app| {
+        .setup(move |app| {
+            // start game-profile auto-switcher background thread
+            let gs = app.state::<AppState>().game_switcher.clone();
+            gameprofile::start(gs, app.handle().clone());
             Ok(())
         })
         .run(tauri::generate_context!())

@@ -32,6 +32,7 @@ import DriverManager from "./pages/DriverManager";
 import GameBooster from "./pages/GameBooster";
 import AutoOptimizer from "./pages/AutoOptimizer";
 import RestorePointManager from "./pages/RestorePointManager";
+import GameProfiles from "./pages/GameProfiles";
 
 type NavItem = { id: string; icon: string; label: string };
 type NavGroup = { group: string; items: NavItem[] };
@@ -56,8 +57,9 @@ const NAV: NavGroup[] = [
       { id: "gameboost",  icon: "🎮", label: "Game Booster" },
       { id: "powerplan",  icon: "🔋", label: "Power Plan" },
       { id: "latency",    icon: "⚠",  label: "Latency" },
-      { id: "gputweaks",  icon: "▣",  label: "GPU Tweaks" },
-      { id: "profiles",   icon: "◎",  label: "Profiles" },
+      { id: "gputweaks",    icon: "▣",  label: "GPU Tweaks" },
+      { id: "profiles",     icon: "◎",  label: "Profiles" },
+      { id: "gameprofiles", icon: "🎮", label: "Game Profiles" },
     ],
   },
   {
@@ -180,6 +182,7 @@ function AppInner() {
         {page === "schedtasks"     && <ScheduledTasks admin={!!admin} />}
         {page === "optimize"       && <Optimize mode={mode} admin={!!admin} />}
         {page === "profiles"       && <Profiles />}
+        {page === "gameprofiles"   && <GameProfiles />}
         {page === "cleanup"        && <Cleanup />}
         {page === "regclean"       && <RegClean admin={!!admin} />}
         {page === "gputweaks"      && <GpuTweaks admin={!!admin} />}
