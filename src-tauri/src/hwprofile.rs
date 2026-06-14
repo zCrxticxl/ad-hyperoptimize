@@ -52,24 +52,46 @@ try {
     $out.ram = @{ totalMb=[int]$totalMb; speedMhz=[int]$speedMhz; sticks=$sticks.Count }
 } catch { $out.ram = @{ totalMb=0; speedMhz=0; sticks=0 } }
 
-# ── Storage ───────────────────────────────────────────────────────────────────
+# ── Storage (three-tier detection) ────────────────────────────────────────────
+$hasNvme = $false; $hasSsd = $false; $hasHdd = $false
+
+# Tier 1: MSFT_Disk (most accurate, BusType 17=NVMe, MediaType 4=SSD 3=HDD)
 try {
-    $disks   = @(Get-PhysicalDisk -ErrorAction Stop)
-    $hasNvme = ($disks | Where-Object { $_.BusType -eq 'NVMe' }).Count -gt 0
-    $hasSsd  = ($disks | Where-Object { $_.MediaType -eq 'SSD' -or $_.BusType -eq 'NVMe' }).Count -gt 0
-    $hasHdd  = ($disks | Where-Object { $_.MediaType -eq 'HDD' }).Count -gt 0
-    $out.storage = @{ hasNvme=$hasNvme; hasSsd=$hasSsd; hasHdd=$hasHdd }
-} catch {
-    # Fallback: use Win32_DiskDrive via CIM
+    $msdisks = @(Get-CimInstance -Namespace 'root\Microsoft\Windows\Storage' -ClassName MSFT_Disk -ErrorAction Stop)
+    foreach ($d in $msdisks) {
+        if ($d.BusType -eq 17) { $hasNvme = $true; $hasSsd = $true }
+        elseif ($d.MediaType -eq 4) { $hasSsd = $true }
+        elseif ($d.MediaType -eq 3) { $hasHdd = $true }
+    }
+} catch {}
+
+# Tier 2: Get-PhysicalDisk
+if (-not $hasSsd -and -not $hasHdd) {
+    try {
+        $disks = @(Get-PhysicalDisk -ErrorAction Stop)
+        foreach ($d in $disks) {
+            if ($d.BusType -eq 'NVMe') { $hasNvme = $true; $hasSsd = $true }
+            elseif ($d.MediaType -eq 'SSD') { $hasSsd = $true }
+            elseif ($d.MediaType -eq 'HDD') { $hasHdd = $true }
+        }
+    } catch {}
+}
+
+# Tier 3: Win32_DiskDrive model name matching
+if (-not $hasSsd -and -not $hasHdd) {
     try {
         $drives = @(Get-CimInstance Win32_DiskDrive -ErrorAction Stop)
-        $hasNvme = ($drives | Where-Object { $_.Model -match 'NVMe|NVME' }).Count -gt 0
-        $hasSsd  = ($drives | Where-Object { $_.Model -match 'NVMe|SSD|Solid' -or $_.MediaType -match 'SSD|Solid' }).Count -gt 0
-        $hasHdd  = ($drives | Where-Object { $_.MediaType -match 'Fixed|HDD' -and $_.Model -notmatch 'NVMe|SSD|Solid' }).Count -gt 0
-        if (-not $hasSsd -and -not $hasHdd) { $hasSsd = $true } # assume SSD if unknown modern system
-        $out.storage = @{ hasNvme=$hasNvme; hasSsd=$hasSsd; hasHdd=$hasHdd }
-    } catch { $out.storage = @{ hasNvme=$false; hasSsd=$true; hasHdd=$false } }
+        foreach ($d in $drives) {
+            $m = "$($d.Model) $($d.Caption) $($d.MediaType)"
+            if ($m -match 'NVMe|NVME') { $hasNvme = $true; $hasSsd = $true }
+            elseif ($m -match 'SSD|Solid State') { $hasSsd = $true }
+            elseif ($m -match 'HDD|Hard Disk') { $hasHdd = $true }
+            else { $hasSsd = $true } # modern system default
+        }
+    } catch {}
 }
+
+$out.storage = @{ hasNvme=$hasNvme; hasSsd=$hasSsd; hasHdd=$hasHdd }
 
 # ── Laptop ────────────────────────────────────────────────────────────────────
 try {
