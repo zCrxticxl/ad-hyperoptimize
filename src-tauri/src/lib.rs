@@ -605,6 +605,24 @@ fn cmd_hw_full() -> Value { hwmonitor::full() }
 // Tauri entry point
 // ═══════════════════════════════════════════════════════════════════════════
 
+
+#[tauri::command(async)]
+fn cmd_disable_scheduled_task(task_path: String, task_name: String) -> Result<String, String> {
+    security::disable_scheduled_task(task_path, task_name)
+}
+#[tauri::command(async)]
+fn cmd_enable_scheduled_task(task_path: String, task_name: String) -> Result<String, String> {
+    security::enable_scheduled_task(task_path, task_name)
+}
+#[tauri::command(async)]
+fn cmd_defender_set_realtime(enabled: bool) -> Result<String, String> {
+    security::defender_set_realtime(enabled)
+}
+#[tauri::command(async)]
+fn cmd_defender_set_cloud(enabled: bool) -> Result<String, String> {
+    security::defender_set_cloud(enabled)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 /// Re-launch the current process with UAC elevation if not already admin.
 /// Returns immediately if already elevated or not on Windows.
@@ -672,6 +690,10 @@ pub fn run() {
             cmd_hosts_list_all,
             cmd_hosts_disable_entries,
             cmd_hosts_enable_entries,
+            cmd_disable_scheduled_task,
+            cmd_enable_scheduled_task,
+            cmd_defender_set_realtime,
+            cmd_defender_set_cloud,
             // uninstaller
             cmd_uninstaller_list,
             cmd_uninstall_app,

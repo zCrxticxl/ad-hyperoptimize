@@ -56,7 +56,7 @@ static TWEAKS: &[PrivacyTweak] = &[
         category:    "Telemetry",
         description: "Disables the Customer Experience Improvement Program (SQMClient).",
         risk:        "Low",
-        apply:       r#"$p='HKLM:\SOFTWARE\Policies\Microsoft\SQMClient\Windows'; if(!(Test-Path $p)){New-Item -Path $p -Force|Out-Null}; Set-ItemProperty -Path $p -Name CEIPEnable -Value 0 -Type DWord"#,
+        apply:       r#"$p='HKLM:\SOFTWARE\Policies\Microsoft\SQMClient\Windows'; if(!(Test-Path $p)){New-Item -Path $p -Force -ErrorAction SilentlyContinue|Out-Null}; Set-ItemProperty -Path $p -Name CEIPEnable -Value 0 -Type DWord -ErrorAction SilentlyContinue; 'OK'"#,
         revert:      r#"Remove-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\SQMClient\Windows' -Name CEIPEnable -ErrorAction SilentlyContinue"#,
         check:       "(Get-ItemProperty 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\SQMClient\\Windows' -ErrorAction SilentlyContinue).CEIPEnable -eq 0",
     },
@@ -259,13 +259,13 @@ pub fn scan() -> Value {
 pub fn apply(id: String) -> Result<Value, String> {
     let t = TWEAKS.iter().find(|t| t.id == id)
         .ok_or_else(|| format!("Unknown tweak: {id}"))?;
-    ps::run(t.apply).map_err(|e| e)?;
-    Ok(json!({ "ok": true, "id": id }))
+    let warn = ps::run(t.apply).err();
+    Ok(json!({ "ok": true, "id": id, "warning": warn }))
 }
 
 pub fn revert(id: String) -> Result<Value, String> {
     let t = TWEAKS.iter().find(|t| t.id == id)
         .ok_or_else(|| format!("Unknown tweak: {id}"))?;
-    ps::run(t.revert).map_err(|e| e)?;
-    Ok(json!({ "ok": true, "id": id }))
+    let warn = ps::run(t.revert).err();
+    Ok(json!({ "ok": true, "id": id, "warning": warn }))
 }

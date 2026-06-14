@@ -80,6 +80,10 @@ export const api = {
   gameboostStop: () => invoke<string>("cmd_gameboost_stop"),
   gameboostGpuPerf: (enable: boolean) => invoke<string>("cmd_gameboost_gpu_perf", { enable }),
   // hosts
+  disableScheduledTask: (taskPath: string, taskName: string) => invoke<string>("cmd_disable_scheduled_task", { taskPath, taskName }),
+  enableScheduledTask:  (taskPath: string, taskName: string) => invoke<string>("cmd_enable_scheduled_task",  { taskPath, taskName }),
+  defenderSetRealtime:  (enabled: boolean) => invoke<string>("cmd_defender_set_realtime", { enabled }),
+  defenderSetCloud:     (enabled: boolean) => invoke<string>("cmd_defender_set_cloud",    { enabled }),
   hostsListAll: () => invoke<any>("cmd_hosts_list_all"),
   hostsDisableEntries: (entries: string[]) => invoke<string>("cmd_hosts_disable_entries", { entries }),
   hostsEnableEntries:  (entries: string[]) => invoke<string>("cmd_hosts_enable_entries",  { entries }),

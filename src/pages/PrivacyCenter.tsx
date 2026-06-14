@@ -68,8 +68,9 @@ export default function PrivacyCenter({ admin }: { admin: boolean }) {
     setBusy(tw.id);
     push(`Applying ${tw.name}…`);
     try {
-      await api.privacyApply(tw.id);
-      push(`✔ ${tw.name} ${t("active")}`);
+      const res = await api.privacyApply(tw.id);
+      if (res?.warning) push(`⚠ ${tw.name}: applied with warning — ${res.warning}`);
+      else push(`✔ ${tw.name} ${t("active")}`);
     } catch (e: any) { push(`✘ ${tw.name}: ${e}`); setErr(String(e)); }
     finally { setBusy(null); refresh(); }
   };
@@ -78,8 +79,9 @@ export default function PrivacyCenter({ admin }: { admin: boolean }) {
     setBusy(tw.id);
     push(`Reverting ${tw.name}…`);
     try {
-      await api.privacyRevert(tw.id);
-      push(`↩ ${tw.name} reverted`);
+      const res = await api.privacyRevert(tw.id);
+      if (res?.warning) push(`⚠ ${tw.name}: reverted with warning — ${res.warning}`);
+      else push(`↩ ${tw.name} reverted`);
     } catch (e: any) { push(`✘ ${tw.name}: ${e}`); setErr(String(e)); }
     finally { setBusy(null); refresh(); }
   };
