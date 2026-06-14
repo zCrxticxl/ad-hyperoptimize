@@ -139,6 +139,14 @@ export const api = {
   analyze: (force = false) => invoke<any>("cmd_analyze", { force }),
   generateReport: () => invoke<any>("cmd_generate_report"),
   openPath: (path: string) => invoke("cmd_open_path", { path }),
+  // game profiles / auto-switcher
+  gameList: () => invoke<any[]>("cmd_game_list"),
+  gameSwitcherStatus: () => invoke<any>("cmd_game_switcher_status"),
+  gameSwitcherConfigure: (enabled: boolean, defaultPreset: string) =>
+    invoke<any>("cmd_game_switcher_configure", { enabled, defaultPreset }),
+  gameApplyPreset: (gameId: string, preset: string) =>
+    invoke<any>("cmd_game_apply_preset", { gameId, preset }),
+  gameRevert: () => invoke<any>("cmd_game_revert"),
   // restore points
   createRestorePoint: (description: string) => invoke<string>("cmd_create_restore_point", { description }),
   listRestorePoints: () => invoke<any>("cmd_list_restore_points"),
