@@ -193,21 +193,6 @@ export default function PrivacyCenter({ admin }: { admin: boolean }) {
               );
             })}
           </Card>
-
-          {/* Log */}
-          {log.length > 0 && (
-            <div className="mt">
-              <Card title={t("log")}>
-                <div className="mono muted" style={{ fontSize: 11, lineHeight: 1.8, maxHeight: 160, overflowY: "auto" }}>
-                  {log.map((l, i) => (
-                    <div key={i} style={{ color: l.includes("✔") ? "var(--green)" : l.includes("✘") ? "var(--red)" : undefined }}>
-                      {l}
-                    </div>
-                  ))}
-                </div>
-              </Card>
-            </div>
-          )}
         </>
       )}
     </>

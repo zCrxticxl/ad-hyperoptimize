@@ -284,8 +284,8 @@ fn cmd_boot_tweak_revert(id: String) -> Result<Value, String> { bootopt::revert_
 fn cmd_disk_drives() -> Value { diskanalyzer::drives() }
 
 #[tauri::command(async)]
-fn cmd_disk_largest(path: String, limit: usize) -> Value {
-    diskanalyzer::scan_largest(path, limit)
+fn cmd_disk_largest(path: String, limit: usize, app: AppHandle) -> Value {
+    diskanalyzer::scan_largest(path, limit, Some(app))
 }
 
 #[tauri::command(async)]
@@ -461,8 +461,9 @@ fn cmd_analyze(force: bool) -> Value {
 fn cmd_generate_report() -> Result<Value, String> {
     let scan     = cache::data_or("scan",      false, crate::scan::full_scan);
     let security = cache::data_or("security",  false, crate::security::scan);
+    let cleanup  = cache::data_or("cleanup",   false, crate::cleanup::scan);
     let analysis = cache::data_or("analysis",  false, || {
-        crate::analysis::analyze(&scan, &security, &serde_json::json!({}))
+        crate::analysis::analyze(&scan, &security, &cleanup)
     });
     let history  = crate::tweaks::history();
     report::generate(&scan, &analysis, &security, &history)
@@ -788,7 +789,7 @@ pub fn run() {
             cmd_profile_list,
             cmd_profile_apply,
             cmd_profile_revert,
-            // startup / proc
+            // startup
             cmd_startup_list,
             cmd_startup_toggle,
             // analysis / report
@@ -804,13 +805,17 @@ pub fn run() {
             cmd_game_switcher_configure,
             cmd_game_apply_preset,
             cmd_game_revert,
+            // restore points
+            cmd_create_restore_point,
+            cmd_list_restore_points,
+            cmd_delete_restore_point,
+            cmd_launch_rstrui,
             // misc
             cmd_open_path,
         ])
         .setup(move |app| {
-            // start game-profile auto-switcher background thread
             let gs = app.state::<AppState>().game_switcher.clone();
-            gameprofile::start(gs, app.handle().clone());
+                     gameprofile::start(gs, app.handle().clone());
             Ok(())
         })
         .run(tauri::generate_context!())

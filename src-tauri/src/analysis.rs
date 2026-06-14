@@ -184,7 +184,7 @@ pub fn analyze(scan: &Value, security: &Value, cleanup: &Value) -> Value {
             if hours > 168 {
                 findings.push(f(2, "System not rebooted in over 7 days",
                     format!("Last reboot was {hours} hours ago. Long uptimes accumulate memory leaks, pending updates, and degraded performance."),
-                    "Reboot regularly — weekly is ideal for a gaming/workstation system.",
+                    "Reboot regularly â weekly is ideal for a gaming/workstation system.",
                     vec![]));
             }
         }
@@ -203,7 +203,7 @@ pub fn analyze(scan: &Value, security: &Value, cleanup: &Value) -> Value {
     // Non-power-plan (not High Performance or Ultimate)
     if let Some(plan) = scan["power_plan"].as_str() {
         let plan_lower = plan.to_lowercase();
-        if !plan_lower.contains("high performance") && !plan_lower.contains("ultimate") && !plan_lower.contains("höchstleistung") {
+        if !plan_lower.contains("high performance") && !plan_lower.contains("ultimate") && !plan_lower.contains("h\u{00f6}chstleistung") {
             findings.push(f(2, "Suboptimal power plan active",
                 format!("Active power plan: '{}'. Balanced/Power Saver plans throttle CPU frequency and increase latency.", plan.trim()),
                 "Switch to High Performance or Ultimate Performance on the Power Plan page.",
@@ -218,7 +218,7 @@ pub fn analyze(scan: &Value, security: &Value, cleanup: &Value) -> Value {
             let read_err = s["ReadErrorsTotal"].as_u64().unwrap_or(0);
             if wear > 90 {
                 findings.push(f(4, "SSD nearing end of life",
-                    format!("Drive wear indicator is at {wear}%. NVMe/SSD drives have a limited write endurance — beyond 90% the risk of data loss increases."),
+                    format!("Drive wear indicator is at {wear}%. NVMe/SSD drives have a limited write endurance â beyond 90% the risk of data loss increases."),
                     "Back up critical data immediately and plan drive replacement.",
                     vec![]));
             }
@@ -251,8 +251,8 @@ pub fn analyze(scan: &Value, security: &Value, cleanup: &Value) -> Value {
             let avg = speeds.iter().sum::<u64>() / speeds.len() as u64;
             if avg < 2666 {
                 findings.push(f(2, "RAM running below DDR4 baseline speed",
-                    format!("Average configured RAM speed: {avg} MHz. Modern DDR4 should run at ≥2666 MHz; lower speeds bottleneck CPU-bound workloads."),
-                    "Check XMP/EXPO is enabled in BIOS — most RAM ships with a default 2133 MHz profile but supports higher speeds.",
+                    format!("Average configured RAM speed: {avg} MHz. Modern DDR4 should run at >=2666 MHz; lower speeds bottleneck CPU-bound workloads."),
+                    "Check XMP/EXPO is enabled in BIOS â most RAM ships with a default 2133 MHz profile but supports higher speeds.",
                     vec![]));
             }
         }
@@ -262,7 +262,6 @@ pub fn analyze(scan: &Value, security: &Value, cleanup: &Value) -> Value {
     {
         for gpu in wmi_arr(&scan["gpu"]) {
             if let Some(date_str) = gpu["DriverDate"].as_str() {
-                // WMI date format: "20230415000000.000000+000"
                 if date_str.len() >= 8 {
                     if let Ok(year) = date_str[0..4].parse::<i32>() {
                         let current_year = chrono::Local::now().year();
@@ -285,12 +284,12 @@ pub fn analyze(scan: &Value, security: &Value, cleanup: &Value) -> Value {
                 let celsius = (temp_raw / 10).saturating_sub(273);
                 if celsius > 90 {
                     findings.push(f(4, "Critical CPU/system temperature detected",
-                        format!("Thermal zone reports {celsius}°C. Sustained temperatures above 90°C cause thermal throttling and reduce hardware lifespan."),
+                        format!("Thermal zone reports {celsius}\u{00b0}C. Sustained temperatures above 90\u{00b0}C cause thermal throttling and reduce hardware lifespan."),
                         "Clean dust from CPU/case fans, reapply thermal paste, ensure airflow is unobstructed. Check HW Monitor page for details.",
                         vec![]));
                 } else if celsius > 80 {
                     findings.push(f(3, "Elevated system temperature",
-                        format!("Thermal zone reports {celsius}°C. This is above the ideal operating range and may cause instability under load."),
+                        format!("Thermal zone reports {celsius}\u{00b0}C. This is above the ideal operating range and may cause instability under load."),
                         "Check cooling solution. Consider reapplying thermal paste or adding case fans.",
                         vec![]));
                 }
@@ -310,11 +309,8 @@ pub fn analyze(scan: &Value, security: &Value, cleanup: &Value) -> Value {
         }
     }
 
-    // Pagefile — none configured (risky on low-RAM systems)
-    if let (Some(total), Some(free)) = (
-        scan["os"]["TotalVisibleMemorySize"].as_u64(),
-        scan["os"]["FreePhysicalMemory"].as_u64(),
-    ) {
+    // Low RAM
+    if let Some(total) = scan["os"]["TotalVisibleMemorySize"].as_u64() {
         let ram_gb = total as f64 / 1_048_576.0;
         if ram_gb < 16.0 {
             findings.push(f(2, "Low total RAM for modern workloads",
@@ -322,18 +318,19 @@ pub fn analyze(scan: &Value, security: &Value, cleanup: &Value) -> Value {
                 "Consider a RAM upgrade. In the meantime, enable automatic pagefile management to prevent out-of-memory crashes.",
                 vec![]));
         }
-        let _ = free; // already used above
     }
 
     findings.sort_by(|a, b| b.severity.cmp(&a.severity));
-    let health: i64 = 100 - findings.iter().map(|x| match x.severity { 5 => 25i64, 4 => 15, 3 => 8, 2 => 3, _ => 1 }).sum::<i64>().min(95);
+    let health: i64 = 100 - findings.iter().map(|x| match x.severity {
+        5 => 25i64, 4 => 15, 3 => 8, 2 => 3, _ => 1
+    }).sum::<i64>().min(95);
 
     let summary = if findings.is_empty() {
         "No significant issues detected. System configuration looks healthy.".to_string()
     } else {
         let top = &findings[0];
         format!(
-            "{} issue(s) found. Highest priority: {} — {} Health score reflects weighted severity; address top items first for the biggest real-world gain.",
+            "{} issue(s) found. Highest priority: {} -- {} Health score reflects weighted severity; address top items first for the biggest real-world gain.",
             findings.len(), top.title, top.recommendation
         )
     };

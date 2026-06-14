@@ -146,21 +146,17 @@ export default function Debloater({ admin }: { admin: boolean }) {
                           {t.applied ? "✓ Active" : "✗ Not applied"}
                         </span>
                         <b style={{ fontSize: 13 }}>{t.name}</b>
-                        <span style={{
-                          fontSize: 10, padding: "1px 6px", borderRadius: 4,
-                          background: CAT_COLORS[t.cat] ?? "var(--bg3)",
-                          color: "#fff", opacity: 0.85,
-                        }}>{t.cat}</span>
+                        <span style={{ color: CAT_COLORS[cat] ?? "var(--muted)", fontSize: 11, marginLeft: 6 }}>{t.cat}</span>
                       </div>
-                      <div className="muted" style={{ fontSize: 12 }}>{t.desc}</div>
+                      <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>{t.description}</div>
                     </div>
                     <button
-                      className={`btn small ${t.applied ? "ghost danger" : ""}`}
-                      style={{ flexShrink: 0 }}
+                      className={`btn small ${t.applied ? "ghost" : ""}`}
                       disabled={busy === t.id}
                       onClick={() => tweak_toggle(t)}
+                      style={{ minWidth: 72, flexShrink: 0 }}
                     >
-                      {busy === t.id ? <><Spinner /> …</> : t.applied ? "Revert" : "Apply"}
+                      {busy === t.id ? <Spinner /> : t.applied ? "Revert" : "Apply"}
                     </button>
                   </div>
                 ))}
@@ -171,45 +167,59 @@ export default function Debloater({ admin }: { admin: boolean }) {
       )}
 
       {tab === "uwp" && (
-        <Card title={`UWP Apps (${uwp_list.length})`}>
-          {!uwp ? <Spinner /> : (
-            <>
+        !uwp ? (
+          <Card title="">
+            <div className="row" style={{ gap: 10 }}>
+              <Spinner />
+              <span className="muted">Loading installed UWP apps…</span>
+            </div>
+          </Card>
+        ) : (
+          <>
+            <div className="row" style={{ gap: 8, marginBottom: 12 }}>
               <input
-                placeholder={`Search ${uwp_list.length} apps…`}
+                className="search-box"
+                placeholder="Search apps…"
                 value={uwpSearch}
                 onChange={e => setUwpSearch(e.target.value)}
-                style={{ width: "100%", padding: "5px 10px", fontSize: 13, background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 4, color: "var(--fg)", marginBottom: 12 }}
+                style={{ flex: 1, padding: "7px 12px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg2)", color: "var(--fg)", fontSize: 13 }}
               />
-              <div style={{ maxHeight: "60vh", overflowY: "auto" }}>
-                {uwp_filtered.map((app: any) => (
-                  <div key={app.PackageFullName} className="row" style={{ padding: "6px 0", borderBottom: "1px solid var(--border)", gap: 10, alignItems: "center" }}>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600 }}>{app.Name}</div>
-                      <div className="muted" style={{ fontSize: 11 }}>{app.Publisher}</div>
-                    </div>
-                    <button
-                      className="btn small ghost danger"
-                      disabled={busy === app.PackageFullName}
-                      onClick={() => act(app.PackageFullName, async () => {
-                        const r = await api.debloaterRemoveUwp(app.PackageFullName);
-                        api.debloaterUwpList().then(setUwp);
-                        return r;
-                      })}
-                    >
-                      {busy === app.PackageFullName ? "…" : "Remove"}
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
-        </Card>
-      )}
+              <button
+                className="btn small ghost"
+                onClick={() => act("remove_all_bloat", () => api.debloaterRemoveUwp("ALL_BLOATWARE"))}
+                disabled={!!busy}
+              >
+                {busy === "remove_all_bloat" ? <Spinner /> : "🗑 Remove All Bloatware"}
+              </button>
+            </div>
 
-      <div className="muted" style={{ fontSize: 12, marginTop: 14 }}>
-        Tweaks are stored in registry and can be reverted at any time. UWP removal is permanent (can be
-        reinstalled from the Microsoft Store).
-      </div>
+            <Card title={`📦 Installed UWP Apps (${uwp_filtered.length})`}>
+              {uwp_filtered.length === 0 && (
+                <div className="muted" style={{ fontSize: 13 }}>No apps found.</div>
+              )}
+              {uwp_filtered.map((a: any) => (
+                <div key={a.PackageFullName ?? a.Name} className="row" style={{ padding: "7px 0", borderBottom: "1px solid var(--border)", alignItems: "center", gap: 10 }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>{a.Name}</div>
+                    <div className="muted" style={{ fontSize: 11 }}>{a.Publisher}</div>
+                  </div>
+                  <button
+                    className="btn small ghost"
+                    style={{ color: "var(--red)", borderColor: "var(--red)", flexShrink: 0 }}
+                    disabled={busy === a.PackageFullName}
+                    onClick={() => act(a.PackageFullName, () =>
+                      api.debloaterRemoveUwp(a.PackageFullName)
+                        .then((msg: string) => { setUwp((prev: any) => prev ? ({ ...prev, apps: prev.apps.filter((x: any) => x.PackageFullName !== a.PackageFullName) }) : prev); return msg; })
+                    )}
+                  >
+                    {busy === a.PackageFullName ? <Spinner /> : "Remove"}
+                  </button>
+                </div>
+              ))}
+            </Card>
+          </>
+        )
+      )}
     </>
   );
 }

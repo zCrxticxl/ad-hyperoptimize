@@ -316,8 +316,8 @@ export default function GpuTweaks({ admin }: { admin: boolean }) {
           })}
 
           {!data.supported && (
-            <div style={{ color: "var(--orange)", marginTop: 8 }}>
-              {t("gpuNoSupport")}
+            <div style={{ color: "var(--orange)", fontSize: 13, marginTop: 12, padding: "10px 14px", background: "rgba(255,160,0,0.08)", borderRadius: 6, border: "1px solid var(--orange)" }}>
+              ⚠ No supported GPU detected. These tweaks require an NVIDIA or AMD GPU.
             </div>
           )}
         </>

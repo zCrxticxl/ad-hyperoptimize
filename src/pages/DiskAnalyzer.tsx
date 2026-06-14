@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { api, fmtBytes } from "../api";
 import { Card, Spinner } from "../components/ui";
 import { useLang } from "../i18n";
@@ -215,16 +216,47 @@ type LargestTabProps = { path: string; drives: Drive[]; currentRoot: string };
 
 function LargestTab({ path, drives, currentRoot }: LargestTabProps) {
   const { t, lang } = useLang();
-  const [data, setData]       = useState<LargestData | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [view, setView]       = useState<"files" | "folders">("files");
-  const [filter, setFilter]   = useState("");
-  const [sel, setSel]         = useState<Set<string>>(new Set());
+  const [data, setData]           = useState<LargestData | null>(null);
+  const [loading, setLoading]     = useState(false);
+  const [scanned, setScanned]     = useState(0);
+  const [view, setView]           = useState<"files" | "folders">("files");
+  const [filter, setFilter]       = useState("");
+  const [sel, setSel]             = useState<Set<string>>(new Set());
 
   const load = useCallback(() => {
     setLoading(true);
+    setScanned(0);
     setSel(new Set());
-    api.diskLargest(path, 50).then(setData).finally(() => setLoading(false));
+
+    // Subscribe to streaming progress events before starting the scan
+    let unlisten: (() => void) | null = null;
+    listen<{ scanned: number; files?: FileEntry[]; done: boolean }>(
+      "disk-scan-progress",
+      (evt) => {
+        const p = evt.payload;
+        setScanned(p.scanned);
+        if (p.files && p.files.length > 0) {
+          // Show partial results immediately
+          setData(prev => ({
+            files:        p.files!,
+            folders:      prev?.folders ?? [],
+            fileCount:    p.scanned,
+            totalSize:    prev?.totalSize ?? 0,
+            totalSizeFmt: prev?.totalSizeFmt ?? "…",
+            capped:       false,
+          }));
+        }
+      }
+    ).then(fn => { unlisten = fn; });
+
+    // Full result arrives when scan completes
+    api.diskLargest(path, 50)
+      .then(setData)
+      .finally(() => {
+        setLoading(false);
+        setScanned(0);
+        unlisten?.();
+      });
   }, [path]);
 
   useEffect(() => { load(); }, [load]);
@@ -274,10 +306,19 @@ function LargestTab({ path, drives, currentRoot }: LargestTabProps) {
         {sel.size > 0 && <span style={{ color: "var(--accent)", fontSize: 12, marginLeft: 4 }}>{sel.size} {t("diskSelected")}</span>}
       </div>
 
-      {loading && !data && <><Spinner /> <span className="muted">{t("diskLoading")}</span></>}
+      {loading && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, fontSize: 12, color: "var(--muted)" }}>
+          <Spinner />
+          <span>
+            {scanned > 0
+              ? `Scanning… ${scanned.toLocaleString()} files indexed`
+              : t("diskLoading")}
+          </span>
+        </div>
+      )}
 
-      {/* Files table */}
-      {!loading && view === "files" && data && (
+      {/* Files table — shown during scan too (partial results) */}
+      {view === "files" && data && (
         <div style={{ overflowY: "auto", maxHeight: 420 }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <thead>
@@ -319,7 +360,7 @@ function LargestTab({ path, drives, currentRoot }: LargestTabProps) {
       )}
 
       {/* Folders list */}
-      {!loading && view === "folders" && data && (
+      {view === "folders" && data && (
         <div style={{ overflowY: "auto", maxHeight: 420 }}>
           {/* Select all header */}
           <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "4px 10px", borderBottom: "1px solid var(--border)", color: "var(--muted)", fontSize: 11 }}>
@@ -528,280 +569,158 @@ const CAT_COLORS: Record<string, string> = {
   "Torrents":    "#009688",
 };
 
-type OrgItem = { src: string; dest: string; name: string; size: number; sizeFmt: string; cat: string; catFolder: string; icon: string };
-type OrgPreview = { items: OrgItem[]; uncategorized: any[]; uncatCount: number; totalFiles: number };
 
-function OrganizerTab({ defaultFolder }: { defaultFolder: string }) {
-  const [folder, setFolder]     = useState(defaultFolder);
-  const [recurse, setRecurse]   = useState(false);
+type OrgItem = { src: string; dest: string; name: string; size: number; sizeFmt: string; cat: string; catFolder: string; icon: string };
+type OrgPreview = { items: OrgItem[]; total_size: number; total_size_fmt: string };
+
+// ─── Organize Tab ─────────────────────────────────────────────────────────────
+
+function OrganizeTab() {
+  const { t } = useLang();
+  const [root, setRoot]         = useState("C:\\Users");
   const [preview, setPreview]   = useState<OrgPreview | null>(null);
-  const [loading, setLoading]   = useState(false);
-  const [applying, setApplying] = useState(false);
-  const [result, setResult]     = useState<any>(null);
+  const [busy, setBusy]         = useState(false);
+  const [log, setLog]           = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
-  const scan = async () => {
-    if (!folder.trim()) return;
-    setLoading(true); setPreview(null); setResult(null); setSelected(new Set());
-    try { setPreview(await api.diskOrganizePreview(folder.trim(), recurse)); }
-    finally { setLoading(false); }
+  const doPreview = async () => {
+    setBusy(true); setPreview(null); setLog(null);
+    try { setPreview(await api.diskOrganizePreview(root, true)); }
+    catch (e: any) { setLog(String(e)); }
+    finally { setBusy(false); }
   };
 
-  const apply = async () => {
+  const doApply = async () => {
     if (!preview) return;
-    const items = preview.items.filter(i => selected.has(i.src));
-    if (!items.length) return;
-    setApplying(true); setResult(null);
-    try {
-      const r = await api.diskOrganizeApply(items);
-      setResult(r);
-      // Re-scan to show updated state
-      const fresh = await api.diskOrganizePreview(folder.trim(), recurse);
-      setPreview(fresh);
-      setSelected(new Set());
-    } catch (e: any) { setResult({ error: String(e) }); }
-    finally { setApplying(false); }
+    setBusy(true); setLog(null);
+    const items = preview.items.filter(it => selected.has(it.src));
+    try { setLog(await api.diskOrganizeApply(items)); }
+    catch (e: any) { setLog(String(e)); }
+    finally { setBusy(false); }
   };
 
-  // Group preview items by category
-  const grouped = useMemo(() => {
-    if (!preview) return {} as Record<string, OrgItem[]>;
-    return preview.items.reduce((acc, item) => {
-      (acc[item.cat] ??= []).push(item);
-      return acc;
-    }, {} as Record<string, OrgItem[]>);
-  }, [preview]);
-
-  const toggleCat = (cat: string) => {
-    const catItems = grouped[cat] ?? [];
-    const allSel = catItems.every(i => selected.has(i.src));
-    setSelected(prev => {
-      const n = new Set(prev);
-      catItems.forEach(i => allSel ? n.delete(i.src) : n.add(i.src));
-      return n;
-    });
+  const toggleAll = () => {
+    if (!preview) return;
+    if (selected.size === preview.items.length) setSelected(new Set());
+    else setSelected(new Set(preview.items.map(i => i.src)));
   };
-
-  const toggleItem = (src: string) => setSelected(prev => {
-    const n = new Set(prev); n.has(src) ? n.delete(src) : n.add(src); return n;
-  });
-
-  const selectAll   = () => setSelected(new Set(preview?.items.map(i => i.src) ?? []));
-  const deselectAll = () => setSelected(new Set());
-
-  const COMMON_FOLDERS = [
-    { label: "Downloads", path: (p: string) => p.replace(/^[A-Z]:\\/, (m) => m) },
-  ];
 
   return (
-    <div>
-      {/* Folder picker */}
-      <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
+    <div style={{ paddingTop: 8 }}>
+      <div className="row" style={{ gap: 8, marginBottom: 12 }}>
         <input
-          value={folder}
-          onChange={e => setFolder(e.target.value)}
-          placeholder="C:\Users\YourName\Downloads"
-          style={{ flex: 1, minWidth: 220, background: "var(--input-bg)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)", padding: "6px 10px", fontSize: 12 }}
+          value={root}
+          onChange={e => setRoot(e.target.value)}
+          placeholder="Folder to organize…"
+          style={{ flex: 1, padding: "7px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg2)", color: "var(--fg)", fontSize: 13 }}
         />
-        <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, cursor: "pointer", userSelect: "none" }}>
-          <input type="checkbox" checked={recurse} onChange={e => setRecurse(e.target.checked)} style={{ accentColor: "var(--accent)" }} />
-          Include subfolders
-        </label>
-        <button className="btn small" onClick={scan} disabled={loading || !folder.trim()}>
-          {loading ? <><Spinner /> Scanning…</> : "🔍 Scan"}
+        <button className="btn small" onClick={doPreview} disabled={busy}>
+          {busy ? <Spinner /> : "Preview"}
         </button>
       </div>
 
-      {/* Quick path buttons */}
-      <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
-        {[
-          { label: "🏠 Desktop", sub: "Desktop" },
-          { label: "⬇ Downloads", sub: "Downloads" },
-          { label: "📄 Documents", sub: "Documents" },
-          { label: "🖼 Pictures", sub: "Pictures" },
-          { label: "🎵 Music", sub: "Music" },
-          { label: "🎬 Videos", sub: "Videos" },
-        ].map(({ label, sub }) => (
-          <button key={sub} className="btn small ghost" onClick={() => {
-            const base = folder.match(/^[A-Z]:\\Users\\[^\\]+/)?.[0]
-              ?? "C:\\Users\\" + (folder.split("\\")[2] ?? "User");
-            setFolder(`${base}\\${sub}`);
-          }}>{label}</button>
-        ))}
-      </div>
-
-      {/* Result banner */}
-      {result && (
-        <div style={{
-          marginBottom: 12, padding: "10px 14px", borderRadius: 6, fontSize: 13,
-          background: result.error ? "rgba(255,80,80,0.08)" : "rgba(80,200,120,0.08)",
-          border: `1px solid ${result.error ? "var(--red)" : "var(--green)"}`,
-          color: result.error ? "var(--red)" : "var(--green)",
-        }}>
-          {result.error ? `✗ ${result.error}` : `✓ Moved ${result.moved} files${result.failed ? ` · ${result.failed} failed` : ""}`}
+      {log && (
+        <div style={{ marginBottom: 10, padding: "8px 12px", borderRadius: 6, background: "rgba(80,200,120,0.08)", border: "1px solid var(--green)", color: "var(--green)", fontSize: 13 }}>
+          {log}
         </div>
       )}
 
       {preview && (
         <>
-          {/* Summary + action bar */}
-          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 14, padding: "10px 14px", borderRadius: 8, background: "var(--card)", border: "1px solid var(--border)" }}>
-            <span style={{ fontSize: 13 }}>
-              <b style={{ color: "var(--accent)" }}>{preview.totalFiles}</b>
-              <span className="muted"> files to sort</span>
-              {preview.uncatCount > 0 && <span className="muted"> · {preview.uncatCount} unrecognized (skipped)</span>}
-            </span>
-            <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-              <button className="btn small ghost" onClick={selectAll}>Select all</button>
-              <button className="btn small ghost" onClick={deselectAll}>Clear</button>
-              <button className="btn small" disabled={!selected.size || applying} onClick={apply}>
-                {applying ? <><Spinner /> Moving…</> : `📁 Move (${selected.size})`}
+          <div className="row" style={{ justifyContent: "space-between", marginBottom: 8 }}>
+            <span className="muted" style={{ fontSize: 13 }}>{preview.items.length} files · {preview.total_size_fmt}</span>
+            <div className="row" style={{ gap: 8 }}>
+              <button className="btn small ghost" onClick={toggleAll}>
+                {selected.size === preview.items.length ? "Deselect All" : "Select All"}
+              </button>
+              <button className="btn small" onClick={doApply} disabled={busy || selected.size === 0}>
+                {busy ? <Spinner /> : `Move ${selected.size} Files`}
               </button>
             </div>
           </div>
-
-          {preview.totalFiles === 0 && (
-            <div className="muted" style={{ textAlign: "center", padding: 30 }}>
-              ✓ No unsorted files found in this folder.
-            </div>
-          )}
-
-          {/* Category groups */}
-          {Object.entries(grouped).map(([cat, items]) => {
-            const catColor = CAT_COLORS[cat] ?? "var(--accent)";
-            const catIcon  = items[0]?.icon ?? "📁";
-            const allSel   = items.every(i => selected.has(i.src));
-            const someSel  = !allSel && items.some(i => selected.has(i.src));
-            const catSize  = items.reduce((a, i) => a + i.size, 0);
-
-            return (
-              <div key={cat} style={{ marginBottom: 10, border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden" }}>
-                {/* Category header */}
-                <div
-                  onClick={() => toggleCat(cat)}
-                  style={{
-                    display: "flex", alignItems: "center", gap: 10, padding: "10px 14px",
-                    background: `${catColor}11`, borderBottom: "1px solid var(--border)",
-                    cursor: "pointer", userSelect: "none",
+          <div style={{ maxHeight: 400, overflowY: "auto" }}>
+            {preview.items.map(it => (
+              <div key={it.src} className="row" style={{ padding: "5px 0", borderBottom: "1px solid var(--border)", gap: 10, alignItems: "center" }}>
+                <input
+                  type="checkbox"
+                  checked={selected.has(it.src)}
+                  onChange={() => {
+                    const next = new Set(selected);
+                    if (next.has(it.src)) next.delete(it.src); else next.add(it.src);
+                    setSelected(next);
                   }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={allSel}
-                    ref={el => { if (el) el.indeterminate = someSel; }}
-                    onChange={() => toggleCat(cat)}
-                    onClick={e => e.stopPropagation()}
-                    style={{ accentColor: catColor, width: 14, height: 14 }}
-                  />
-                  <span style={{ fontSize: 18 }}>{catIcon}</span>
-                  <span style={{ fontWeight: 700, fontSize: 13, color: catColor }}>{cat}</span>
-                  <span className="muted" style={{ fontSize: 11 }}>→ {items[0]?.catFolder}\</span>
-                  <span style={{ marginLeft: "auto", fontSize: 11, color: catColor }}>{items.length} files · {fmtBytes(catSize)}</span>
+                />
+                <span style={{ fontSize: 18 }}>{it.icon}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.name}</div>
+                  <div className="muted" style={{ fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>→ {it.dest}</div>
                 </div>
-
-                {/* File list */}
-                <div style={{ maxHeight: 200, overflowY: "auto" }}>
-                  {items.map(item => (
-                    <div
-                      key={item.src}
-                      onClick={() => toggleItem(item.src)}
-                      style={{
-                        display: "flex", alignItems: "center", gap: 10, padding: "6px 14px",
-                        borderBottom: "1px solid var(--border-subtle, #282828)",
-                        background: selected.has(item.src) ? `${catColor}0d` : undefined,
-                        cursor: "pointer",
-                      }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={selected.has(item.src)}
-                        onChange={() => toggleItem(item.src)}
-                        onClick={e => e.stopPropagation()}
-                        style={{ accentColor: catColor, width: 13, height: 13, flexShrink: 0 }}
-                      />
-                      <div style={{ flex: 1, overflow: "hidden" }}>
-                        <div style={{ fontSize: 12, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</div>
-                        <div className="mono muted" style={{ fontSize: 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.src}</div>
-                      </div>
-                      <span style={{ fontSize: 11, fontWeight: 600, flexShrink: 0, color: "var(--muted)" }}>{item.sizeFmt}</span>
-                    </div>
-                  ))}
-                </div>
+                <span className="muted" style={{ fontSize: 12, flexShrink: 0 }}>{it.sizeFmt}</span>
               </div>
-            );
-          })}
-
-          {/* Unrecognized files */}
-          {preview.uncatCount > 0 && (
-            <div style={{ marginTop: 10, padding: "8px 14px", borderRadius: 6, background: "var(--bg2)", border: "1px solid var(--border)" }}>
-              <div className="muted" style={{ fontSize: 12 }}>
-                ⚠ {preview.uncatCount} unrecognized file{preview.uncatCount !== 1 ? "s" : ""} (unknown extension) — not moved.
-              </div>
-            </div>
-          )}
+            ))}
+          </div>
         </>
       )}
     </div>
   );
 }
 
-// ── Main page ─────────────────────────────────────────────────────────────────
+// ─── Main Component ───────────────────────────────────────────────────────────
+
+const DA_TABS = ["largest", "duplicates", "temp", "organize"] as const;
+type DaTab = typeof DA_TABS[number];
 
 export default function DiskAnalyzer() {
   const { t } = useLang();
-  const [drives, setDrives]             = useState<Drive[]>([]);
-  const [drivesLoading, setDrivesLoading] = useState(true);
-  const [selected, setSelected]         = useState<Drive | null>(null);
-  const [tab, setTab]                   = useState<Tab>("largest");
+  const [tab, setTab]           = useState<DaTab>("largest");
+  const [drives, setDrives]     = useState<Drive[]>([]);
+  const [currentRoot, setRoot]  = useState("C:\\");
 
-  const refreshDrives = () => {
-    setDrivesLoading(true);
-    api.diskDrives().then((r: any) => {
-      const list: Drive[] = r.drives ?? [];
+  useEffect(() => {
+    api.diskDrives().then((d: any) => {
+      const list: Drive[] = d.drives ?? [];
       setDrives(list);
-      if (!selected && list.length > 0) setSelected(list[0]);
-    }).finally(() => setDrivesLoading(false));
-  };
+      if (list.length > 0) setRoot(list[0].root);
+    });
+  }, []);
 
-  useEffect(() => { refreshDrives(); }, []);
-
-  const TAB_LABELS: { id: Tab; label: string }[] = [
-    { id: "largest",    label: `⬛ ${t("diskTabLargest")}` },
-    { id: "duplicates", label: `⬛ ${t("diskTabDupes")}` },
-    { id: "temp",       label: `⬛ ${t("diskTabTemp")}` },
-    { id: "organizer",  label: "📁 File Organizer" },
-  ];
+  const path = currentRoot;
 
   return (
     <>
-      <div className="page-title">{t("diskTitle")}</div>
-      <div className="page-sub">{t("diskSub")}</div>
+      <div className="page-title">◉ Disk Analyzer</div>
+      <div className="page-sub">Analyze disk usage, find large files, duplicates, old temp files, and auto-organize.</div>
 
-      <Card title="Drives">
-        {drivesLoading && <><Spinner /> <span className="muted">{t("diskLoading")}</span></>}
-        {!drivesLoading && drives.length === 0 && <div className="muted">{t("diskNoDrives")}</div>}
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+      {/* Drive picker */}
+      {drives.length > 0 && (
+        <div className="row" style={{ gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
           {drives.map(d => (
-            <DriveCard key={d.root} drive={d} selected={selected?.root === d.root} onClick={() => { setSelected(d); setTab("largest"); }} />
+            <DriveCard
+              key={d.root}
+              drive={d}
+              selected={currentRoot === d.root}
+              onClick={() => setRoot(d.root)}
+            />
           ))}
         </div>
-      </Card>
-
-      {selected && (
-        <div className="mt">
-          <Card title={`${t("diskAnalyzingDrive")}: ${selected.root}`}>
-            <div style={{ display: "flex", gap: 6, marginBottom: 16, flexWrap: "wrap" }}>
-              {TAB_LABELS.map(tl => (
-                <button key={tl.id} className={`btn small ${tab === tl.id ? "" : "ghost"}`} onClick={() => setTab(tl.id)}>{tl.label}</button>
-              ))}
-            </div>
-            {tab === "largest"    && <LargestTab    key={selected.root} path={selected.root} drives={drives} currentRoot={selected.root} />}
-            {tab === "duplicates" && <DuplicatesTab key={selected.root} path={selected.root} drives={drives} currentRoot={selected.root} />}
-            {tab === "temp"       && <TempTab />}
-            {tab === "organizer"  && <OrganizerTab  key={selected.root} defaultFolder={selected.root} />}
-          </Card>
-        </div>
       )}
+
+      <div className="row" style={{ gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+        {(["largest", "duplicates", "temp", "organize"] as const).map(tb => (
+          <button
+            key={tb}
+            className={`btn small ${tab === tb ? "" : "ghost"}`}
+            onClick={() => setTab(tb)}
+          >
+            {{ largest: "📦 Largest Files", duplicates: "🗂 Duplicates", temp: "🌡 Old Temp", organize: "📁 Organize" }[tb]}
+          </button>
+        ))}
+      </div>
+
+      {tab === "largest"    && <LargestTab    path={path} drives={drives} currentRoot={currentRoot} />}
+      {tab === "duplicates" && <DuplicatesTab path={path} drives={drives} currentRoot={currentRoot} />}
+      {tab === "temp"       && <TempTab />}
+      {tab === "organize"   && <OrganizeTab />}
     </>
   );
 }

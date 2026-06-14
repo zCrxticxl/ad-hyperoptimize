@@ -234,7 +234,7 @@ export default function Processes() {
             </tbody>
           </table>
         )}
-      </Card>
+        </Card>
     </>
   );
 }
