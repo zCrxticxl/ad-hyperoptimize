@@ -13,6 +13,7 @@ function HostsCard({ count, hoDisabledCount }: { count: number; hoDisabledCount:
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState<"active" | "disabled">("active");
   const [busy, setBusy] = useState(false);
+  const [taskMsg, setTaskMsg] = useState<{ text: string; ok: boolean } | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
   const load = async () => {
@@ -211,6 +212,7 @@ export default function Security({ mode }: { mode: Mode }) {
   const [sec, setSec] = useState<any | null>(null);
   const [meta, setMeta] = useState<{ time: string; fromCache: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [taskMsg, setTaskMsg] = useState<{ text: string; ok: boolean } | null>(null);
 
   const load = (force: boolean) => {
     setBusy(true);
@@ -246,13 +248,28 @@ export default function Security({ mode }: { mode: Mode }) {
   const fwArr: any[] = Array.isArray(sec.firewall) ? sec.firewall : [];
   const fwMap: Record<string, any> = Object.fromEntries(fwArr.map((f: any) => [f.Name, f]));
 
-  const rows = [
-    { label: "Real-Time Protection",    val: light(d.RealTimeProtectionEnabled) },
-    { label: "Cloud Protection",        val: light(d.MAPSReporting) },
-    { label: "Tamper Protection",       val: light(d.TamperProtectionSource) },
-    { label: "Firewall (Domain)",  val: light(fwMap["Domain"]?.Enabled) },
-    { label: "Firewall (Private)", val: light(fwMap["Private"]?.Enabled) },
-    { label: "Firewall (Public)",  val: light(fwMap["Public"]?.Enabled) },
+  const defenderRows = [
+    {
+      label: "Real-Time Protection",
+      on: ok(d.RealTimeProtectionEnabled),
+      toggle: (v: boolean) => api.defenderSetRealtime(v).then(() => load(false)),
+      canToggle: true,
+    },
+    {
+      label: "Cloud Protection",
+      on: ok(d.MAPSReporting),
+      toggle: (v: boolean) => api.defenderSetCloud(v).then(() => load(false)),
+      canToggle: true,
+    },
+    {
+      label: "Tamper Protection",
+      on: ok(d.IsTamperProtected),
+      toggle: null,
+      canToggle: false,
+    },
+    { label: "Firewall (Domain)",  on: ok(fwMap["Domain"]?.Enabled),  toggle: null, canToggle: false },
+    { label: "Firewall (Private)", on: ok(fwMap["Private"]?.Enabled), toggle: null, canToggle: false },
+    { label: "Firewall (Public)",  on: ok(fwMap["Public"]?.Enabled),  toggle: null, canToggle: false },
   ];
 
   const susDrivers   = (sec.unsigned_drivers?.items ?? []) as any[];
@@ -281,10 +298,28 @@ export default function Security({ mode }: { mode: Mode }) {
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
         {/* Defender + Firewall */}
         <Card title="Windows Defender & Firewall">
-          {rows.map(r => (
-            <div key={r.label} className="row" style={{ justifyContent: "space-between", padding: "5px 0", borderBottom: "1px solid var(--border)", fontSize: 13 }}>
+          {defenderRows.map(r => (
+            <div key={r.label} className="row" style={{ justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid var(--border)", fontSize: 13, alignItems: "center" }}>
               <span className="muted">{r.label}</span>
-              {r.val}
+              <div className="row" style={{ gap: 8, alignItems: "center" }}>
+                {light(r.on)}
+                {r.canToggle && (
+                  <button
+                    className="btn small ghost"
+                    style={{ fontSize: 11, padding: "2px 8px", color: r.on ? "var(--red)" : "var(--green)", borderColor: r.on ? "var(--red)" : "var(--green)" }}
+                    disabled={busy}
+                    onClick={async () => {
+                    setBusy(true);
+                    try { if (r.toggle) await r.toggle(!r.on); }
+                    catch (e: any) { alert(String(e)); }
+                    finally { setBusy(false); }
+                    load(true);
+                  }}
+                  >
+                    {r.on ? "Disable" : "Enable"}
+                  </button>
+                )}
+              </div>
             </div>
           ))}
         </Card>
@@ -305,15 +340,72 @@ export default function Security({ mode }: { mode: Mode }) {
 
       <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
         {/* Autoruns */}
-        <Card title={`Suspicious Autoruns (${susAutoruns.length})`}>
+      {taskMsg && (
+        <div style={{ margin: "0 0 10px", padding: "8px 12px", borderRadius: 6, fontSize: 13,
+          background: taskMsg.ok ? "rgba(80,200,120,0.08)" : "rgba(255,80,80,0.08)",
+          border: `1px solid ${taskMsg.ok ? "var(--green)" : "var(--red)"}`,
+          color: taskMsg.ok ? "var(--green)" : "var(--red)",
+          display: "flex", gap: 10, alignItems: "center" }}>
+          <span>{taskMsg.ok ? "✓" : "✗"}</span>
+          <span style={{ flex: 1 }}>{taskMsg.text}</span>
+          <button onClick={() => setTaskMsg(null)} style={{ background:"none",border:"none",cursor:"pointer",color:"inherit",fontSize:16 }}>×</button>
+        </div>
+      )}
+        <Card title={`Autoruns / Scheduled Tasks (${susAutoruns.length})`}>
           {susAutoruns.length === 0 ? (
-            <span className="muted" style={{ fontSize: 13 }}>✓ No suspicious startup entries found.</span>
-          ) : susAutoruns.map((a: any, i: number) => (
-            <div key={i} style={{ fontSize: 12, padding: "4px 0", borderBottom: "1px solid var(--border)" }}>
-              <div style={{ fontWeight: 600 }}>{a.Name ?? a.name ?? a.TaskName}</div>
-              <div className="muted" style={{ wordBreak: "break-all" }}>{a.FullName ?? a.path ?? a.TaskPath}</div>
-            </div>
-          ))}
+            <span className="muted" style={{ fontSize: 13 }}>✓ No non-Microsoft startup tasks found.</span>
+          ) : susAutoruns.map((a: any, i: number) => {
+            const taskName = a.TaskName ?? a.Name ?? a.name ?? "";
+            const taskPath = a.TaskPath ?? "\\";
+            const isDisabled = a.State === "Disabled";
+            return (
+              <div key={i} className="row" style={{ padding: "6px 0", borderBottom: "1px solid var(--border)", gap: 8, alignItems: "center" }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, fontSize: 12, color: isDisabled ? "var(--muted)" : undefined }}>{taskName}</div>
+                  <div className="muted" style={{ fontSize: 11 }}>{taskPath}</div>
+                </div>
+                <span style={{ fontSize: 10, color: isDisabled ? "var(--muted)" : "var(--green)", flexShrink: 0 }}>
+                  {isDisabled ? "Disabled" : "Enabled"}
+                </span>
+                <button
+                  className="btn small ghost"
+                  style={{ fontSize: 11, flexShrink: 0, color: isDisabled ? "var(--green)" : "var(--red)", borderColor: isDisabled ? "var(--green)" : "var(--red)" }}
+                  disabled={busy}
+                  onClick={async () => {
+                    setBusy(true);
+                    setTaskMsg(null);
+                    try {
+                      const msg = isDisabled
+                        ? await api.enableScheduledTask(taskPath, taskName)
+                        : await api.disableScheduledTask(taskPath, taskName);
+                      setTaskMsg({ text: msg || (isDisabled ? `Enabled: ${taskName}` : `Disabled: ${taskName}`), ok: true });
+                      // optimistic UI flip
+                      setSec((prev: any) => {
+                        if (!prev?.autoruns?.tasks_nonms) return prev;
+                        return {
+                          ...prev,
+                          autoruns: {
+                            ...prev.autoruns,
+                            tasks_nonms: prev.autoruns.tasks_nonms.map((t: any) =>
+                              t.TaskName === taskName && t.TaskPath === taskPath
+                                ? { ...t, State: isDisabled ? "Ready" : "Disabled" }
+                                : t
+                            ),
+                          },
+                        };
+                      });
+                    } catch (e: any) {
+                      setTaskMsg({ text: String(e), ok: false });
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                >
+                  {isDisabled ? "Enable" : "Disable"}
+                </button>
+              </div>
+            );
+          })}
         </Card>
 
         {/* Hosts file */}

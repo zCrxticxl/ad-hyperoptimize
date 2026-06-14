@@ -75,7 +75,7 @@ fn autoruns() -> Value {
         "hklm_run": sec("Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run' -ErrorAction Stop | Select-Object * -ExcludeProperty PS*"),
         "hkcu_run": sec("Get-ItemProperty 'HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run' -ErrorAction Stop | Select-Object * -ExcludeProperty PS*"),
         "startup_folder": sec("Get-ChildItem ([Environment]::GetFolderPath('Startup')) -ErrorAction Stop | Select-Object Name,FullName"),
-        "tasks_nonms": sec("Get-ScheduledTask | Where-Object { $_.TaskPath -notlike '\\Microsoft\\*' -and $_.State -ne 'Disabled' } | Select-Object TaskName,TaskPath,State | Select-Object -First 40"),
+        "tasks_nonms": sec("Get-ScheduledTask | Where-Object { $_.TaskPath -notlike '\\Microsoft\\*' } | Select-Object TaskName,TaskPath,State | Select-Object -First 60"),
         "winlogon_shell": sec("Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon' | Select-Object Shell,Userinit"),
     })
 }
@@ -147,4 +147,43 @@ pub fn hosts_enable_entries(entries: Vec<String>) -> Result<String, String> {
     let new_content = lines.join("\r\n") + "\r\n";
     fs::write(&path, new_content).map_err(|e| e.to_string())?;
     Ok(format!("Enabled {count} host entries"))
+}
+
+// ── Scheduled task disable/enable ─────────────────────────────────────────────
+
+pub fn disable_scheduled_task(task_path: String, task_name: String) -> Result<String, String> {
+    ps::run(&format!(
+        "Disable-ScheduledTask -TaskPath '{}' -TaskName '{}' -ErrorAction Stop | Out-Null; 'Disabled: {}{}'",
+        task_path, task_name, task_path, task_name
+    ))
+    .map(|s| s.trim().to_string())
+}
+
+pub fn enable_scheduled_task(task_path: String, task_name: String) -> Result<String, String> {
+    ps::run(&format!(
+        "Enable-ScheduledTask -TaskPath '{}' -TaskName '{}' -ErrorAction Stop | Out-Null; 'Enabled: {}{}'",
+        task_path, task_name, task_path, task_name
+    ))
+    .map(|s| s.trim().to_string())
+}
+
+// ── Defender toggles ──────────────────────────────────────────────────────────
+
+pub fn defender_set_realtime(enabled: bool) -> Result<String, String> {
+    let cmd = if enabled {
+        "Set-MpPreference -DisableRealtimeMonitoring $false -ErrorAction Stop; 'Real-Time Protection enabled'"
+    } else {
+        "Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction Stop; 'Real-Time Protection disabled'"
+    };
+    ps::run(cmd).map(|s| s.trim().to_string())
+}
+
+pub fn defender_set_cloud(enabled: bool) -> Result<String, String> {
+    let val = if enabled { "2" } else { "0" };
+    ps::run(&format!(
+        "Set-MpPreference -MAPSReporting {} -ErrorAction Stop; '{}'",
+        val,
+        if enabled { "Cloud Protection enabled" } else { "Cloud Protection disabled" }
+    ))
+    .map(|s| s.trim().to_string())
 }
