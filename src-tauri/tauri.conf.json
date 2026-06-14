@@ -28,7 +28,7 @@
     "targets": ["nsis", "msi"],
     "icon": ["icons/icon.ico"],
     "windows": {
-      "nsis": { "installMode": "currentUser" },
+      "nsis": { "installMode": "perMachine" },
       "webviewInstallMode": { "type": "embedBootstrapper" }
     }
   }
