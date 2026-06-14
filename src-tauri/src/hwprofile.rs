@@ -59,7 +59,17 @@ try {
     $hasSsd  = ($disks | Where-Object { $_.MediaType -eq 'SSD' -or $_.BusType -eq 'NVMe' }).Count -gt 0
     $hasHdd  = ($disks | Where-Object { $_.MediaType -eq 'HDD' }).Count -gt 0
     $out.storage = @{ hasNvme=$hasNvme; hasSsd=$hasSsd; hasHdd=$hasHdd }
-} catch { $out.storage = @{ hasNvme=$false; hasSsd=$false; hasHdd=$false } }
+} catch {
+    # Fallback: use Win32_DiskDrive via CIM
+    try {
+        $drives = @(Get-CimInstance Win32_DiskDrive -ErrorAction Stop)
+        $hasNvme = ($drives | Where-Object { $_.Model -match 'NVMe|NVME' }).Count -gt 0
+        $hasSsd  = ($drives | Where-Object { $_.Model -match 'NVMe|SSD|Solid' -or $_.MediaType -match 'SSD|Solid' }).Count -gt 0
+        $hasHdd  = ($drives | Where-Object { $_.MediaType -match 'Fixed|HDD' -and $_.Model -notmatch 'NVMe|SSD|Solid' }).Count -gt 0
+        if (-not $hasSsd -and -not $hasHdd) { $hasSsd = $true } # assume SSD if unknown modern system
+        $out.storage = @{ hasNvme=$hasNvme; hasSsd=$hasSsd; hasHdd=$hasHdd }
+    } catch { $out.storage = @{ hasNvme=$false; hasSsd=$true; hasHdd=$false } }
+}
 
 # ── Laptop ────────────────────────────────────────────────────────────────────
 try {
