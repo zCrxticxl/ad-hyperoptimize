@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { api } from "../api";
 import { Card, Spinner } from "../components/ui";
+import { HwWarnings } from "../components/HwWarnings";
 
 export default function GameBooster({ admin }: { admin: boolean }) {
   const [games, setGames]       = useState<any[]>([]);
@@ -53,6 +54,7 @@ export default function GameBooster({ admin }: { admin: boolean }) {
         Click "Stop Boost" when done to restore settings.
         {!admin && <span style={{ color: "var(--orange)" }}> · Admin recommended for power plan switch.</span>}
       </div>
+      <HwWarnings page="game_booster" />
 
       {/* Running games */}
       <Card title="Detected Games / Heavy Processes" style={{ marginBottom: 14 }}>

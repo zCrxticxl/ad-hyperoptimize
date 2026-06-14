@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { api } from "../api";
 import { Card, Spinner } from "../components/ui";
+import { HwWarnings } from "../components/HwWarnings";
 
 const PLAN_DESC: Record<string, string> = {
   "381b4222-f694-41f0-9685-ff5bb260df2e": "Balances performance with energy — Windows default.",
@@ -39,6 +40,7 @@ export default function PowerPlan({ admin }: { admin: boolean }) {
         Switch Windows power schemes, unlock hidden Ultimate Performance plan, create custom plans.
         {!admin && <span style={{ color: "var(--orange)" }}> · Admin required to change plans.</span>}
       </div>
+      <HwWarnings page="power_plan" />
 
       {!hasUltimate && (
         <Card title="⚡ Unlock Ultimate Performance" style={{ marginBottom: 14 }}>

@@ -56,6 +56,7 @@ export const api = {
   hwTemps: () => invoke<any>("cmd_hw_temps"),
   hwSmart: () => invoke<any>("cmd_hw_smart"),
   hwFull: () => invoke<any>("cmd_hw_full"),
+  hwProfile: () => invoke<any>("cmd_hw_profile"),
   // debloater
   debloaterUwpList: () => invoke<any>("cmd_debloater_uwp_list"),
   debloaterRemoveUwp: (packageFullName: string) => invoke<string>("cmd_debloater_remove_uwp", { packageFullName }),

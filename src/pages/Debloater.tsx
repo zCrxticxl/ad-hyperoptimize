@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { Card, Spinner } from "../components/ui";
+import { HwWarnings } from "../components/HwWarnings";
 
 const CAT_COLORS: Record<string, string> = {
   Telemetry: "var(--red)",
@@ -79,6 +80,7 @@ export default function Debloater({ admin }: { admin: boolean }) {
         Disable telemetry, ads, Cortana, and remove pre-installed bloatware. All tweaks are reversible.
         {!admin && <span style={{ color: "var(--orange)" }}> · Admin required for system tweaks.</span>}
       </div>
+      <HwWarnings page="debloater" />
 
       {/* Tab bar */}
       <div className="row" style={{ gap: 8, marginBottom: log ? 8 : 16 }}>

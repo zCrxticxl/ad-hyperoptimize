@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { api } from "../api";
 import { Card, Spinner } from "../components/ui";
+import { HwWarnings } from "../components/HwWarnings";
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -459,6 +460,7 @@ export default function PerfTweaks({ admin }: { admin: boolean }) {
         Advanced system-level tuning — timer resolution, interrupt routing, network latency, memory management.
         All changes are reversible. Admin rights required for most features.
       </div>
+      <HwWarnings page="perf_tweaks" />
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
         <TimerCard admin={admin} />

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { api, fmtAge } from "../api";
 import { Card, Stat, Badge, Spinner, RawJson } from "../components/ui";
+import { HwWarnings, HwProfileCard } from "../components/HwWarnings";
 import type { Mode } from "../App";
 
 export default function Dashboard({ mode, go }: { mode: Mode; go: (p: string) => void }) {
@@ -58,6 +59,14 @@ export default function Dashboard({ mode, go }: { mode: Mode; go: (p: string) =>
         <Card title="Summary" style={{ gridColumn: "span 2" }}>
           <div style={{ lineHeight: 1.6 }}>{analysis?.summary ?? (busy ? "Running full analysis…" : "—")}</div>
           {err && <div style={{ color: "var(--red)" }}>{err}</div>}
+        </Card>
+      </div>
+
+      <HwWarnings page="dashboard" />
+
+      <div className="grid grid-2" style={{ marginBottom: 14 }}>
+        <Card title="Hardware Profile">
+          <HwProfileCard />
         </Card>
       </div>
 
