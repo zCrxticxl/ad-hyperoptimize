@@ -1,5 +1,7 @@
 # PC Optimization & Deep Diagnostic Suite
 
+Join my dc for help: https://discord.gg/GPcTdABdcY
+
 Modern, safe, fully reversible Windows 10/11 optimization + diagnostics desktop app.
 **Stack:** Tauri 2 (Rust backend) · React 18 + TypeScript · Recharts · WMI/PowerShell/SMART/Event Log integration.
 
