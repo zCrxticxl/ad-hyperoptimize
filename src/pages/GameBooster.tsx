@@ -14,12 +14,14 @@ export default function GameBooster({ admin }: { admin: boolean }) {
   const refresh = async () => {
     setLoading(true);
     try {
-      const [g, b] = await Promise.all([
+      const [g, b, status] = await Promise.all([
         api.gameboostRunningGames(),
         api.gameboostBackgroundProcs(),
+        api.gameboostGetStatus(),
       ]);
       setGames(g.games ?? []);
       setBg(b.procs ?? []);
+      setBoosted(status ?? null);
     } finally { setLoading(false); }
   };
 
@@ -166,7 +168,7 @@ export default function GameBooster({ admin }: { admin: boolean }) {
       <div className="muted" style={{ fontSize: 12, marginTop: 14 }}>
         Boost: sets game to High priority + switches to max-perf power plan + silences notifications.
         Stop Boost: reverts power plan to Balanced and re-enables notifications.
-        Killed processes must be manually restarted.
+             Killed processes must be manually restarted.
       </div>
     </>
   );

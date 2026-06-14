@@ -78,6 +78,7 @@ export const api = {
   gameboostKillBackground: (pids: number[]) => invoke<string>("cmd_gameboost_kill_background", { pids }),
   gameboostStart: (pid: number) => invoke<string>("cmd_gameboost_start", { pid }),
   gameboostStop: () => invoke<string>("cmd_gameboost_stop"),
+  gameboostGetStatus: () => invoke<number | null>("cmd_gameboost_get_status"),
   gameboostGpuPerf: (enable: boolean) => invoke<string>("cmd_gameboost_gpu_perf", { enable }),
   // hosts
   disableScheduledTask: (taskPath: string, taskName: string) => invoke<string>("cmd_disable_scheduled_task", { taskPath, taskName }),

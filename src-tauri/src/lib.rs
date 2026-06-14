@@ -40,6 +40,7 @@ use tauri::{AppHandle, Manager, State};
 struct AppState {
     monitor:      monitor::MonitorState,
     game_switcher: gameprofile::SharedState,
+    boosted_pid:  std::sync::Mutex<Option<u32>>,
 }
 
 // ---- diagnostics ----
@@ -385,10 +386,23 @@ fn cmd_gameboost_kill_background(pids: Vec<u32>) -> Result<String, String> {
 }
 
 #[tauri::command(async)]
-fn cmd_gameboost_start(pid: u32) -> Result<String, String> { gameboost::boost_start(pid) }
+fn cmd_gameboost_start(pid: u32, state: State<AppState>) -> Result<String, String> {
+    let r = gameboost::boost_start(pid)?;
+    *state.boosted_pid.lock().unwrap() = Some(pid);
+    Ok(r)
+}
 
 #[tauri::command(async)]
-fn cmd_gameboost_stop() -> Result<String, String> { gameboost::boost_stop() }
+fn cmd_gameboost_stop(state: State<AppState>) -> Result<String, String> {
+    let r = gameboost::boost_stop()?;
+    *state.boosted_pid.lock().unwrap() = None;
+    Ok(r)
+}
+
+#[tauri::command]
+fn cmd_gameboost_get_status(state: State<AppState>) -> Option<u32> {
+    *state.boosted_pid.lock().unwrap()
+}
 
 #[tauri::command(async)]
 fn cmd_gameboost_gpu_perf(enable: bool) -> Result<String, String> {
@@ -660,6 +674,7 @@ pub fn run() {
         .manage(AppState {
             monitor:       monitor::MonitorState::default(),
             game_switcher: gameprofile::new_state(),
+            boosted_pid:   std::sync::Mutex::new(None),
         })
         .invoke_handler(tauri::generate_handler![
             // system scan
@@ -754,6 +769,7 @@ pub fn run() {
             cmd_gameboost_kill_background,
             cmd_gameboost_start,
             cmd_gameboost_stop,
+            cmd_gameboost_get_status,
             cmd_gameboost_gpu_perf,
             // privacy
             cmd_privacy_scan,
