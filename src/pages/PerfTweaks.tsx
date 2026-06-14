@@ -46,7 +46,8 @@ function TimerCard({ admin }: { admin: boolean }) {
   };
 
   const isMin = data && data.currentMs <= 0.55;
-  const currentColor = isMin ? "var(--green)" : data?.currentMs <= 1.05 ? "var(--accent)" : "var(--red)";
+  const is1ms = data && data.currentMs <= 1.05;
+  const currentColor = isMin ? "var(--green)" : is1ms ? "var(--accent)" : "var(--red)";
 
   return (
     <Card title="Timer Resolution">
@@ -67,10 +68,16 @@ function TimerCard({ admin }: { admin: boolean }) {
             <tr><td className="muted">Min possible</td><td>{data.minMs != null ? `${data.minMs} ms` : "—"}</td></tr>
             <tr><td className="muted">Max (default)</td><td>{data.maxMs != null ? `${data.maxMs} ms` : "—"}</td></tr>
             <tr>
-              <td className="muted">GlobalTimerReq</td>
-              <td><span style={{ color: data.globalReqEnabled ? "var(--green)" : "var(--red)" }}>
-                {data.globalReqEnabled ? "✓ enabled (persistent)" : "✗ off (session only)"}
-              </span></td>
+              <td className="muted">Persistent</td>
+              <td>
+                <span style={{ color: data.persistent ? "var(--green)" : data.globalReqEnabled ? "var(--accent)" : "var(--red)" }}>
+                  {data.persistent
+                    ? "✓ active (background process running)"
+                    : data.globalReqEnabled
+                      ? "~ configured — apply again or reboot"
+                      : "✗ not set"}
+                </span>
+              </td>
             </tr>
           </tbody></table>
           {!admin && <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>⚠ Requires admin rights to apply.</div>}
