@@ -106,13 +106,17 @@ export default function GpuTweaks({ admin }: { admin: boolean }) {
     }
   };
 
-  const cats = useMemo(() => {
+  const applicableTweaks = useMemo(() => {
     if (!data) return [];
-    return [...new Set(data.tweaks.map((tw) => tw.category))];
+    return data.tweaks.filter((tw: any) => tw.applicable !== false);
   }, [data]);
 
-  const appliedCount = data?.tweaks.filter((tw) => tw.status === "applied").length ?? 0;
-  const totalCount   = data?.tweaks.length ?? 0;
+  const cats = useMemo(() => {
+    return [...new Set(applicableTweaks.map((tw: any) => tw.category))];
+  }, [applicableTweaks]);
+
+  const appliedCount = applicableTweaks.filter((tw: any) => tw.status === "applied").length;
+  const totalCount   = applicableTweaks.length;
 
   return (
     <>
@@ -207,7 +211,7 @@ export default function GpuTweaks({ admin }: { admin: boolean }) {
 
           {/* Tweak categories */}
           {data.supported && cats.map((cat) => {
-            const tweaks = data.tweaks.filter((tw) => tw.category === cat);
+            const tweaks = applicableTweaks.filter((tw: any) => tw.category === cat);
             return (
               <div key={cat} className="mt">
                 <h3
@@ -269,56 +273,4 @@ export default function GpuTweaks({ admin }: { admin: boolean }) {
                               needsAdmin ? t("bootAdminNeeded") : ""
                             }
                           >
-                            {isBusy ? <Spinner /> : t("bootApply")}
-                          </button>
-                        )}
-                      </div>
-
-                      {isOpen && (
-                        <div className="tweak-detail">
-                          <p>{tw.description}</p>
-                          <p><b>{t("gpuImpact")}</b> {tw.impact}</p>
-                          {blocked && (
-                            <p style={{ color: "var(--yellow)" }}>
-                              {t("gpuNoKeyDesc")}
-                            </p>
-                          )}
-                          {needsAdmin && (
-                            <p style={{ color: "var(--yellow)" }}>
-                              {t("gpuNeedsAdmin")}
-                            </p>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            );
-          })}
-
-          {/* Activity log */}
-          {log.length > 0 && (
-            <div className="mt">
-              <Card title={t("log")}>
-                <div
-                  className="mono muted"
-                  style={{ fontSize: 11, lineHeight: 1.8, maxHeight: 160, overflowY: "auto" }}
-                >
-                  {log.map((l, i) => (
-                    <div
-                      key={i}
-                      style={{ color: l.includes("✔") ? "var(--green)" : l.includes("✘") ? "var(--red)" : undefined }}
-                    >
-                      {l}
-                    </div>
-                  ))}
-                </div>
-              </Card>
-            </div>
-          )}
-        </>
-      )}
-    </>
-  );
-}
+                       
