@@ -653,37 +653,9 @@ fn cmd_defender_set_cloud(enabled: bool) -> Result<String, String> {
     security::defender_set_cloud(enabled)
 }
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
-/// Re-launch the current process with UAC elevation if not already admin.
-/// Returns immediately if already elevated or not on Windows.
-fn ensure_admin() {
-    #[cfg(windows)]
-    {
-        let is_admin = std::process::Command::new("powershell")
-            .args(["-NoProfile", "-NonInteractive", "-Command",
-                "([Security.Principal.WindowsPrincipal]\
-                 [Security.Principal.WindowsIdentity]::GetCurrent())\
-                 .IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)"])
-            .output()
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim().eq_ignore_ascii_case("true"))
-            .unwrap_or(false);
-
-        if !is_admin {
-            if let Ok(exe) = std::env::current_exe() {
-                let _ = std::process::Command::new("powershell")
-                    .args([
-                        "-NoProfile", "-NonInteractive", "-Command",
-                        &format!("Start-Process '{}' -Verb RunAs", exe.display()),
-                    ])
-                    .spawn();
-                std::process::exit(0);
-            }
-        }
-    }
-}
-
 pub fn run() {
-    ensure_admin();
+    // Admin elevation is handled via requestedExecutionLevel=requireAdministrator
+    // in tauri.conf.json — Windows shows the UAC prompt before the process starts.
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
