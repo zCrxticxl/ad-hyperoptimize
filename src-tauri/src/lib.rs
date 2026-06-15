@@ -653,9 +653,43 @@ fn cmd_defender_set_cloud(enabled: bool) -> Result<String, String> {
     security::defender_set_cloud(enabled)
 }
 
+fn ensure_admin() {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000; // no console/PowerShell flash
+
+        let is_admin = std::process::Command::new("powershell")
+            .args([
+                "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command",
+                "([Security.Principal.WindowsPrincipal]\
+                 [Security.Principal.WindowsIdentity]::GetCurrent())\
+                 .IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)",
+            ])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+
+        if !is_admin {
+            if let Ok(exe) = std::env::current_exe() {
+                // Escape single quotes in path, hide the spawning shell entirely
+                let path = exe.to_string_lossy().replace('\'', "''");
+                let _ = std::process::Command::new("powershell")
+                    .args([
+                        "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command",
+                        &format!("Start-Process -FilePath '{}' -Verb RunAs", path),
+                    ])
+                    .creation_flags(CREATE_NO_WINDOW)
+                    .spawn();
+                std::process::exit(0);
+            }
+        }
+    }
+}
+
 pub fn run() {
-    // Admin elevation is handled via requestedExecutionLevel=requireAdministrator
-    // in tauri.conf.json — Windows shows the UAC prompt before the process starts.
+    ensure_admin();
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
