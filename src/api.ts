@@ -57,6 +57,9 @@ export const api = {
   hwSmart: () => invoke<any>("cmd_hw_smart"),
   hwFull: () => invoke<any>("cmd_hw_full"),
   hwProfile: () => invoke<any>("cmd_hw_profile"),
+  swCatalog: () => invoke<any>("cmd_sw_catalog"),
+  swCheckInstalled: () => invoke<any>("cmd_sw_check_installed"),
+  swInstall: (wingetIds: string[]) => invoke<void>("cmd_sw_install", { wingetIds }),
   // debloater
   debloaterUwpList: () => invoke<any>("cmd_debloater_uwp_list"),
   debloaterRemoveUwp: (packageFullName: string) => invoke<string>("cmd_debloater_remove_uwp", { packageFullName }),

@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
+import { check as checkUpdate } from "@tauri-apps/plugin-updater";
 import { api } from "./api";
 import { LangProvider, useLang } from "./i18n";
 import Dashboard from "./pages/Dashboard";
@@ -33,6 +34,7 @@ import GameBooster from "./pages/GameBooster";
 import AutoOptimizer from "./pages/AutoOptimizer";
 import RestorePointManager from "./pages/RestorePointManager";
 import GameProfiles from "./pages/GameProfiles";
+import SoftwareInstaller from "./pages/SoftwareInstaller";
 
 type NavItem = { id: string; icon: string; label: string };
 type NavGroup = { group: string; items: NavItem[] };
@@ -69,7 +71,7 @@ const NAV: NavGroup[] = [
       { id: "uninstaller",  icon: "🗑", label: "Uninstaller" },
       { id: "diskanalyzer", icon: "◉",  label: "Disk Analyzer" },
       { id: "regclean",     icon: "⎔",  label: "Reg Cleaner" },
-      { id: "debloater",    icon: "🧼", label: "Debloater" },
+      { id: "debloater",    icon: "🚀", label: "Quick Setup" },
       { id: "ctxmenu",      icon: "☰",  label: "Context Menu" },
     ],
   },
@@ -91,6 +93,7 @@ const NAV: NavGroup[] = [
       { id: "bootopt",       icon: "⏻",  label: "Boot Optimizer" },
       { id: "restorepoints", icon: "🛟", label: "Restore Points" },
       { id: "updates",       icon: "⟳",  label: "Updates" },
+      { id: "softinstaller",  icon: "📦", label: "Software Installer" },
     ],
   },
   {
@@ -109,9 +112,26 @@ function AppInner() {
   const [page, setPage] = useState<string>("dashboard");
   const [admin, setAdmin] = useState<boolean | null>(null);
   const [mode, setMode] = useState<Mode>("beginner");
+  const [updateBanner, setUpdateBanner] = useState<{ version: string } | null>(null);
+  const updateChecked = useRef(false);
 
   useEffect(() => {
     api.isAdmin().then(setAdmin).catch(() => setAdmin(false));
+  }, []);
+
+  // Auto-check for updates on startup (only fires once, only in production builds)
+  useEffect(() => {
+    if (updateChecked.current) return;
+    updateChecked.current = true;
+    const timer = setTimeout(async () => {
+      try {
+        const update = await checkUpdate();
+        if (update) setUpdateBanner({ version: update.version });
+      } catch {
+        // silently ignore — dev mode, offline, etc.
+      }
+    }, 3000); // 3s delay so the app feels snappy on launch
+    return () => clearTimeout(timer);
   }, []);
 
   return (
@@ -173,6 +193,30 @@ function AppInner() {
       </aside>
 
       <main className="main">
+        {/* Update available banner */}
+        {updateBanner && (
+          <div style={{
+            display: "flex", alignItems: "center", gap: 12,
+            padding: "10px 16px", marginBottom: 14,
+            background: "rgba(0,140,255,0.10)", border: "1px solid rgba(0,140,255,0.35)",
+            borderRadius: 8, fontSize: 13,
+          }}>
+            <span style={{ fontWeight: 700, color: "var(--accent)" }}>⟳ Update available</span>
+            <span className="muted">v{updateBanner.version} is ready to install</span>
+            <button
+              className="btn small"
+              style={{ marginLeft: "auto" }}
+              onClick={() => { setPage("updates"); setUpdateBanner(null); }}
+            >
+              Install update →
+            </button>
+            <button
+              className="btn small ghost"
+              style={{ padding: "3px 8px" }}
+              onClick={() => setUpdateBanner(null)}
+            >✕</button>
+          </div>
+        )}
         {page === "dashboard"      && <Dashboard mode={mode} go={setPage} />}
         {page === "hardware"       && <Hardware mode={mode} />}
         {page === "monitor"        && <Monitor />}
@@ -205,6 +249,7 @@ function AppInner() {
         {page === "reports"        && <Reports />}
         {page === "autoopt"        && <AutoOptimizer admin={!!admin} />}
         {page === "restorepoints"  && <RestorePointManager admin={!!admin} />}
+        {page === "softinstaller"  && <SoftwareInstaller />}
       </main>
     </div>
   );
