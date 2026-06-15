@@ -34,6 +34,7 @@ mod security;
 mod tweaks;
 mod updates;
 mod hwprofile;
+mod softwareinstaller;
 
 use serde_json::Value;
 use tauri::{AppHandle, Manager, State};
@@ -619,6 +620,17 @@ fn cmd_hw_full() -> Value { hwmonitor::full() }
 #[tauri::command(async)]
 fn cmd_hw_profile() -> Value { hwprofile::hw_profile() }
 
+#[tauri::command(async)]
+fn cmd_sw_catalog() -> Value { softwareinstaller::catalog() }
+
+#[tauri::command(async)]
+fn cmd_sw_check_installed() -> Value { softwareinstaller::check_installed() }
+
+#[tauri::command]
+fn cmd_sw_install(winget_ids: Vec<String>, app: AppHandle) {
+    softwareinstaller::install_apps(winget_ids, app);
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Tauri entry point
 // ═══════════════════════════════════════════════════════════════════════════
@@ -856,6 +868,10 @@ pub fn run() {
             cmd_list_restore_points,
             cmd_delete_restore_point,
             cmd_launch_rstrui,
+            // software installer
+            cmd_sw_catalog,
+            cmd_sw_check_installed,
+            cmd_sw_install,
             // misc
             cmd_open_path,
         ])
