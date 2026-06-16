@@ -27,6 +27,23 @@ try {
     $g = $gpus | Select-Object -First 1
     if ($g) {
         $vramMb = if ($g.AdapterRAM -gt 0) { [math]::Round($g.AdapterRAM / 1MB) } else { 0 }
+        # Win32_VideoController.AdapterRAM is a 32-bit field in WMI — it caps/wraps
+        # at 4 GB, so any card with >4 GB VRAM (e.g. RX 6800 16GB) misreports as
+        # ~4GB or less. The registry's HardwareInformation.qwMemorySize is a real
+        # QWORD and is authoritative when it disagrees with the WMI value.
+        try {
+            $regBase = 'HKLM:\SYSTEM\ControlSet001\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}'
+            $regHit = Get-ChildItem $regBase -ErrorAction Stop | ForEach-Object {
+                $p = Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue
+                if ($p.DriverDesc -and $p.DriverDesc.Trim() -eq $g.Name.Trim() -and $p.'HardwareInformation.qwMemorySize') {
+                    [int64]$p.'HardwareInformation.qwMemorySize'
+                }
+            } | Select-Object -First 1
+            if ($regHit -gt 0) {
+                $regMb = [math]::Round($regHit / 1MB)
+                if ($regMb -gt $vramMb) { $vramMb = $regMb }
+            }
+        } catch {}
         # nvidia-smi gives exact VRAM, prefer that
         try {
             $nvVram = & nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>$null |
