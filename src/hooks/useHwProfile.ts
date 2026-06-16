@@ -40,6 +40,13 @@ export type HwProfile = {
   isLaptop: boolean;
   isWifi: boolean;
   warnings: HwWarning[];
+  tweakRisks: Record<string, TweakRisk>;
+};
+
+export type TweakRisk = {
+  severity: "info" | "warning" | "danger";
+  title: string;
+  message: string;
 };
 
 // module-level cache — survives re-renders, cleared on app restart
@@ -77,4 +84,11 @@ export function useHwWarnings(page: string): HwWarning[] {
   const profile = useHwProfile();
   if (!profile) return [];
   return profile.warnings.filter(w => w.page === page);
+}
+
+// Hardware-aware risk verdict for one specific tweak id, or undefined if this
+// tweak has no known hardware-specific risk on the detected system.
+export function useTweakRisk(id: string): TweakRisk | undefined {
+  const profile = useHwProfile();
+  return profile?.tweakRisks?.[id];
 }

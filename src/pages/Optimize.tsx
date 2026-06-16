@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { api } from "../api";
 import { Card, Badge, Spinner, ActionBtn } from "../components/ui";
+import { RiskBadge, RiskNotice } from "../components/HwWarnings";
+import { useHwProfile } from "../hooks/useHwProfile";
 import type { Mode } from "../App";
 
 export default function Optimize({ mode, admin }: { mode: Mode; admin: boolean }) {
@@ -9,6 +11,8 @@ export default function Optimize({ mode, admin }: { mode: Mode; admin: boolean }
   const [log, setLog] = useState<string[]>([]);
   const [rpStatus, setRpStatus] = useState("");
   const [confirm, setConfirm] = useState<string | null>(null);
+  const [riskAck, setRiskAck] = useState<string | null>(null);
+  const profile = useHwProfile();
 
   const refresh = () => api.listTweaks().then(setTweaks);
   useEffect(() => { refresh(); }, []);
@@ -27,6 +31,7 @@ export default function Optimize({ mode, admin }: { mode: Mode; admin: boolean }
       push(`✘ ${t.name}: ${e}`);
     }
     setConfirm(null);
+    setRiskAck(null);
     refresh();
   };
 
@@ -70,11 +75,15 @@ export default function Optimize({ mode, admin }: { mode: Mode; admin: boolean }
       {cats.map((cat) => (
         <div key={cat} className="mt">
           <h3 style={{ color: "var(--muted)", textTransform: "uppercase", fontSize: 12, letterSpacing: ".5px", marginBottom: 8 }}>{cat}</h3>
-          {visible.filter((t) => t.category === cat).map((t) => (
+          {visible.filter((t) => t.category === cat).map((t) => {
+            const hwRisk = profile?.tweakRisks?.[t.id];
+            const needsAck = hwRisk?.severity === "danger" && riskAck !== t.id;
+            return (
             <div className="tweak" key={t.id}>
               <div className="tweak-head">
                 <span className="tweak-name">{t.name}</span>
                 <Badge cls={`risk-${t.risk}`}>{t.risk} risk</Badge>
+                <RiskBadge id={t.id} />
                 <Badge cls={`st-${t.status}`}>{t.status.replace("_", " ")}</Badge>
                 {t.requiresAdmin && <Badge cls="st-unknown">admin</Badge>}
                 <button className="btn small ghost" onClick={() => setOpen(open === t.id ? null : t.id)}>
@@ -82,10 +91,14 @@ export default function Optimize({ mode, admin }: { mode: Mode; admin: boolean }
                 </button>
                 {t.status !== "applied" && (
                   confirm === t.id ? (
-                    <>
-                      <button className="btn small danger" onClick={() => doApply(t)}>Confirm apply</button>
-                      <button className="btn small ghost" onClick={() => setConfirm(null)}>Cancel</button>
-                    </>
+                    needsAck ? (
+                      <button className="btn small ghost" onClick={() => { setConfirm(null); setRiskAck(null); }}>Cancel</button>
+                    ) : (
+                      <>
+                        <button className="btn small danger" onClick={() => doApply(t)}>Confirm apply</button>
+                        <button className="btn small ghost" onClick={() => { setConfirm(null); setRiskAck(null); }}>Cancel</button>
+                      </>
+                    )
                   ) : (
                     <button
                       className="btn small"
@@ -106,7 +119,15 @@ export default function Optimize({ mode, admin }: { mode: Mode; admin: boolean }
                   <b>Why it matters:</b> {t.rationale}<br />
                   <b>Expected impact:</b> {t.impact}<br />
                   <b>Risk:</b> {t.risk} · <b>Reversible:</b> {t.reversible ? "Yes — one-click undo, registry backup saved first" : "No"}<br />
-                  {confirm === t.id && (
+                  <RiskNotice id={t.id} />
+                  {confirm === t.id && needsAck && (
+                    <div style={{ marginTop: 8 }}>
+                      <button className="btn small danger" onClick={() => setRiskAck(t.id)}>
+                        I understand the risk for my hardware — continue
+                      </button>
+                    </div>
+                  )}
+                  {confirm === t.id && !needsAck && (
                     <span style={{ color: "var(--yellow)" }}>
                       Review the above, then press <b>Confirm apply</b>. A .reg backup and journal entry are written before any change.
                     </span>
@@ -114,7 +135,8 @@ export default function Optimize({ mode, admin }: { mode: Mode; admin: boolean }
                 </div>
               )}
             </div>
-          ))}
+            );
+          })}
         </div>
       ))}
 
