@@ -50,8 +50,17 @@ jobs:
           RELEASE_NOTES: ${{ github.event.head_commit.message }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $version = "${{ github.ref_name }}".TrimStart('v')
+          # Version of truth = tauri.conf.json, NOT the git tag name.
+          # A mismatched/duplicate tag previously caused the manifest to
+          # advertise a version the built binary didn't actually contain,
+          # producing an infinite "update available" loop.
+          $conf    = Get-Content "src-tauri/tauri.conf.json" -Raw | ConvertFrom-Json
+          $version = $conf.version
           $tag     = "${{ github.ref_name }}"
+          if ($tag.TrimStart('v') -ne $version) {
+            Write-Error "Tag '$tag' does not match tauri.conf.json version '$version' — aborting to avoid a mismatched release."
+            exit 1
+          }
 
           # ── 1. Find local NSIS installer ──────────────────────────────────
           $exe = Get-ChildItem "src-tauri/target/release/bundle/nsis/*-setup.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
