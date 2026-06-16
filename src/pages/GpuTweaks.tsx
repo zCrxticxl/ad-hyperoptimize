@@ -2,7 +2,8 @@ import React, { useEffect, useState, useMemo } from "react";
 import { api } from "../api";
 import { Card, Spinner, Badge } from "../components/ui";
 import { useLang } from "../i18n";
-import { HwWarnings } from "../components/HwWarnings";
+import { HwWarnings, RiskBadge, RiskNotice } from "../components/HwWarnings";
+import { useHwProfile } from "../hooks/useHwProfile";
 
 type GpuTweak = {
   id: string;
@@ -56,6 +57,8 @@ export default function GpuTweaks({ admin }: { admin: boolean }) {
   const [log, setLog]     = useState<string[]>([]);
   const [open, setOpen]   = useState<string | null>(null);
   const [err, setErr]     = useState("");
+  const [pendingApply, setPendingApply] = useState<string | null>(null);
+  const profile = useHwProfile();
 
   const VENDOR_LABEL: Record<string, string> = {
     nvidia: "NVIDIA",
@@ -96,6 +99,7 @@ export default function GpuTweaks({ admin }: { admin: boolean }) {
       push(`✘ ${tw.name}: ${e}`);
     } finally {
       setBusy(null);
+      setPendingApply(null);
       refresh();
     }
   };
@@ -242,6 +246,9 @@ export default function GpuTweaks({ admin }: { admin: boolean }) {
                   const applied  = tw.status === "applied";
                   const blocked  = tw.driverKeyMissing;
                   const needsAdmin = !admin && tw.risk === "Medium";
+                  const hwRisk   = profile?.tweakRisks?.[tw.id];
+                  const requiresConfirm = hwRisk?.severity === "danger" && !applied;
+                  const awaitingConfirm = requiresConfirm && pendingApply !== tw.id;
 
                   return (
                     <div className="tweak" key={tw.id} style={{ opacity: blocked ? 0.5 : 1 }}>
@@ -253,6 +260,7 @@ export default function GpuTweaks({ admin }: { admin: boolean }) {
                           {tw.name}
                         </span>
                         <Badge cls={`risk-${tw.risk}`}>{tw.risk}</Badge>
+                        <RiskBadge id={tw.id} />
                         <Badge cls={STATUS_CLS[tw.status]}>{STATUS_LABEL[tw.status]}</Badge>
                         {tw.reboot && (
                           <Badge cls="st-partial">{t("gpuRebootBadge")}</Badge>
@@ -273,6 +281,16 @@ export default function GpuTweaks({ admin }: { admin: boolean }) {
                           >
                             {isBusy ? <Spinner /> : t("bootUndo")}
                           </button>
+                        ) : awaitingConfirm ? (
+                          <button
+                            className="btn small"
+                            style={{ background: "var(--red)", borderColor: "var(--red)" }}
+                            disabled={isBusy || blocked}
+                            onClick={() => { setPendingApply(tw.id); setOpen(tw.id); }}
+                            title="This tweak has a known risk for your detected hardware — review before applying"
+                          >
+                            ⚠ Review Risk
+                          </button>
                         ) : (
                           <button
                             className="btn small"
@@ -283,7 +301,7 @@ export default function GpuTweaks({ admin }: { admin: boolean }) {
                               needsAdmin ? t("bootAdminNeeded") : ""
                             }
                           >
-                                                   {isBusy ? <Spinner /> : t("apply")}
+                                                   {isBusy ? <Spinner /> : (pendingApply === tw.id ? `⚠ ${t("apply")} anyway` : t("apply"))}
                           </button>
                         )}
                       </div>
@@ -301,6 +319,14 @@ export default function GpuTweaks({ admin }: { admin: boolean }) {
                           {!admin && tw.risk === "Medium" && (
                             <div style={{ color: "var(--orange)", fontSize: 12, marginTop: 4 }}>
                               {t("gpuNeedsAdmin")}
+                            </div>
+                          )}
+                          <RiskNotice id={tw.id} />
+                          {pendingApply === tw.id && (
+                            <div style={{ marginTop: 8 }}>
+                              <button className="btn small ghost" onClick={() => setPendingApply(null)}>
+                                Cancel
+                              </button>
                             </div>
                           )}
                         </div>

@@ -1,7 +1,10 @@
 import React, { useEffect, useState } from "react";
 import { api } from "../api";
 import { Card, Spinner } from "../components/ui";
-import { HwWarnings } from "../components/HwWarnings";
+import { HwWarnings, RiskBadge } from "../components/HwWarnings";
+import { useHwProfile } from "../hooks/useHwProfile";
+
+const ULTIMATE_GUID = "e9a42b02-d5df-448d-aa00-03f14749eb61";
 
 const PLAN_DESC: Record<string, string> = {
   "381b4222-f694-41f0-9685-ff5bb260df2e": "Balances performance with energy — Windows default.",
@@ -10,12 +13,29 @@ const PLAN_DESC: Record<string, string> = {
   "e9a42b02-d5df-448d-aa00-03f14749eb61": "Eliminates micro-latency by preventing CPU from downclocking. Best for competitive gaming.",
 };
 
+// Map a plan's GUID to a risk-badge id. The 3 non-Ultimate Windows defaults
+// have no backend risk entry (intentional — they're always safe, badge
+// defaults to green "OK"). Ultimate uses its real laptop-conditional risk.
+// Anything else (Winhance, OEM-bundled, hand-made custom plans) is unknown —
+// we can't see its Advanced Power Settings, so it's always flagged.
+const PLAN_RISK_ID: Record<string, string> = {
+  "381b4222-f694-41f0-9685-ff5bb260df2e": "power_plan_balanced",
+  "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c": "power_plan_high_perf",
+  "a1841308-3541-4fab-bc81-f71556f20b4a": "power_plan_power_saver",
+  "e9a42b02-d5df-448d-aa00-03f14749eb61": "power_plan_ultimate",
+};
+function riskIdForPlan(guid: string): string {
+  return PLAN_RISK_ID[guid.toLowerCase()] ?? "power_plan_custom_unknown";
+}
+
 export default function PowerPlan({ admin }: { admin: boolean }) {
   const [data, setData] = useState<any>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [log, setLog] = useState("");
   const [newName, setNewName] = useState("");
   const [showCreate, setShowCreate] = useState(false);
+  const profile = useHwProfile();
+  const ultimateRisk = profile?.tweakRisks?.["power_plan_ultimate"];
 
   const load = async () => setData(await api.powerplanList());
   useEffect(() => { load(); }, []);
@@ -49,9 +69,13 @@ export default function PowerPlan({ admin }: { admin: boolean }) {
             micro-latency by keeping the CPU at max frequency with no power-saving downclocks.
             Ideal for competitive gaming and low-latency workloads.
           </div>
+          {ultimateRisk && <div style={{ marginBottom: 8 }}><RiskBadge id="power_plan_ultimate" /></div>}
           <button
             className="btn"
-            onClick={() => act("unlock", api.powerplanUnlockUltimate)}
+            onClick={() => {
+              if (ultimateRisk && !window.confirm(`${ultimateRisk.title}\n\n${ultimateRisk.message}\n\nContinue anyway?`)) return;
+              act("unlock", api.powerplanUnlockUltimate);
+            }}
             disabled={busy !== null || !admin}
           >
             {busy === "unlock" ? <><Spinner /> Unlocking…</> : "⚡ Unlock Ultimate Performance"}
@@ -79,6 +103,7 @@ export default function PowerPlan({ admin }: { admin: boolean }) {
                     {p.active && <span style={{ color: "var(--green)", fontWeight: 700 }}>●</span>}
                     <b style={{ color: p.active ? "var(--accent)" : "var(--fg)" }}>{p.name}</b>
                     {p.active && <span style={{ fontSize: 11, color: "var(--green)" }}>ACTIVE</span>}
+                    <RiskBadge id={riskIdForPlan(p.guid)} />
                   </div>
                   <div className="muted" style={{ fontSize: 12 }}>
                     {PLAN_DESC[p.guid.toLowerCase()] ?? "Custom power plan"}
@@ -89,7 +114,11 @@ export default function PowerPlan({ admin }: { admin: boolean }) {
                   {!p.active && (
                     <button
                       className="btn small"
-                      onClick={() => act(p.guid, () => api.powerplanSet(p.guid))}
+                      onClick={() => {
+                        if (p.guid.toLowerCase() === ULTIMATE_GUID && ultimateRisk &&
+                            !window.confirm(`${ultimateRisk.title}\n\n${ultimateRisk.message}\n\nContinue anyway?`)) return;
+                        act(p.guid, () => api.powerplanSet(p.guid));
+                      }}
                       disabled={busy !== null || !admin}
                     >
                       {busy === p.guid ? "…" : "Set Active"}

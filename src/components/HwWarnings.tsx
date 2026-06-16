@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { useHwWarnings, useHwProfile, HwWarning, HwProfile } from "../hooks/useHwProfile";
+import { useHwWarnings, useHwProfile, useTweakRisk, HwWarning, HwProfile, TweakRisk } from "../hooks/useHwProfile";
 
 // ─── severity styling ────────────────────────────────────────────────────────
 const SEV: Record<string, { bg: string; border: string; icon: string; label: string }> = {
@@ -80,6 +80,91 @@ export function HwWarningChips({ page }: { page: string }) {
       })}
     </div>
   );
+}
+
+// ─── per-tweak hardware risk badge + block-on-apply gate ─────────────────────
+// Use anywhere a tweak/setting has an `id` that may appear in profile.tweakRisks.
+
+const OK_STYLE = { bg: "rgba(80,200,120,0.08)", border: "var(--green)" };
+
+export function RiskBadge({ id }: { id: string }) {
+  const profile = useHwProfile();
+  const risk = useTweakRisk(id);
+
+  // Hardware not detected yet — don't claim a verdict we haven't checked.
+  if (!profile) return null;
+
+  if (!risk) {
+    return (
+      <span
+        title="No known issue for your detected hardware"
+        style={{
+          fontSize: 10.5,
+          fontWeight: 700,
+          padding: "1px 7px",
+          borderRadius: 10,
+          background: OK_STYLE.bg,
+          border: `1px solid ${OK_STYLE.border}`,
+          color: OK_STYLE.border,
+          cursor: "help",
+          whiteSpace: "nowrap",
+        }}
+      >
+        ✓ OK FOR YOUR HARDWARE
+      </span>
+    );
+  }
+
+  const s = SEV[risk.severity] ?? SEV.warning;
+  return (
+    <span
+      title={risk.message}
+      style={{
+        fontSize: 10.5,
+        fontWeight: 700,
+        padding: "1px 7px",
+        borderRadius: 10,
+        background: s.bg,
+        border: `1px solid ${s.border}`,
+        color: s.border,
+        cursor: "help",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {s.icon} {risk.severity === "danger" ? "RISKY FOR YOUR HARDWARE" : "CHECK YOUR HARDWARE"}
+    </span>
+  );
+}
+
+// Inline block shown inside an open detail/confirm panel — always renders the
+// full risk message (not just a tooltip) so the user cannot miss it before confirming.
+export function RiskNotice({ id }: { id: string }) {
+  const risk = useTweakRisk(id);
+  if (!risk) return null;
+  const s = SEV[risk.severity] ?? SEV.warning;
+  return (
+    <div
+      style={{
+        marginTop: 8,
+        padding: "8px 10px",
+        borderRadius: 6,
+        background: s.bg,
+        border: `1px solid ${s.border}`,
+        fontSize: 12,
+        lineHeight: 1.5,
+      }}
+    >
+      <b style={{ color: s.border }}>{s.icon} {risk.title}</b>
+      <div style={{ marginTop: 3, opacity: 0.88 }}>{risk.message}</div>
+    </div>
+  );
+}
+
+// Hook: returns whether a tweak id requires an explicit "apply anyway"
+// confirmation before it's allowed to run (severity === "danger").
+export function useRequiresRiskConfirm(id: string): boolean {
+  const risk = useTweakRisk(id);
+  return risk?.severity === "danger";
 }
 
 // ─── hardware summary card (for Dashboard) ───────────────────────────────────

@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { api } from "../api";
 import { Card, Spinner } from "../components/ui";
-import { HwWarnings } from "../components/HwWarnings";
+import { HwWarnings, RiskBadge, RiskNotice } from "../components/HwWarnings";
+import { useHwProfile } from "../hooks/useHwProfile";
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -25,6 +26,10 @@ function TimerCard({ admin }: { admin: boolean }) {
   const [data, setData] = useState<any>(null);
   const [busy, setBusy] = useState(false);
   const [log, setLog] = useState("");
+  const [riskAck, setRiskAck] = useState(false);
+  const profile = useHwProfile();
+  const minRisk = profile?.tweakRisks?.["timer_resolution_min"];
+  const minNeedsAck = !!minRisk && !riskAck;
 
   const load = async () => {
     setData(await api.timerGet());
@@ -52,9 +57,10 @@ function TimerCard({ admin }: { admin: boolean }) {
 
   return (
     <Card title="Timer Resolution">
-      <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
         Windows default is ~15.6 ms. Lowering to 0.5 ms reduces scheduler jitter — measurably improves input latency and frame pacing.
       </div>
+      <div style={{ marginBottom: 10 }}><RiskBadge id="timer_resolution_min" /></div>
       {!data ? <Spinner /> : data.error ? (
         <div className="muted">{data.error}</div>
       ) : (
@@ -83,9 +89,15 @@ function TimerCard({ admin }: { admin: boolean }) {
           </tbody></table>
           {!admin && <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>⚠ Requires admin rights to apply.</div>}
           <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-            <button className="btn small" onClick={() => apply(5000)} disabled={busy || !admin}>
-              ⚡ Set 0.5 ms (gaming)
-            </button>
+            {minNeedsAck ? (
+              <button className="btn small" style={{ background: "var(--red)", borderColor: "var(--red)" }} disabled={busy || !admin} onClick={() => setRiskAck(true)}>
+                ⚠ Review risk before setting 0.5 ms
+              </button>
+            ) : (
+              <button className="btn small" onClick={() => apply(5000)} disabled={busy || !admin}>
+                ⚡ Set 0.5 ms (gaming)
+              </button>
+            )}
             <button className="btn small ghost" onClick={() => apply(10000)} disabled={busy || !admin}>
               Set 1.0 ms
             </button>
@@ -94,6 +106,7 @@ function TimerCard({ admin }: { admin: boolean }) {
             </button>
             <button className="btn small ghost" onClick={load} disabled={busy}>↺</button>
           </div>
+          {minRisk && <RiskNotice id="timer_resolution_min" />}
           {log && <div className="mono muted" style={{ fontSize: 11, marginTop: 8 }}>{log}</div>}
         </>
       )}
@@ -136,6 +149,7 @@ function MsiCard({ admin }: { admin: boolean }) {
               <span style={{ color: d.msiEnabled ? "var(--green)" : "var(--red)", fontWeight: 700, fontSize: 12 }}>
                 {d.msiEnabled ? "● MSI ON" : "● LINE"}
               </span>
+              <RiskBadge id="msi_mode_toggle" />
               <button
                 className={`btn small ${d.msiEnabled ? "ghost" : ""}`}
                 onClick={() => toggle(d)}
@@ -227,6 +241,7 @@ function NetCard({ admin }: { admin: boolean }) {
                     <span style={{ color: off ? "var(--green)" : "var(--muted)", fontWeight: 700, fontSize: 11, minWidth: 24 }}>
                       {off ? "●" : "○"}
                     </span>
+                    <RiskBadge id="net_offload_disable" />
                     <button
                       className="btn small ghost"
                       style={{ minWidth: 70 }}
@@ -306,11 +321,12 @@ function RamCard({ admin }: { admin: boolean }) {
             <tr><td className="muted">Modified list</td><td>{mb(data.modifiedMb)}</td></tr>
             <tr><td className="muted">Free</td><td style={{ color: "var(--green)" }}>{mb(data.freeMb)}</td></tr>
           </tbody></table>
-          <div className="row" style={{ gap: 8 }}>
+          <div className="row" style={{ gap: 8, alignItems: "center" }}>
             <button className="btn small" onClick={flush} disabled={busy || !admin}>
               {busy ? <><Spinner /> Flushing…</> : "⚡ Flush Standby List"}
             </button>
             <button className="btn small ghost" onClick={load} disabled={busy}>↺ Refresh</button>
+            <RiskBadge id="ram_flush_standby" />
           </div>
           {!admin && <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>⚠ Requires admin rights.</div>}
           {log && <div className="mono muted" style={{ fontSize: 11, marginTop: 8 }}>{log}</div>}
@@ -330,6 +346,8 @@ function PagefileCard({ admin }: { admin: boolean }) {
   const [customInit, setCustomInit] = useState("4096");
   const [customMax, setCustomMax] = useState("8192");
   const [showCustom, setShowCustom] = useState(false);
+  const profile = useHwProfile();
+  const pfRisk = profile?.tweakRisks?.["pagefile_disable"];
 
   const load = async () => {
     const d = await api.pagefileInfo();
@@ -388,7 +406,8 @@ function PagefileCard({ admin }: { admin: boolean }) {
             <button
               className="btn small danger"
               onClick={() => {
-                if (data.ramGb < 28 && !window.confirm(`You only have ${data.ramGb} GB RAM. Disabling the pagefile can cause system instability. Continue?`)) return;
+                if (pfRisk && !window.confirm(`${pfRisk.title}\n\n${pfRisk.message}\n\nContinue anyway?`)) return;
+                if (!pfRisk && data.ramGb < 28 && !window.confirm(`You only have ${data.ramGb} GB RAM. Disabling the pagefile can cause system instability. Continue?`)) return;
                 act(api.pagefileDisable);
               }}
               disabled={busy || !admin}
@@ -396,6 +415,8 @@ function PagefileCard({ admin }: { admin: boolean }) {
               ⛔ Disable pagefile
             </button>
           </div>
+          <div style={{ marginTop: 6 }}><RiskBadge id="pagefile_disable" /></div>
+          {pfRisk && <RiskNotice id="pagefile_disable" />}
 
           {showCustom && (
             <div style={{ marginTop: 12, padding: 10, background: "var(--bg2)", borderRadius: 6, border: "1px solid var(--border)" }}>
@@ -427,7 +448,7 @@ function PagefileCard({ admin }: { admin: boolean }) {
                     style={{ width: 90, padding: "3px 6px", fontSize: 12, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 4, color: "var(--fg)" }}
                   />
                 </div>
-                <div style={{ alignSelf: "flex-end" }}>
+                <div style={{ alignSelf: "flex-end", display: "flex", gap: 8, alignItems: "center" }}>
                   <button
                     className="btn small"
                     onClick={() => act(() => api.pagefileSetCustom(customPath, parseInt(customInit), parseInt(customMax)))}
@@ -435,6 +456,7 @@ function PagefileCard({ admin }: { admin: boolean }) {
                   >
                     Apply
                   </button>
+                  <RiskBadge id="pagefile_custom_size" />
                 </div>
               </div>
               <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>
