@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from "react";
 import { api } from "../api";
 import { Card, Spinner } from "../components/ui";
+import { useLang } from "../i18n";
 
 export default function CtxMenuCleaner({ admin }: { admin: boolean }) {
+  const { t } = useLang();
   const [data, setData]     = useState<any>(null);
   const [busy, setBusy]     = useState<string | null>(null);
   const [log, setLog]       = useState("");
@@ -21,7 +23,7 @@ export default function CtxMenuCleaner({ admin }: { admin: boolean }) {
   };
 
   const disableAll = async () => {
-    if (!window.confirm("Disable all bloat context menu entries? This is reversible.")) return;
+    if (!window.confirm(t("ctxmenuDisableAllConfirm"))) return;
     setBulkBusy(true);
     try { setLog(await api.ctxmenuDisableAll()); await load(); }
     catch (e: any) { setLog(String(e)); }
@@ -42,22 +44,21 @@ export default function CtxMenuCleaner({ admin }: { admin: boolean }) {
 
   return (
     <>
-      <div className="page-title">☰ Context Menu Cleaner</div>
+      <div className="page-title">☰ {t("ctxmenuTitle")}</div>
       <div className="page-sub">
-        Remove bloat from the Windows right-click menu. All changes are reversible — disabled entries
-        are renamed in-place, not deleted.
-        {!admin && <span style={{ color: "var(--orange)" }}> · Admin required for system-level entries.</span>}
+        {t("ctxmenuSub")}
+        {!admin && <span style={{ color: "var(--orange)" }}> · {t("ctxmenuAdminHint")}</span>}
       </div>
 
-      <Card title={`Context Menu Entries · ${enabled} active · ${disabled} disabled`}>
+      <Card title={`${t("ctxmenuEntries")} · ${enabled} ${t("ctxmenuActive")} · ${disabled} ${t("ctxmenuDisabled")}`}>
         {!data ? <Spinner /> : (
           <>
             <div className="row" style={{ gap: 8, marginBottom: 14 }}>
               <button className="btn small danger" onClick={disableAll} disabled={bulkBusy || !admin}>
-                {bulkBusy ? "…" : "⛔ Disable all bloat"}
+                {bulkBusy ? "…" : `⛔ ${t("ctxmenuDisableAllBloat")}`}
               </button>
               <button className="btn small ghost" onClick={enableAll} disabled={bulkBusy}>
-                ↩ Re-enable all
+                ↩ {t("ctxmenuReenableAll")}
               </button>
               <button className="btn small ghost" onClick={load} disabled={bulkBusy}>↺</button>
             </div>
@@ -81,11 +82,11 @@ export default function CtxMenuCleaner({ admin }: { admin: boolean }) {
                       fontWeight: 700,
                       fontSize: 12,
                     }}>
-                      {e.enabled ? "● ON" : "● OFF"}
+                      {e.enabled ? `● ${t("ctxmenuOn")}` : `● ${t("ctxmenuOff")}`}
                     </span>
                     <b style={{ fontSize: 13 }}>{e.name}</b>
-                    {e.admin && <span className="muted" style={{ fontSize: 10 }}>[admin]</span>}
-                    {!e.present && <span className="muted" style={{ fontSize: 10 }}>[not installed]</span>}
+                    {e.admin && <span className="muted" style={{ fontSize: 10 }}>[{t("ctxmenuAdminTag")}]</span>}
+                    {!e.present && <span className="muted" style={{ fontSize: 10 }}>[{t("ctxmenuNotInstalledTag")}]</span>}
                   </div>
                   <div className="muted" style={{ fontSize: 12 }}>{e.desc}</div>
                 </div>
@@ -97,7 +98,7 @@ export default function CtxMenuCleaner({ admin }: { admin: boolean }) {
                     disabled={busy === e.path || (e.admin && !admin)}
                     onClick={() => toggle(e, !e.enabled)}
                   >
-                    {busy === e.path ? "…" : e.enabled ? "Disable" : "Enable"}
+                    {busy === e.path ? "…" : e.enabled ? t("disable") : t("enable")}
                   </button>
                 )}
               </div>
@@ -108,8 +109,8 @@ export default function CtxMenuCleaner({ admin }: { admin: boolean }) {
             )}
 
             <div className="muted" style={{ fontSize: 12, marginTop: 14 }}>
-              Changes take effect immediately — close and reopen File Explorer or restart the shell to see them.
-              Entries marked [not installed] are not present on this system.
+              {t("ctxmenuFooterRestart")}
+              {" "}{t("ctxmenuFooterNotInstalled")}
             </div>
           </>
         )}

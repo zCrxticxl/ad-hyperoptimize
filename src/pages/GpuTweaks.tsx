@@ -2,6 +2,7 @@ import React, { useEffect, useState, useMemo } from "react";
 import { api } from "../api";
 import { Card, Spinner, Badge } from "../components/ui";
 import { useLang } from "../i18n";
+import { localizeTweak } from "../localize";
 import { HwWarnings, RiskBadge, RiskNotice } from "../components/HwWarnings";
 import { useHwProfile } from "../hooks/useHwProfile";
 
@@ -50,7 +51,7 @@ const STATUS_CLS: Record<string, string> = {
 };
 
 export default function GpuTweaks({ admin }: { admin: boolean }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const [data, setData]   = useState<ScanData | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy]   = useState<string | null>(null);
@@ -241,6 +242,7 @@ export default function GpuTweaks({ admin }: { admin: boolean }) {
                   {cat}
                 </h3>
                 {tweaks.map((tw) => {
+                  tw = localizeTweak(tw, lang);
                   const isBusy   = busy === tw.id;
                   const isOpen   = open === tw.id;
                   const applied  = tw.status === "applied";

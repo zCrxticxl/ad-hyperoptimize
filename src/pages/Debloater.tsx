@@ -2,32 +2,33 @@ import React, { useEffect, useState } from "react";
 import { api } from "../api";
 import { Spinner } from "../components/ui";
 import { HwWarnings } from "../components/HwWarnings";
+import { useLang } from "../i18n";
 
-const BLOAT_PACKAGES: { name: string; display: string; cat: string }[] = [
-  { name: "Microsoft.BingNews",                     display: "Microsoft News",          cat: "Microsoft" },
-  { name: "Microsoft.BingWeather",                  display: "Microsoft Weather",        cat: "Microsoft" },
-  { name: "Microsoft.BingFinance",                  display: "Microsoft Finance",        cat: "Microsoft" },
-  { name: "Microsoft.BingSports",                   display: "Microsoft Sports",         cat: "Microsoft" },
-  { name: "Microsoft.MicrosoftSolitaireCollection", display: "Solitaire Collection",     cat: "Microsoft" },
-  { name: "Microsoft.MixedReality.Portal",          display: "Mixed Reality Portal",     cat: "Microsoft" },
-  { name: "Microsoft.People",                       display: "Microsoft People",          cat: "Microsoft" },
-  { name: "Microsoft.SkypeApp",                     display: "Skype",                    cat: "Microsoft" },
-  { name: "Microsoft.Teams",                        display: "Teams (Personal)",          cat: "Microsoft" },
-  { name: "Microsoft.ZuneMusic",                    display: "Groove Music",             cat: "Microsoft" },
-  { name: "Microsoft.ZuneVideo",                    display: "Movies & TV",              cat: "Microsoft" },
-  { name: "Microsoft.GetHelp",                      display: "Get Help",                 cat: "Microsoft" },
-  { name: "Microsoft.Getstarted",                   display: "Tips / Get Started",       cat: "Microsoft" },
-  { name: "Microsoft.Microsoft3DViewer",            display: "3D Viewer",                cat: "Microsoft" },
-  { name: "Microsoft.XboxApp",                      display: "Xbox (old)",               cat: "Xbox"      },
-  { name: "Microsoft.XboxGameOverlay",              display: "Xbox Game Overlay",        cat: "Xbox"      },
-  { name: "Microsoft.XboxGamingOverlay",            display: "Xbox Gaming Overlay",      cat: "Xbox"      },
-  { name: "Microsoft.XboxIdentityProvider",         display: "Xbox Identity Provider",   cat: "Xbox"      },
-  { name: "king.com.CandyCrushSaga",                display: "Candy Crush Saga",         cat: "3rd Party" },
-  { name: "king.com.CandyCrushFriends",             display: "Candy Crush Friends",      cat: "3rd Party" },
-  { name: "BytedancePte.Ltd.TikTok",                display: "TikTok",                   cat: "3rd Party" },
-  { name: "SpotifyAB.SpotifyMusic",                 display: "Spotify (Store)",          cat: "3rd Party" },
-  { name: "Disney.37853D22215E2",                   display: "Disney+",                  cat: "3rd Party" },
-  { name: "AmazonVideo.PrimeVideo",                 display: "Prime Video",              cat: "3rd Party" },
+const BLOAT_PACKAGES: { name: string; displayKey: string; cat: string }[] = [
+  { name: "Microsoft.BingNews",                     displayKey: "debloatPkgBingNews",        cat: "Microsoft" },
+  { name: "Microsoft.BingWeather",                  displayKey: "debloatPkgBingWeather",     cat: "Microsoft" },
+  { name: "Microsoft.BingFinance",                  displayKey: "debloatPkgBingFinance",     cat: "Microsoft" },
+  { name: "Microsoft.BingSports",                   displayKey: "debloatPkgBingSports",      cat: "Microsoft" },
+  { name: "Microsoft.MicrosoftSolitaireCollection", displayKey: "debloatPkgSolitaire",       cat: "Microsoft" },
+  { name: "Microsoft.MixedReality.Portal",          displayKey: "debloatPkgMixedReality",    cat: "Microsoft" },
+  { name: "Microsoft.People",                       displayKey: "debloatPkgPeople",          cat: "Microsoft" },
+  { name: "Microsoft.SkypeApp",                     displayKey: "debloatPkgSkype",           cat: "Microsoft" },
+  { name: "Microsoft.Teams",                        displayKey: "debloatPkgTeams",           cat: "Microsoft" },
+  { name: "Microsoft.ZuneMusic",                    displayKey: "debloatPkgGrooveMusic",     cat: "Microsoft" },
+  { name: "Microsoft.ZuneVideo",                    displayKey: "debloatPkgMoviesTv",        cat: "Microsoft" },
+  { name: "Microsoft.GetHelp",                      displayKey: "debloatPkgGetHelp",         cat: "Microsoft" },
+  { name: "Microsoft.Getstarted",                   displayKey: "debloatPkgGetStarted",      cat: "Microsoft" },
+  { name: "Microsoft.Microsoft3DViewer",            displayKey: "debloatPkg3dViewer",        cat: "Microsoft" },
+  { name: "Microsoft.XboxApp",                      displayKey: "debloatPkgXboxOld",         cat: "Xbox"      },
+  { name: "Microsoft.XboxGameOverlay",              displayKey: "debloatPkgXboxGameOverlay", cat: "Xbox"      },
+  { name: "Microsoft.XboxGamingOverlay",            displayKey: "debloatPkgXboxGamingOverlay", cat: "Xbox"      },
+  { name: "Microsoft.XboxIdentityProvider",         displayKey: "debloatPkgXboxIdentity",    cat: "Xbox"      },
+  { name: "king.com.CandyCrushSaga",                displayKey: "debloatPkgCandyCrushSaga",  cat: "3rd Party" },
+  { name: "king.com.CandyCrushFriends",             displayKey: "debloatPkgCandyCrushFriends", cat: "3rd Party" },
+  { name: "BytedancePte.Ltd.TikTok",                displayKey: "debloatPkgTikTok",          cat: "3rd Party" },
+  { name: "SpotifyAB.SpotifyMusic",                 displayKey: "debloatPkgSpotify",         cat: "3rd Party" },
+  { name: "Disney.37853D22215E2",                   displayKey: "debloatPkgDisneyPlus",      cat: "3rd Party" },
+  { name: "AmazonVideo.PrimeVideo",                 displayKey: "debloatPkgPrimeVideo",      cat: "3rd Party" },
 ];
 
 const RECOMMENDED_BLOAT = [
@@ -51,6 +52,7 @@ function ProgressBar({ done, total }: { done: number; total: number }) {
 }
 
 export default function Debloater({ admin }: { admin: boolean }) {
+  const { t } = useLang();
   const [tweaks, setTweaks]       = useState<Tweak[]>([]);
   const [loading, setLoading]     = useState(true);
   const [busy, setBusy]           = useState<Record<string, boolean>>({});
@@ -68,7 +70,7 @@ export default function Debloater({ admin }: { admin: boolean }) {
   const unapplied = tweaks.filter(t => !t.applied);
 
   const requireAdmin = () => {
-    if (!admin) { setLog({ msg: "Administrator rights required.", ok: false }); return false; }
+    if (!admin) { setLog({ msg: t("debloatAdminRequiredMsg"), ok: false }); return false; }
     return true;
   };
 
@@ -92,7 +94,7 @@ export default function Debloater({ admin }: { admin: boolean }) {
       try { await api.debloaterTweakApply(t.id); setTweaks(prev => prev.map(tw => tw.id === id ? { ...tw, applied: true } : tw)); } catch {}
     }
     setApplyingAll(false);
-    setLog({ msg: "Section applied.", ok: true });
+    setLog({ msg: t("debloatSectionApplied"), ok: true });
   };
 
   const applyAll = async () => {
@@ -103,7 +105,7 @@ export default function Debloater({ admin }: { admin: boolean }) {
       try { await api.debloaterTweakApply(t.id); setTweaks(prev => prev.map(tw => tw.id === t.id ? { ...tw, applied: true } : tw)); n++; } catch {}
     }
     setApplyingAll(false);
-    setLog({ msg: `Applied ${n} tweak${n !== 1 ? "s" : ""}. Restart recommended.`, ok: true });
+    setLog({ msg: `${t("debloatAppliedN")} ${n} ${n !== 1 ? t("debloatTweaksWord") : t("debloatTweakWord")}. ${t("debloatRestartRecommended")}`, ok: true });
   };
 
   const removeBloat = async () => {
@@ -114,7 +116,7 @@ export default function Debloater({ admin }: { admin: boolean }) {
       try { await api.debloaterRemoveProvisioned(name); removed++; } catch { failed++; }
     }
     setRemovingBloat(false);
-    setBloatLog(`Removed ${removed} app${removed !== 1 ? "s" : ""}${failed ? `, ${failed} skipped (already removed or not found)` : ""}.`);
+    setBloatLog(`${t("debloatRemovedN")} ${removed} ${removed !== 1 ? t("debloatAppsWord") : t("debloatAppWord")}${failed ? `, ${failed} ${t("debloatSkipped")}` : ""}.`);
   };
 
   const CAT_ORDER = ["Telemetry", "Ads & Clutter", "Privacy", "Gaming"];
@@ -122,14 +124,15 @@ export default function Debloater({ admin }: { admin: boolean }) {
   const sortedCategories = CAT_ORDER.filter(c => byCategory[c]).concat(Object.keys(byCategory).filter(c => !CAT_ORDER.includes(c)));
   const CAT_ICON: Record<string, string> = { Telemetry: "📡", "Ads & Clutter": "📢", Privacy: "🔒", Gaming: "🎮" };
   const CAT_RECOMMENDED: Record<string, boolean> = { Telemetry: true, "Ads & Clutter": true, Privacy: true, Gaming: false };
+  const CAT_LABEL: Record<string, string> = { Telemetry: t("debloatCatTelemetry"), "Ads & Clutter": t("debloatCatAdsClutter"), Privacy: t("debloatCatPrivacy"), Gaming: t("debloatCatGaming") };
+  const GRP_LABEL: Record<string, string> = { "3rd Party": t("debloatGrp3rdParty"), Microsoft: t("debloatGrpMicrosoft"), Xbox: t("debloatGrpXbox") };
 
   return (
     <>
-      <div className="page-title">🚀 Quick Setup</div>
+      <div className="page-title">🚀 {t("debloatTitle")}</div>
       <div className="page-sub">
-        Fresh install checklist — privacy, telemetry and bloatware in one place.
-        Everything is reversible. Restart after applying for best results.
-        {!admin && <span style={{ color: "var(--orange)" }}> · Admin required.</span>}
+        {t("debloatSub")}
+        {!admin && <span style={{ color: "var(--orange)" }}> · {t("debloatAdminRequired")}</span>}
       </div>
 
       <HwWarnings page="debloater" />
@@ -139,18 +142,18 @@ export default function Debloater({ admin }: { admin: boolean }) {
         <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 10 }}>
           <div style={{ flex: 1 }}>
             <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 6 }}>
-              {loading ? "Scanning system…" : applied === tweaks.length && tweaks.length > 0
-                ? "✅ All tweaks applied — system is clean"
-                : `${applied} / ${tweaks.length} tweaks applied`}
+              {loading ? t("debloatScanningSystem") : applied === tweaks.length && tweaks.length > 0
+                ? `✅ ${t("debloatAllApplied")}`
+                : `${applied} / ${tweaks.length} ${t("debloatTweaksApplied")}`}
             </div>
             {!loading && <ProgressBar done={applied} total={tweaks.length} />}
             <div className="muted" style={{ fontSize: 11 }}>
-              {unapplied.length > 0 ? `${unapplied.length} remaining` : tweaks.length > 0 ? "Nothing left to do" : ""}
+              {unapplied.length > 0 ? `${unapplied.length} ${t("debloatRemaining")}` : tweaks.length > 0 ? t("debloatNothingLeft") : ""}
             </div>
           </div>
           {!loading && unapplied.length > 0 && (
             <button className="btn" style={{ minWidth: 200, fontSize: 14, padding: "10px 18px" }} onClick={applyAll} disabled={applyingAll || !admin}>
-              {applyingAll ? <><Spinner /> Applying…</> : `⚡ Apply All (${unapplied.length})`}
+              {applyingAll ? <><Spinner /> {t("debloatApplying")}</> : `⚡ ${t("debloatApplyAllBtn")} (${unapplied.length})`}
             </button>
           )}
         </div>
@@ -161,7 +164,7 @@ export default function Debloater({ admin }: { admin: boolean }) {
         )}
       </div>
 
-      {loading && <div style={{ display: "flex", gap: 10, alignItems: "center" }}><Spinner /><span className="muted">Scanning…</span></div>}
+      {loading && <div style={{ display: "flex", gap: 10, alignItems: "center" }}><Spinner /><span className="muted">{t("debloatScanningEllipsis")}</span></div>}
 
       {/* Tweak sections */}
       {!loading && sortedCategories.map(cat => {
@@ -174,28 +177,28 @@ export default function Debloater({ admin }: { admin: boolean }) {
           <div key={cat} style={{ marginBottom: 20 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
               <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.07em", color: "var(--muted)" }}>
-                {CAT_ICON[cat] ?? "⚙"} {cat}
+                {CAT_ICON[cat] ?? "⚙"} {CAT_LABEL[cat] ?? cat}
               </span>
-              {isRecommended && <span style={{ fontSize: 10, color: "var(--green)", background: "rgba(0,200,80,0.1)", padding: "1px 6px", borderRadius: 8, fontWeight: 700 }}>Recommended</span>}
+              {isRecommended && <span style={{ fontSize: 10, color: "var(--green)", background: "rgba(0,200,80,0.1)", padding: "1px 6px", borderRadius: 8, fontWeight: 700 }}>{t("debloatRecommended")}</span>}
               <div style={{ flex: 1, borderBottom: "1px solid var(--border)" }} />
               {allDone
-                ? <span style={{ fontSize: 11, color: "var(--green)" }}>✓ all applied</span>
-                : <button className="btn small ghost" style={{ fontSize: 11 }} onClick={() => applySection(catUnapplied)} disabled={applyingAll}>Apply section →</button>}
+                ? <span style={{ fontSize: 11, color: "var(--green)" }}>✓ {t("debloatAllAppliedShort")}</span>
+                : <button className="btn small ghost" style={{ fontSize: 11 }} onClick={() => applySection(catUnapplied)} disabled={applyingAll}>{t("debloatApplySection")} →</button>}
             </div>
-            {items.map(t => (
-              <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 0", borderBottom: "1px solid var(--border)", opacity: busy[t.id] ? 0.7 : 1 }}>
+            {items.map(tw => (
+              <div key={tw.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 0", borderBottom: "1px solid var(--border)", opacity: busy[tw.id] ? 0.7 : 1 }}>
                 <button
-                  onClick={() => toggle(t)}
-                  style={{ width: 22, height: 22, borderRadius: 5, flexShrink: 0, border: `2px solid ${t.applied ? "var(--green)" : "var(--border)"}`, background: t.applied ? "var(--green)" : "transparent", color: "#fff", fontSize: 12, display: "flex", alignItems: "center", justifyContent: "center", cursor: admin ? "pointer" : "not-allowed" }}
+                  onClick={() => toggle(tw)}
+                  style={{ width: 22, height: 22, borderRadius: 5, flexShrink: 0, border: `2px solid ${tw.applied ? "var(--green)" : "var(--border)"}`, background: tw.applied ? "var(--green)" : "transparent", color: "#fff", fontSize: 12, display: "flex", alignItems: "center", justifyContent: "center", cursor: admin ? "pointer" : "not-allowed" }}
                 >
-                  {busy[t.id] ? <Spinner /> : t.applied ? "✓" : ""}
+                  {busy[tw.id] ? <Spinner /> : tw.applied ? "✓" : ""}
                 </button>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 600, fontSize: 13 }}>{t.name}</div>
-                  <div className="muted" style={{ fontSize: 11 }}>{t.desc}</div>
+                  <div style={{ fontWeight: 600, fontSize: 13 }}>{tw.name}</div>
+                  <div className="muted" style={{ fontSize: 11 }}>{tw.desc}</div>
                 </div>
-                <span style={{ fontSize: 11, fontWeight: 600, color: t.applied ? "var(--green)" : "var(--muted)" }}>
-                  {t.applied ? "Applied" : "Not applied"}
+                <span style={{ fontSize: 11, fontWeight: 600, color: tw.applied ? "var(--green)" : "var(--muted)" }}>
+                  {tw.applied ? t("debloatApplied") : t("debloatNotApplied")}
                 </span>
               </div>
             ))}
@@ -206,25 +209,25 @@ export default function Debloater({ admin }: { admin: boolean }) {
       {/* UWP Bloatware */}
       <div style={{ marginTop: 8 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-          <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.07em", color: "var(--muted)" }}>🗑 Remove UWP Bloatware</span>
-          <span style={{ fontSize: 10, color: "var(--accent)", background: "rgba(0,140,255,0.1)", padding: "1px 6px", borderRadius: 8 }}>Optional</span>
+          <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.07em", color: "var(--muted)" }}>🗑 {t("debloatRemoveUwp")}</span>
+          <span style={{ fontSize: 10, color: "var(--accent)", background: "rgba(0,140,255,0.1)", padding: "1px 6px", borderRadius: 8 }}>{t("debloatOptional")}</span>
           <div style={{ flex: 1, borderBottom: "1px solid var(--border)" }} />
         </div>
-        <div className="muted" style={{ fontSize: 12, marginBottom: 12 }}>Pre-selected = most commonly removed. Uncheck anything you want to keep.</div>
+        <div className="muted" style={{ fontSize: 12, marginBottom: 12 }}>{t("debloatPreselectedNote")}</div>
 
         {["3rd Party", "Microsoft", "Xbox"].map(grp => {
           const items = BLOAT_PACKAGES.filter(b => b.cat === grp);
           if (!items.length) return null;
           return (
             <div key={grp} style={{ marginBottom: 12 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.07em" }}>{grp}</div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.07em" }}>{GRP_LABEL[grp] ?? grp}</div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                 {items.map(b => {
                   const checked = selBloat.has(b.name);
                   return (
                     <label key={b.name} style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 10px", borderRadius: 6, cursor: "pointer", border: `1px solid ${checked ? "var(--accent)" : "var(--border)"}`, background: checked ? "rgba(0,140,255,0.07)" : "var(--bg2)", fontSize: 12, fontWeight: 500, userSelect: "none" }}>
                       <input type="checkbox" checked={checked} onChange={() => setSelBloat(prev => { const n = new Set(prev); n.has(b.name) ? n.delete(b.name) : n.add(b.name); return n; })} style={{ pointerEvents: "none" }} />
-                      {b.display}
+                      {t(b.displayKey as any)}
                     </label>
                   );
                 })}
@@ -235,17 +238,17 @@ export default function Debloater({ admin }: { admin: boolean }) {
 
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12 }}>
           <button className="btn danger" disabled={!selBloat.size || removingBloat || !admin} onClick={removeBloat}>
-            {removingBloat ? <><Spinner /> Removing…</> : `🗑 Remove (${selBloat.size})`}
+            {removingBloat ? <><Spinner /> {t("debloatRemoving")}</> : `🗑 ${t("debloatRemoveBtn")} (${selBloat.size})`}
           </button>
-          <button className="btn small ghost" onClick={() => setSelBloat(new Set(RECOMMENDED_BLOAT))}>Reset</button>
-          <button className="btn small ghost" onClick={() => setSelBloat(new Set(BLOAT_PACKAGES.map(b => b.name)))}>All</button>
-          <button className="btn small ghost" onClick={() => setSelBloat(new Set())}>None</button>
+          <button className="btn small ghost" onClick={() => setSelBloat(new Set(RECOMMENDED_BLOAT))}>{t("debloatReset")}</button>
+          <button className="btn small ghost" onClick={() => setSelBloat(new Set(BLOAT_PACKAGES.map(b => b.name)))}>{t("debloatAll")}</button>
+          <button className="btn small ghost" onClick={() => setSelBloat(new Set())}>{t("debloatNone")}</button>
         </div>
         {bloatLog && <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>{bloatLog}</div>}
       </div>
 
       <div className="muted" style={{ fontSize: 11, marginTop: 20 }}>
-        System tweaks are reversible — click an applied tweak to revert. UWP removal is permanent but apps can be reinstalled from the Microsoft Store.
+        {t("debloatFooterNote")}
       </div>
     </>
   );

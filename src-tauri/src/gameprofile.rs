@@ -6,10 +6,22 @@ use crate::gamedb::{self, Game};
 use crate::ps;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::Duration;
 use tauri::Emitter;
+
+/// Guards against `start()` spawning more than one polling thread
+/// (e.g. if app setup ever runs twice, or a future reload path calls it again).
+static STARTED: AtomicBool = AtomicBool::new(false);
+
+/// Lock helper that recovers from a poisoned mutex instead of panicking.
+/// A panic while some other holder was mutating state must not permanently
+/// brick every other command that touches `SwitcherState`.
+fn lock(state: &SharedState) -> MutexGuard<'_, SwitcherState> {
+    state.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 // ── Power-plan GUIDs ─────────────────────────────────────────────────────────
 const PLAN_BALANCED:          &str = "381b4222-f694-41f0-9685-ff5bb260df2e";
@@ -38,12 +50,15 @@ pub fn new_state() -> SharedState {
 
 // ── Background polling thread ────────────────────────────────────────────────
 pub fn start(state: SharedState, app: tauri::AppHandle) {
+    if STARTED.swap(true, Ordering::SeqCst) {
+        return; // already running — never spawn a second poll loop
+    }
     thread::spawn(move || {
         loop {
             thread::sleep(Duration::from_secs(3));
 
             let (enabled, current_game, preset) = {
-                let s = state.lock().unwrap();
+                let s = lock(&state);
                 (s.enabled, s.active_game.clone(), s.default_preset.clone())
             };
             if !enabled { continue; }
@@ -60,7 +75,7 @@ pub fn start(state: SharedState, app: tauri::AppHandle) {
                 (Some(game), None) => {
                     let prev = get_active_plan_guid();
                     {
-                        let mut s = state.lock().unwrap();
+                        let mut s = lock(&state);
                         s.active_game    = Some(game.id.to_string());
                         s.prev_plan_guid = prev.clone();
                     }
@@ -75,7 +90,7 @@ pub fn start(state: SharedState, app: tauri::AppHandle) {
                 // Active game no longer running — revert
                 (None, Some(id)) => {
                     {
-                        let mut s = state.lock().unwrap();
+                        let mut s = lock(&state);
                         s.active_game = None;
                     }
                     revert_power_plan(&state);
@@ -85,7 +100,7 @@ pub fn start(state: SharedState, app: tauri::AppHandle) {
                 // Different game detected (switched without closing first)
                 (Some(game), Some(ref cid)) if game.id != cid.as_str() => {
                     {
-                        let mut s = state.lock().unwrap();
+                        let mut s = lock(&state);
                         s.active_game = Some(game.id.to_string());
                         // keep prev_plan_guid from original game launch
                     }
@@ -112,7 +127,7 @@ pub fn cmd_game_list() -> Value {
 
 /// Return current switcher status.
 pub fn cmd_game_switcher_status(state: &SharedState) -> Value {
-    let s = state.lock().unwrap();
+    let s = lock(state);
     json!({
         "enabled":       s.enabled,
         "defaultPreset": s.default_preset,
@@ -126,7 +141,7 @@ pub fn cmd_game_switcher_configure(
     enabled: bool,
     default_preset: String,
 ) -> Value {
-    let mut s = state.lock().unwrap();
+    let mut s = lock(state);
     s.enabled        = enabled;
     s.default_preset = default_preset;
     json!({ "ok": true })
@@ -147,7 +162,7 @@ pub fn cmd_game_apply_preset(game_id: String, preset: String) -> Value {
 /// Manually revert to balanced power plan.
 pub fn cmd_game_revert(state: &SharedState) -> Value {
     revert_power_plan(state);
-    let mut s = state.lock().unwrap();
+    let mut s = lock(state);
     s.active_game = None;
     json!({ "ok": true })
 }
@@ -204,7 +219,7 @@ fn apply_power_plan_for_preset(game: &Game, preset: &str) {
 
 fn revert_power_plan(state: &SharedState) {
     let guid = {
-        let s = state.lock().unwrap();
+        let s = lock(state);
         s.prev_plan_guid.clone().unwrap_or_else(|| PLAN_BALANCED.to_string())
     };
     set_power_plan(&guid);

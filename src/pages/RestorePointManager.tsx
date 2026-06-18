@@ -1,22 +1,13 @@
 import React, { useEffect, useState } from "react";
 import { api } from "../api";
 import { Card, Spinner } from "../components/ui";
+import { useLang } from "../i18n";
 
 type RP = {
   SequenceNumber: number;
   Description: string;
   RestorePointType: number | string;
   CreationTime: string;
-};
-
-const RP_TYPES: Record<number, string> = {
-  0:  "Application Install",
-  1:  "Application Uninstall",
-  6:  "Restore Operation",
-  7:  "Checkpoint",
-  10: "Device Driver Install",
-  12: "Modify Settings",
-  13: "Cancelled Operation",
 };
 
 function fmtDate(raw: string): string {
@@ -30,6 +21,7 @@ function fmtDate(raw: string): string {
 }
 
 export default function RestorePointManager({ admin }: { admin: boolean }) {
+  const { t } = useLang();
   const [points, setPoints] = useState<RP[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy]     = useState<number | null>(null);
@@ -38,6 +30,16 @@ export default function RestorePointManager({ admin }: { admin: boolean }) {
   const [log, setLog]       = useState("");
   const [confirm, setConfirm] = useState<number | null>(null);
 
+  const RP_TYPES: Record<number, string> = {
+    0:  t("restoreTypeAppInstall"),
+    1:  t("restoreTypeAppUninstall"),
+    6:  t("restoreTypeRestoreOp"),
+    7:  t("restoreTypeCheckpoint"),
+    10: t("restoreTypeDriverInstall"),
+    12: t("restoreTypeModifySettings"),
+    13: t("restoreTypeCancelledOp"),
+  };
+
   const load = async () => {
     setLoading(true);
     setLog("");
@@ -45,7 +47,7 @@ export default function RestorePointManager({ admin }: { admin: boolean }) {
       const r = await api.listRestorePoints();
       const arr = Array.isArray(r) ? r : r?.error ? [] : [r];
       setPoints(arr.sort((a: RP, b: RP) => b.SequenceNumber - a.SequenceNumber));
-      if (r?.error) setLog(`Error: ${r.error}`);
+      if (r?.error) setLog(`${t("error")}: ${r.error}`);
     } finally { setLoading(false); }
   };
 
@@ -81,43 +83,43 @@ export default function RestorePointManager({ admin }: { admin: boolean }) {
 
   return (
     <>
-      <div className="page-title">🛟 Restore Points</div>
+      <div className="page-title">🛟 {t("restoreTitle")}</div>
       <div className="page-sub">
-        Create and manage System Restore Points. Use "System Restore" to roll back the OS to a checkpoint.
-        {!admin && <span style={{ color: "var(--orange)" }}> · Admin required to create/delete restore points.</span>}
+        {t("restoreSub")}
+        {!admin && <span style={{ color: "var(--orange)" }}> · {t("restoreAdminRequiredHint")}</span>}
       </div>
 
       {/* Create */}
-      <Card title="Create Restore Point" style={{ marginBottom: 14 }}>
+      <Card title={t("restoreCreateTitle")} style={{ marginBottom: 14 }}>
         <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
           <input
             value={desc}
             onChange={e => setDesc(e.target.value)}
-            placeholder="Description…"
+            placeholder={t("restoreDescPlaceholder")}
             style={{ flex: 1, minWidth: 200, padding: "6px 10px", fontSize: 13, background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 4, color: "var(--fg)" }}
           />
           <button className="btn" disabled={creating || !desc.trim() || !admin} onClick={create}>
-            {creating ? <><Spinner /> Creating…</> : "🛟 Create"}
+            {creating ? <><Spinner /> {t("restoreCreating")}</> : `🛟 ${t("restoreCreateBtn")}`}
           </button>
           <button className="btn ghost" onClick={openRstrui}>
-            🪟 System Restore…
+            🪟 {t("restoreSystemRestoreBtn")}
           </button>
         </div>
         {!admin && (
-          <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>Restart the app as administrator to create restore points.</div>
+          <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>{t("restoreAdminHint")}</div>
         )}
       </Card>
 
       {/* List */}
-      <Card title={`Restore Points (${points.length})`}>
+      <Card title={`${t("restorePointsTitle")} (${points.length})`}>
         <div className="row" style={{ gap: 8, marginBottom: 12 }}>
-          <button className="btn small ghost" onClick={load} disabled={loading}>↺ Refresh</button>
+          <button className="btn small ghost" onClick={load} disabled={loading}>↺ {t("refresh2")}</button>
         </div>
 
         {loading ? (
-          <div className="row" style={{ gap: 10 }}><Spinner /><span className="muted">Loading…</span></div>
+          <div className="row" style={{ gap: 10 }}><Spinner /><span className="muted">{t("loading")}</span></div>
         ) : points.length === 0 ? (
-          <div className="muted">No restore points found. Create one above, or check if System Restore is enabled.</div>
+          <div className="muted">{t("restoreEmpty")}</div>
         ) : (
           <div style={{ maxHeight: "55vh", overflowY: "auto" }}>
             {points.map((rp) => (
@@ -128,22 +130,22 @@ export default function RestorePointManager({ admin }: { admin: boolean }) {
                     <div className="muted" style={{ fontSize: 10 }}>#{rp.SequenceNumber}</div>
                   </div>
                   <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 600, fontSize: 13 }}>{rp.Description || "(no description)"}</div>
+                    <div style={{ fontWeight: 600, fontSize: 13 }}>{rp.Description || t("restoreNoDescription")}</div>
                     <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
                       {fmtDate(rp.CreationTime)}
                       {rp.RestorePointType !== undefined && (
-                        <span> · {RP_TYPES[Number(rp.RestorePointType)] ?? `Type ${rp.RestorePointType}`}</span>
+                        <span> · {RP_TYPES[Number(rp.RestorePointType)] ?? `${t("restoreTypeGeneric")} ${rp.RestorePointType}`}</span>
                       )}
                     </div>
                   </div>
                   <div className="row" style={{ gap: 6, flexShrink: 0 }}>
                     {confirm === rp.SequenceNumber ? (
                       <>
-                        <span className="muted" style={{ fontSize: 12, alignSelf: "center" }}>Delete?</span>
+                        <span className="muted" style={{ fontSize: 12, alignSelf: "center" }}>{t("restoreDeleteConfirm")}</span>
                         <button className="btn small danger" disabled={busy === rp.SequenceNumber} onClick={() => del(rp.SequenceNumber)}>
-                          {busy === rp.SequenceNumber ? <><Spinner /></> : "Yes"}
+                          {busy === rp.SequenceNumber ? <><Spinner /></> : t("restoreYes")}
                         </button>
-                        <button className="btn small ghost" onClick={() => setConfirm(null)}>No</button>
+                        <button className="btn small ghost" onClick={() => setConfirm(null)}>{t("restoreNo")}</button>
                       </>
                     ) : (
                       <button
@@ -151,7 +153,7 @@ export default function RestorePointManager({ admin }: { admin: boolean }) {
                         disabled={!admin || busy !== null}
                         onClick={() => setConfirm(rp.SequenceNumber)}
                       >
-                        🗑 Delete
+                        🗑 {t("restoreDeleteBtn")}
                       </button>
                     )}
                   </div>
@@ -166,8 +168,8 @@ export default function RestorePointManager({ admin }: { admin: boolean }) {
         )}
 
         <div className="muted" style={{ fontSize: 11, marginTop: 12 }}>
-          "System Restore" opens the Windows restore wizard where you can roll back to any checkpoint.
-          Deleting a restore point is permanent. Windows auto-creates points when tweaks are applied.
+          {t("restoreFootSystemRestore")}
+          {t("restoreFootDeletePermanent")}
         </div>
       </Card>
     </>

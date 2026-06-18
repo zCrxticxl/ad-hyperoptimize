@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { api, onMetrics, Metrics } from "../api";
 import { Card, Bar } from "../components/ui";
+import { useLang } from "../i18n";
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
 } from "recharts";
@@ -8,6 +9,7 @@ import {
 const MAX_POINTS = 60;
 
 export default function Monitor() {
+  const { t } = useLang();
   const [latest, setLatest] = useState<Metrics | null>(null);
   const [series, setSeries] = useState<any[]>([]);
   const unlisten = useRef<(() => void) | null>(null);
@@ -50,29 +52,29 @@ export default function Monitor() {
 
   return (
     <>
-      <div className="page-title">Live Monitor</div>
-      <div className="page-sub">1-second sampling · CPU, memory, network, disks, top processes.</div>
+      <div className="page-title">{t("monTitle")}</div>
+      <div className="page-sub">{t("monSub")}</div>
 
       <div className="grid grid-4">
-        <Card title="CPU"><div className="stat-big">{latest?.cpuTotal.toFixed(1) ?? "—"}%</div>
+        <Card title={t("monCpu")}><div className="stat-big">{latest?.cpuTotal.toFixed(1) ?? "—"}%</div>
           <div className="stat-sub">{latest?.freqMhz ? `${latest.freqMhz} MHz` : ""}</div></Card>
-        <Card title="Memory"><div className="stat-big">{latest ? ((latest.memUsedMb / latest.memTotalMb) * 100).toFixed(0) : "—"}%</div>
+        <Card title={t("monMemory")}><div className="stat-big">{latest ? ((latest.memUsedMb / latest.memTotalMb) * 100).toFixed(0) : "—"}%</div>
           <div className="stat-sub">{latest ? `${(latest.memUsedMb / 1024).toFixed(1)} / ${(latest.memTotalMb / 1024).toFixed(1)} GB` : ""}</div></Card>
-        <Card title="Net ↓"><div className="stat-big">{latest ? fmtRate(latest.netRxKbs) : "—"}</div></Card>
-        <Card title="Net ↑"><div className="stat-big">{latest ? fmtRate(latest.netTxKbs) : "—"}</div></Card>
+        <Card title={t("monNetDown")}><div className="stat-big">{latest ? fmtRate(latest.netRxKbs) : "—"}</div></Card>
+        <Card title={t("monNetUp")}><div className="stat-big">{latest ? fmtRate(latest.netTxKbs) : "—"}</div></Card>
       </div>
 
       <div className="grid grid-2 mt">
-        <Card title="CPU usage %">{chart("cpu", "#4f8cff", "%", [0, 100])}</Card>
-        <Card title="Memory usage %">{chart("mem", "#7c5cff", "%", [0, 100])}</Card>
+        <Card title={t("monCpuUsagePct")}>{chart("cpu", "#4f8cff", "%", [0, 100])}</Card>
+        <Card title={t("monMemUsagePct")}>{chart("mem", "#7c5cff", "%", [0, 100])}</Card>
       </div>
       <div className="grid grid-2 mt">
-        <Card title="Network ↓ KB/s">{chart("rx", "#3fd68f", "KB/s")}</Card>
-        <Card title="Network ↑ KB/s">{chart("tx", "#ffd166", "KB/s")}</Card>
+        <Card title={t("monNetDownKbs")}>{chart("rx", "#3fd68f", "KB/s")}</Card>
+        <Card title={t("monNetUpKbs")}>{chart("tx", "#ffd166", "KB/s")}</Card>
       </div>
 
       <div className="grid grid-2 mt">
-        <Card title="Top processes — CPU">
+        <Card title={t("monTopProcsCpu")}>
           <table className="tbl">
             <tbody>
               {latest?.topCpu.map((p, i) => (
@@ -81,7 +83,7 @@ export default function Monitor() {
             </tbody>
           </table>
         </Card>
-        <Card title="Top processes — Memory">
+        <Card title={t("monTopProcsMem")}>
           <table className="tbl">
             <tbody>
               {latest?.topMem.map((p, i) => (
@@ -92,14 +94,14 @@ export default function Monitor() {
         </Card>
       </div>
 
-      <Card title="Disks" style={{ marginTop: 14 }}>
+      <Card title={t("monDisks")} style={{ marginTop: 14 }}>
         {latest?.disks.map((d, i) => {
           const used = ((d.totalGb - d.freeGb) / d.totalGb) * 100;
           return (
             <div key={i} className="mt">
               <div className="row" style={{ justifyContent: "space-between" }}>
                 <span>{d.name}</span>
-                <span className="muted">{d.freeGb.toFixed(1)} GB free of {d.totalGb.toFixed(0)} GB</span>
+                <span className="muted">{d.freeGb.toFixed(1)} GB {t("monFreeOf")} {d.totalGb.toFixed(0)} GB</span>
               </div>
               <Bar pct={used} color={used > 90 ? "var(--red)" : undefined} />
             </div>

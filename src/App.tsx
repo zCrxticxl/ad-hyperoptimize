@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { check as checkUpdate } from "@tauri-apps/plugin-updater";
 import { api } from "./api";
-import { LangProvider, useLang } from "./i18n";
+import { LangProvider, useLang, LANG_NAMES, Lang } from "./i18n";
 import Dashboard from "./pages/Dashboard";
 import Hardware from "./pages/Hardware";
 import Monitor from "./pages/Monitor";
@@ -39,68 +39,70 @@ import SoftwareInstaller from "./pages/SoftwareInstaller";
 type NavItem = { id: string; icon: string; label: string };
 type NavGroup = { group: string; items: NavItem[] };
 
-const NAV: NavGroup[] = [
+type NavBuilder = (t: (key: any) => string) => NavGroup[];
+
+const buildNav: NavBuilder = (t) => [
   {
-    group: "Overview",
+    group: t("navGrpOverview"),
     items: [
-      { id: "dashboard",   icon: "⌂",  label: "Dashboard" },
-      { id: "hardware",    icon: "▦",  label: "Hardware" },
-      { id: "monitor",     icon: "∿",  label: "Live Monitor" },
-      { id: "hwmonitor",   icon: "🌡", label: "HW Monitor" },
-      { id: "healthcheck", icon: "✚",  label: "Health Check" },
+      { id: "dashboard",   icon: "⌂",  label: t("navDashboard") },
+      { id: "hardware",    icon: "▦",  label: t("navHardware") },
+      { id: "monitor",     icon: "∿",  label: t("navMonitor") },
+      { id: "hwmonitor",   icon: "🌡", label: t("navHwMonitor") },
+      { id: "healthcheck", icon: "✚",  label: t("navHealthCheck") },
     ],
   },
   {
-    group: "Performance",
+    group: t("navGrpPerformance"),
     items: [
-      { id: "autoopt",    icon: "✨", label: "Auto-Optimize" },
-      { id: "perftweaks", icon: "⚡", label: "Perf Tweaks" },
-      { id: "optimize",   icon: "🚀", label: "Optimize" },
-      { id: "gameboost",  icon: "🎮", label: "Game Booster" },
-      { id: "powerplan",  icon: "🔋", label: "Power Plan" },
-      { id: "latency",    icon: "⚠",  label: "Latency" },
-      { id: "gputweaks",    icon: "▣",  label: "GPU Tweaks" },
-      { id: "profiles",     icon: "◎",  label: "Profiles" },
-      { id: "gameprofiles", icon: "🎮", label: "Game Profiles" },
+      { id: "autoopt",    icon: "✨", label: t("navAutoOpt") },
+      { id: "perftweaks", icon: "⚡", label: t("navPerfTweaks") },
+      { id: "optimize",   icon: "🚀", label: t("navOptimize") },
+      { id: "gameboost",  icon: "🎮", label: t("navGameBoost") },
+      { id: "powerplan",  icon: "🔋", label: t("navPowerPlan") },
+      { id: "latency",    icon: "⚠",  label: t("navLatency") },
+      { id: "gputweaks",    icon: "▣",  label: t("navGpuTweaks") },
+      { id: "profiles",     icon: "◎",  label: t("navProfiles") },
+      { id: "gameprofiles", icon: "🎮", label: t("navGameProfiles") },
     ],
   },
   {
-    group: "Cleanup",
+    group: t("navGrpCleanup"),
     items: [
-      { id: "cleanup",      icon: "🧹", label: "Cleanup" },
-      { id: "uninstaller",  icon: "🗑", label: "Uninstaller" },
-      { id: "diskanalyzer", icon: "◉",  label: "Disk Analyzer" },
-      { id: "regclean",     icon: "⎔",  label: "Reg Cleaner" },
-      { id: "debloater",    icon: "🚀", label: "Quick Setup" },
-      { id: "ctxmenu",      icon: "☰",  label: "Context Menu" },
+      { id: "cleanup",      icon: "🧹", label: t("navCleanup") },
+      { id: "uninstaller",  icon: "🗑", label: t("navUninstaller") },
+      { id: "diskanalyzer", icon: "◉",  label: t("navDiskAnalyzer") },
+      { id: "regclean",     icon: "⎔",  label: t("navRegClean") },
+      { id: "debloater",    icon: "🚀", label: t("navDebloater") },
+      { id: "ctxmenu",      icon: "☰",  label: t("navCtxMenu") },
     ],
   },
   {
-    group: "Privacy & Security",
+    group: t("navGrpPrivacySecurity"),
     items: [
-      { id: "privacy",  icon: "🔒", label: "Privacy" },
-      { id: "security", icon: "🛡", label: "Security" },
+      { id: "privacy",  icon: "🔒", label: t("navPrivacy") },
+      { id: "security", icon: "🛡", label: t("navSecurity") },
     ],
   },
   {
-    group: "System",
+    group: t("navGrpSystem"),
     items: [
-      { id: "processes",     icon: "≣",  label: "Processes" },
-      { id: "startup",       icon: "▶",  label: "Startup" },
-      { id: "services",      icon: "⚙",  label: "Services" },
-      { id: "schedtasks",    icon: "⏲",  label: "Sched. Tasks" },
-      { id: "drivers",       icon: "🔧", label: "Drivers" },
-      { id: "bootopt",       icon: "⏻",  label: "Boot Optimizer" },
-      { id: "restorepoints", icon: "🛟", label: "Restore Points" },
-      { id: "updates",       icon: "⟳",  label: "Updates" },
-      { id: "softinstaller",  icon: "📦", label: "Software Installer" },
+      { id: "processes",     icon: "≣",  label: t("navProcesses") },
+      { id: "startup",       icon: "▶",  label: t("navStartup") },
+      { id: "services",      icon: "⚙",  label: t("navServices") },
+      { id: "schedtasks",    icon: "⏲",  label: t("navSchedTasks") },
+      { id: "drivers",       icon: "🔧", label: t("navDrivers") },
+      { id: "bootopt",       icon: "⏻",  label: t("navBootOpt") },
+      { id: "restorepoints", icon: "🛟", label: t("navRestorePoints") },
+      { id: "updates",       icon: "⟳",  label: t("navUpdates") },
+      { id: "softinstaller",  icon: "📦", label: t("navSoftInstaller") },
     ],
   },
   {
-    group: "Reports",
+    group: t("navGrpReports"),
     items: [
-      { id: "benchmark", icon: "⏱",  label: "Benchmark" },
-      { id: "reports",   icon: "📄", label: "Reports" },
+      { id: "benchmark", icon: "⏱",  label: t("navBenchmark") },
+      { id: "reports",   icon: "📄", label: t("navReports") },
     ],
   },
 ];
@@ -109,6 +111,7 @@ export type Mode = "beginner" | "expert";
 
 function AppInner() {
   const { lang, setLang, t } = useLang();
+  const NAV = buildNav(t);
   const [page, setPage] = useState<string>("dashboard");
   const [admin, setAdmin] = useState<boolean | null>(null);
   const [mode, setMode] = useState<Mode>("beginner");
@@ -167,10 +170,16 @@ function AppInner() {
         </div>
 
         <div className="sidebar-footer">
-          <div className="mode-toggle" style={{ marginBottom: 8 }}>
-            <button className={lang === "de" ? "on" : ""} onClick={() => setLang("de")}>DE</button>
-            <button className={lang === "en" ? "on" : ""} onClick={() => setLang("en")}>EN</button>
-          </div>
+          <select
+            className="lang-select"
+            value={lang}
+            onChange={(e) => setLang(e.target.value as Lang)}
+            style={{ marginBottom: 10, width: "100%" }}
+          >
+            {Object.entries(LANG_NAMES).map(([code, name]) => (
+              <option key={code} value={code}>{name}</option>
+            ))}
+          </select>
 
           <div className="mode-toggle" style={{ marginBottom: 10 }}>
             <button className={mode === "beginner" ? "on" : ""} onClick={() => setMode("beginner")}>
@@ -181,7 +190,7 @@ function AppInner() {
             </button>
           </div>
 
-          {admin === null ? "checking…" : admin ? (
+          {admin === null ? t("navChecking") : admin ? (
             <span className="admin-badge admin-yes">{t("adminBadge")}</span>
           ) : (
             <span className="admin-badge admin-no">{t("userBadge")}</span>
@@ -224,14 +233,14 @@ function AppInner() {
             background: "rgba(0,140,255,0.10)", border: "1px solid rgba(0,140,255,0.35)",
             borderRadius: 8, fontSize: 13,
           }}>
-            <span style={{ fontWeight: 700, color: "var(--accent)" }}>⟳ Update available</span>
-            <span className="muted">v{updateBanner.version} is ready to install</span>
+            <span style={{ fontWeight: 700, color: "var(--accent)" }}>⟳ {t("navUpdateAvailable")}</span>
+            <span className="muted">v{updateBanner.version} {t("navUpdateReady")}</span>
             <button
               className="btn small"
               style={{ marginLeft: "auto" }}
               onClick={() => { setPage("updates"); setUpdateBanner(null); }}
             >
-              Install update →
+              {t("navInstallUpdate")} →
             </button>
             <button
               className="btn small ghost"

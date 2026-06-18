@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useMemo } from "react";
 import { api } from "../api";
 import { Card, Spinner } from "../components/ui";
+import { useLang } from "../i18n";
 
 type Rec = {
   id: string; module: string; category: string; name: string;
@@ -8,6 +9,7 @@ type Rec = {
 };
 
 export default function AutoOptimizer({ admin }: { admin: boolean }) {
+  const { t } = useLang();
   const [data, setData]       = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -68,15 +70,14 @@ export default function AutoOptimizer({ admin }: { admin: boolean }) {
 
   return (
     <>
-      <div className="page-title">✨ Auto-Optimizer</div>
+      <div className="page-title">✨ {t("autoTitle")}</div>
       <div className="page-sub">
-        Scans safe, well-tested tweaks across all modules and applies your selection in one click.
-        A restore point is created automatically before applying.
-        {!admin && <span style={{ color: "var(--orange)" }}> · Some tweaks require admin.</span>}
+        {t("autoSub")}
+        {!admin && <span style={{ color: "var(--orange)" }}> · {t("autoAdminHint")}</span>}
       </div>
 
       {loading ? (
-        <Card title=""><div className="row" style={{ gap: 10 }}><Spinner /><span className="muted">Scanning all modules…</span></div></Card>
+        <Card title=""><div className="row" style={{ gap: 10 }}><Spinner /><span className="muted">{t("autoScanning")}</span></div></Card>
       ) : (
         <>
           {/* Score + summary */}
@@ -94,34 +95,34 @@ export default function AutoOptimizer({ admin }: { admin: boolean }) {
                 </div>
               </div>
               <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>Optimization Score</div>
+                <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>{t("autoScoreTitle")}</div>
                 <div className="muted" style={{ fontSize: 13 }}>
-                  {data.total - data.pending} of {data.total} safe tweaks applied · {data.pending} pending
+                  {data.total - data.pending} {t("autoOf")} {data.total} {t("autoSafeTweaksApplied")} · {data.pending} {t("autoPendingWord")}
                 </div>
                 {data.pending === 0 && (
                   <div style={{ color: "var(--green)", fontWeight: 600, marginTop: 6, fontSize: 13 }}>
-                    ✓ System fully optimized — nothing left to apply.
+                    ✓ {t("autoFullyOptimized")}
                   </div>
                 )}
               </div>
               <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
                 {pending.length > 0 && (
                   <>
-                    <button className="btn small ghost" onClick={() => setSelected(new Set(pending.map(r => r.id)))}>Select all</button>
-                    <button className="btn small ghost" onClick={() => setSelected(new Set())}>Clear</button>
+                    <button className="btn small ghost" onClick={() => setSelected(new Set(pending.map(r => r.id)))}>{t("autoSelectAll")}</button>
+                    <button className="btn small ghost" onClick={() => setSelected(new Set())}>{t("autoClear")}</button>
                     <button className="btn" disabled={!selected.size || busy} onClick={applySelected}>
-                      {busy ? <><Spinner /> Applying…</> : `⚡ Apply (${selected.size})`}
+                      {busy ? <><Spinner /> {t("autoApplying")}</> : `⚡ ${t("autoApplyBtn")} (${selected.size})`}
                     </button>
                   </>
                 )}
-                <button className="btn small ghost" onClick={() => load(true)} disabled={loading || busy}>↺ Rescan</button>
+                <button className="btn small ghost" onClick={() => load(true)} disabled={loading || busy}>↺ {t("autoRescan")}</button>
               </div>
             </div>
           </Card>
 
           {/* Results */}
           {results && (
-            <Card title={`Results — ${results.ok ?? 0} OK · ${results.errors ?? 0} errors`} style={{ marginBottom: 14 }}>
+            <Card title={`${t("autoResultsTitle")} — ${results.ok ?? 0} ${t("autoOk")} · ${results.errors ?? 0} ${t("autoErrors")}`} style={{ marginBottom: 14 }}>
               {results.restore_point && (
                 <div className="muted" style={{ fontSize: 11, marginBottom: 8 }}>🛟 {results.restore_point}</div>
               )}
@@ -142,7 +143,7 @@ export default function AutoOptimizer({ admin }: { admin: boolean }) {
 
           {/* Pending tweaks */}
           {pending.length > 0 && (
-            <Card title={`Pending (${pending.length})`} style={{ marginBottom: 14 }}>
+            <Card title={`${t("autoPendingTitle")} (${pending.length})`} style={{ marginBottom: 14 }}>
               {Object.entries(grouped).map(([cat, items]) => (
                 <div key={cat} style={{ marginBottom: 14 }}>
                   <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--muted)", marginBottom: 6, opacity: 0.7 }}>
@@ -157,7 +158,7 @@ export default function AutoOptimizer({ admin }: { admin: boolean }) {
                         {r.impact && <div style={{ fontSize: 11, color: "var(--green)", marginTop: 2 }}>↑ {r.impact}</div>}
                       </div>
                       <span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 4, background: "var(--bg2)", color: "var(--muted)", flexShrink: 0, alignSelf: "center" }}>
-                        {r.module === "tweak" ? "Tweak" : r.module === "privacy" ? "Privacy" : "Debloat"}
+                        {r.module === "tweak" ? t("autoBadgeTweak") : r.module === "privacy" ? t("autoBadgePrivacy") : t("autoBadgeDebloat")}
                       </span>
                     </label>
                   ))}
@@ -168,7 +169,7 @@ export default function AutoOptimizer({ admin }: { admin: boolean }) {
 
           {/* Already applied */}
           {applied.length > 0 && (
-            <Card title={`Already Applied (${applied.length})`}>
+            <Card title={`${t("autoAppliedTitle")} (${applied.length})`}>
               <div style={{ maxHeight: 200, overflowY: "auto" }}>
                 {applied.map(r => (
                   <div key={r.id} className="row" style={{ gap: 8, padding: "5px 0", borderBottom: "1px solid var(--border)", fontSize: 12 }}>

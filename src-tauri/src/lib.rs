@@ -390,20 +390,20 @@ fn cmd_gameboost_kill_background(pids: Vec<u32>) -> Result<String, String> {
 #[tauri::command(async)]
 fn cmd_gameboost_start(pid: u32, state: State<AppState>) -> Result<String, String> {
     let r = gameboost::boost_start(pid)?;
-    *state.boosted_pid.lock().unwrap() = Some(pid);
+    *state.boosted_pid.lock().unwrap_or_else(|e| e.into_inner()) = Some(pid);
     Ok(r)
 }
 
 #[tauri::command(async)]
 fn cmd_gameboost_stop(state: State<AppState>) -> Result<String, String> {
     let r = gameboost::boost_stop()?;
-    *state.boosted_pid.lock().unwrap() = None;
+    *state.boosted_pid.lock().unwrap_or_else(|e| e.into_inner()) = None;
     Ok(r)
 }
 
 #[tauri::command]
 fn cmd_gameboost_get_status(state: State<AppState>) -> Option<u32> {
-    *state.boosted_pid.lock().unwrap()
+    *state.boosted_pid.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 #[tauri::command(async)]

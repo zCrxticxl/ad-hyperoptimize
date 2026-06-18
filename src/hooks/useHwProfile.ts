@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
+import { useLang } from "../i18n";
+import { localizeWarning, localizeRisk } from "../localize";
 
 export type HwWarning = {
   page: string;
@@ -82,13 +84,16 @@ export function useHwProfile(): HwProfile | null {
 
 export function useHwWarnings(page: string): HwWarning[] {
   const profile = useHwProfile();
+  const { lang } = useLang();
   if (!profile) return [];
-  return profile.warnings.filter(w => w.page === page);
+  return profile.warnings.filter(w => w.page === page).map(w => localizeWarning(w, lang));
 }
 
 // Hardware-aware risk verdict for one specific tweak id, or undefined if this
 // tweak has no known hardware-specific risk on the detected system.
 export function useTweakRisk(id: string): TweakRisk | undefined {
   const profile = useHwProfile();
-  return profile?.tweakRisks?.[id];
+  const { lang } = useLang();
+  const risk = profile?.tweakRisks?.[id];
+  return risk ? localizeRisk(risk, id, lang) : undefined;
 }

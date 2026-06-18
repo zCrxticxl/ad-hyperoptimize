@@ -3,15 +3,9 @@ import { api } from "../api";
 import { Card, Spinner } from "../components/ui";
 import { HwWarnings, RiskBadge } from "../components/HwWarnings";
 import { useHwProfile } from "../hooks/useHwProfile";
+import { useLang } from "../i18n";
 
 const ULTIMATE_GUID = "e9a42b02-d5df-448d-aa00-03f14749eb61";
-
-const PLAN_DESC: Record<string, string> = {
-  "381b4222-f694-41f0-9685-ff5bb260df2e": "Balances performance with energy — Windows default.",
-  "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c": "Favors performance over energy saving. No CPU throttling.",
-  "a1841308-3541-4fab-bc81-f71556f20b4a": "Reduces PC performance to save energy. Not for gaming.",
-  "e9a42b02-d5df-448d-aa00-03f14749eb61": "Eliminates micro-latency by preventing CPU from downclocking. Best for competitive gaming.",
-};
 
 // Map a plan's GUID to a risk-badge id. The 3 non-Ultimate Windows defaults
 // have no backend risk entry (intentional — they're always safe, badge
@@ -29,6 +23,7 @@ function riskIdForPlan(guid: string): string {
 }
 
 export default function PowerPlan({ admin }: { admin: boolean }) {
+  const { t } = useLang();
   const [data, setData] = useState<any>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [log, setLog] = useState("");
@@ -36,6 +31,13 @@ export default function PowerPlan({ admin }: { admin: boolean }) {
   const [showCreate, setShowCreate] = useState(false);
   const profile = useHwProfile();
   const ultimateRisk = profile?.tweakRisks?.["power_plan_ultimate"];
+
+  const PLAN_DESC: Record<string, string> = {
+    "381b4222-f694-41f0-9685-ff5bb260df2e": t("pwrDescBalanced"),
+    "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c": t("pwrDescHighPerf"),
+    "a1841308-3541-4fab-bc81-f71556f20b4a": t("pwrDescPowerSaver"),
+    "e9a42b02-d5df-448d-aa00-03f14749eb61": t("pwrDescUltimate"),
+  };
 
   const load = async () => setData(await api.powerplanList());
   useEffect(() => { load(); }, []);
@@ -55,36 +57,34 @@ export default function PowerPlan({ admin }: { admin: boolean }) {
 
   return (
     <>
-      <div className="page-title">🔋 Power Plan Manager</div>
+      <div className="page-title">🔋 {t("pwrTitle")}</div>
       <div className="page-sub">
-        Switch Windows power schemes, unlock hidden Ultimate Performance plan, create custom plans.
-        {!admin && <span style={{ color: "var(--orange)" }}> · Admin required to change plans.</span>}
+        {t("pwrSub")}
+        {!admin && <span style={{ color: "var(--orange)" }}> · {t("pwrAdminRequiredHint")}</span>}
       </div>
       <HwWarnings page="power_plan" />
 
       {!hasUltimate && (
-        <Card title="⚡ Unlock Ultimate Performance" style={{ marginBottom: 14 }}>
+        <Card title={`⚡ ${t("pwrUnlockUltimateTitle")}`} style={{ marginBottom: 14 }}>
           <div className="muted" style={{ fontSize: 13, marginBottom: 10 }}>
-            Ultimate Performance is a hidden plan built into Windows 10/11 Pro that eliminates
-            micro-latency by keeping the CPU at max frequency with no power-saving downclocks.
-            Ideal for competitive gaming and low-latency workloads.
+            {t("pwrUnlockUltimateDesc")}
           </div>
           {ultimateRisk && <div style={{ marginBottom: 8 }}><RiskBadge id="power_plan_ultimate" /></div>}
           <button
             className="btn"
             onClick={() => {
-              if (ultimateRisk && !window.confirm(`${ultimateRisk.title}\n\n${ultimateRisk.message}\n\nContinue anyway?`)) return;
+              if (ultimateRisk && !window.confirm(`${ultimateRisk.title}\n\n${ultimateRisk.message}\n\n${t("pwrContinueAnyway")}`)) return;
               act("unlock", api.powerplanUnlockUltimate);
             }}
             disabled={busy !== null || !admin}
           >
-            {busy === "unlock" ? <><Spinner /> Unlocking…</> : "⚡ Unlock Ultimate Performance"}
+            {busy === "unlock" ? <><Spinner /> {t("pwrUnlocking")}</> : `⚡ ${t("pwrUnlockUltimateBtn")}`}
           </button>
           {log && <div className="mono muted" style={{ fontSize: 11, marginTop: 8 }}>{log}</div>}
         </Card>
       )}
 
-      <Card title={`Power Plans (${plans.length})`}>
+      <Card title={`${t("pwrPlansTitle")} (${plans.length})`}>
         {!data ? <Spinner /> : (
           <>
             {plans.map((p: any) => (
@@ -102,11 +102,11 @@ export default function PowerPlan({ admin }: { admin: boolean }) {
                   <div className="row" style={{ alignItems: "center", gap: 8, marginBottom: 3 }}>
                     {p.active && <span style={{ color: "var(--green)", fontWeight: 700 }}>●</span>}
                     <b style={{ color: p.active ? "var(--accent)" : "var(--fg)" }}>{p.name}</b>
-                    {p.active && <span style={{ fontSize: 11, color: "var(--green)" }}>ACTIVE</span>}
+                    {p.active && <span style={{ fontSize: 11, color: "var(--green)" }}>{t("pwrPlanActive")}</span>}
                     <RiskBadge id={riskIdForPlan(p.guid)} />
                   </div>
                   <div className="muted" style={{ fontSize: 12 }}>
-                    {PLAN_DESC[p.guid.toLowerCase()] ?? "Custom power plan"}
+                    {PLAN_DESC[p.guid.toLowerCase()] ?? t("pwrDescCustom")}
                   </div>
                   <div className="mono muted" style={{ fontSize: 10, marginTop: 2 }}>{p.guid}</div>
                 </div>
@@ -116,12 +116,12 @@ export default function PowerPlan({ admin }: { admin: boolean }) {
                       className="btn small"
                       onClick={() => {
                         if (p.guid.toLowerCase() === ULTIMATE_GUID && ultimateRisk &&
-                            !window.confirm(`${ultimateRisk.title}\n\n${ultimateRisk.message}\n\nContinue anyway?`)) return;
+                            !window.confirm(`${ultimateRisk.title}\n\n${ultimateRisk.message}\n\n${t("pwrContinueAnyway")}`)) return;
                         act(p.guid, () => api.powerplanSet(p.guid));
                       }}
                       disabled={busy !== null || !admin}
                     >
-                      {busy === p.guid ? "…" : "Set Active"}
+                      {busy === p.guid ? "…" : t("pwrSetActive")}
                     </button>
                   )}
                   {!["381b4222-f694-41f0-9685-ff5bb260df2e",
@@ -131,7 +131,7 @@ export default function PowerPlan({ admin }: { admin: boolean }) {
                     <button
                       className="btn small ghost danger"
                       onClick={async () => {
-                        if (!window.confirm(`Delete plan "${p.name}"?`)) return;
+                        if (!window.confirm(`${t("pwrDeleteConfirm")} "${p.name}"?`)) return;
                         act(`del-${p.guid}`, () => api.powerplanDelete(p.guid));
                       }}
                       disabled={busy !== null || p.active || !admin}
@@ -148,25 +148,25 @@ export default function PowerPlan({ admin }: { admin: boolean }) {
             <div style={{ marginTop: 14 }}>
               {!showCreate ? (
                 <button className="btn small ghost" onClick={() => setShowCreate(true)} disabled={!admin}>
-                  + Create custom plan…
+                  + {t("pwrCreateCustomBtn")}
                 </button>
               ) : (
                 <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                   <input
-                    placeholder="Plan name"
+                    placeholder={t("pwrPlanNamePlaceholder")}
                     value={newName}
                     onChange={e => setNewName(e.target.value)}
                     style={{ padding: "4px 8px", fontSize: 13, background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 4, color: "var(--fg)", width: 200 }}
                   />
-                  <span className="muted" style={{ fontSize: 12 }}>based on</span>
+                  <span className="muted" style={{ fontSize: 12 }}>{t("pwrBasedOn")}</span>
                   <button
                     className="btn small ghost"
                     onClick={() => act("create", () => api.powerplanCreate(newName, activeGuid))}
                     disabled={!newName.trim() || busy !== null}
                   >
-                    Duplicate active plan
+                    {t("pwrDuplicateActive")}
                   </button>
-                  <button className="btn small ghost" onClick={() => setShowCreate(false)}>Cancel</button>
+                  <button className="btn small ghost" onClick={() => setShowCreate(false)}>{t("cancel")}</button>
                 </div>
               )}
             </div>
@@ -175,8 +175,7 @@ export default function PowerPlan({ admin }: { admin: boolean }) {
       </Card>
 
       <div className="muted" style={{ fontSize: 12, marginTop: 14 }}>
-        Tip: Ultimate Performance keeps CPU at max clock — increases idle power draw by 10–30W.
-        Switch back to Balanced when not gaming.
+        {t("pwrUltimateTip")}
       </div>
     </>
   );
