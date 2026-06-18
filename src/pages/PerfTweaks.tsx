@@ -3,6 +3,7 @@ import { api } from "../api";
 import { Card, Spinner } from "../components/ui";
 import { HwWarnings, RiskBadge, RiskNotice } from "../components/HwWarnings";
 import { useHwProfile } from "../hooks/useHwProfile";
+import { useLang } from "../i18n";
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -23,6 +24,7 @@ function TempBar({ pct, color }: { pct: number; color: string }) {
 // ─── Timer Resolution ─────────────────────────────────────────────────────────
 
 function TimerCard({ admin }: { admin: boolean }) {
+  const { t } = useLang();
   const [data, setData] = useState<any>(null);
   const [busy, setBusy] = useState(false);
   const [log, setLog] = useState("");
@@ -56,9 +58,9 @@ function TimerCard({ admin }: { admin: boolean }) {
   const currentColor = isMin ? "var(--green)" : is1ms ? "var(--accent)" : "var(--red)";
 
   return (
-    <Card title="Timer Resolution">
+    <Card title={t("perfTimerTitle")}>
       <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
-        Windows default is ~15.6 ms. Lowering to 0.5 ms reduces scheduler jitter — measurably improves input latency and frame pacing.
+        {t("perfTimerDesc")}
       </div>
       <div style={{ marginBottom: 10 }}><RiskBadge id="timer_resolution_min" /></div>
       {!data ? <Spinner /> : data.error ? (
@@ -67,42 +69,42 @@ function TimerCard({ admin }: { admin: boolean }) {
         <>
           <table className="tbl" style={{ marginBottom: 10 }}><tbody>
             <tr>
-              <td className="muted">Current</td>
+              <td className="muted">{t("perfCurrent")}</td>
               <td><span style={{ color: currentColor, fontWeight: 700 }}>
                 {data.currentMs != null ? `${data.currentMs} ms` : "—"}
               </span></td>
             </tr>
-            <tr><td className="muted">Min possible</td><td>{data.minMs != null ? `${data.minMs} ms` : "—"}</td></tr>
-            <tr><td className="muted">Max (default)</td><td>{data.maxMs != null ? `${data.maxMs} ms` : "—"}</td></tr>
+            <tr><td className="muted">{t("perfTimerMinPossible")}</td><td>{data.minMs != null ? `${data.minMs} ms` : "—"}</td></tr>
+            <tr><td className="muted">{t("perfTimerMaxDefault")}</td><td>{data.maxMs != null ? `${data.maxMs} ms` : "—"}</td></tr>
             <tr>
-              <td className="muted">Persistent</td>
+              <td className="muted">{t("perfTimerPersistent")}</td>
               <td>
                 <span style={{ color: data.persistent ? "var(--green)" : data.globalReqEnabled ? "var(--accent)" : "var(--red)" }}>
                   {data.persistent
-                    ? "✓ active (background process running)"
+                    ? `✓ ${t("perfTimerActiveBg")}`
                     : data.globalReqEnabled
-                      ? "~ configured — apply again or reboot"
-                      : "✗ not set"}
+                      ? `~ ${t("perfTimerConfiguredReboot")}`
+                      : `✗ ${t("perfNotSet")}`}
                 </span>
               </td>
             </tr>
           </tbody></table>
-          {!admin && <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>⚠ Requires admin rights to apply.</div>}
+          {!admin && <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>⚠ {t("perfAdminRequiredApply")}</div>}
           <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
             {minNeedsAck ? (
               <button className="btn small" style={{ background: "var(--red)", borderColor: "var(--red)" }} disabled={busy || !admin} onClick={() => setRiskAck(true)}>
-                ⚠ Review risk before setting 0.5 ms
+                ⚠ {t("perfTimerReviewRisk")}
               </button>
             ) : (
               <button className="btn small" onClick={() => apply(5000)} disabled={busy || !admin}>
-                ⚡ Set 0.5 ms (gaming)
+                ⚡ {t("perfTimerSetGaming")}
               </button>
             )}
             <button className="btn small ghost" onClick={() => apply(10000)} disabled={busy || !admin}>
-              Set 1.0 ms
+              {t("perfTimerSet1ms")}
             </button>
             <button className="btn small ghost" onClick={reset} disabled={busy || !admin}>
-              ↩ Reset default
+              ↩ {t("perfResetDefault")}
             </button>
             <button className="btn small ghost" onClick={load} disabled={busy}>↺</button>
           </div>
@@ -117,6 +119,7 @@ function TimerCard({ admin }: { admin: boolean }) {
 // ─── MSI Mode ─────────────────────────────────────────────────────────────────
 
 function MsiCard({ admin }: { admin: boolean }) {
+  const { t } = useLang();
   const [data, setData] = useState<any>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [log, setLog] = useState("");
@@ -134,20 +137,19 @@ function MsiCard({ admin }: { admin: boolean }) {
   const devices: any[] = data?.devices ?? [];
 
   return (
-    <Card title="MSI Mode (Message Signaled Interrupts)">
+    <Card title={t("perfMsiTitle")}>
       <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
-        MSI replaces legacy line-based interrupts with in-band PCIe messages — eliminates shared interrupt contention,
-        reduces DPC latency on GPU and NIC. Requires reboot after change.
+        {t("perfMsiDesc")}
       </div>
       {!data ? <Spinner /> : (
         <>
-          {devices.length === 0 && <div className="muted">No GPU/NIC devices found.</div>}
+          {devices.length === 0 && <div className="muted">{t("perfMsiNoDevices")}</div>}
           {devices.map((d: any, i: number) => (
             <div key={i} className="row" style={{ padding: "6px 0", borderBottom: "1px solid var(--border)", alignItems: "center", gap: 10 }}>
               <span style={{ color: "var(--muted)", fontSize: 11, width: 36, flexShrink: 0 }}>[{d.type}]</span>
               <span style={{ flex: 1 }}>{d.name}</span>
               <span style={{ color: d.msiEnabled ? "var(--green)" : "var(--red)", fontWeight: 700, fontSize: 12 }}>
-                {d.msiEnabled ? "● MSI ON" : "● LINE"}
+                {d.msiEnabled ? `● ${t("perfMsiOn")}` : `● ${t("perfMsiLine")}`}
               </span>
               <RiskBadge id="msi_mode_toggle" />
               <button
@@ -155,13 +157,13 @@ function MsiCard({ admin }: { admin: boolean }) {
                 onClick={() => toggle(d)}
                 disabled={busy === d.regPath || !admin}
               >
-                {busy === d.regPath ? "…" : d.msiEnabled ? "Disable" : "Enable MSI"}
+                {busy === d.regPath ? "…" : d.msiEnabled ? t("perfDisable") : t("perfMsiEnable")}
               </button>
             </div>
           ))}
           {log && <div className="mono muted" style={{ fontSize: 11, marginTop: 8 }}>⚠ {log}</div>}
           <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>
-            Reboot required after any change. Verify in Device Manager → Interrupt Mode.
+            {t("perfMsiRebootNote")}
           </div>
         </>
       )}
@@ -171,17 +173,18 @@ function MsiCard({ admin }: { admin: boolean }) {
 
 // ─── Network Adapter Tweaks ────────────────────────────────────────────────────
 
-const NET_PROPS: { key: string; label: string; keyword: string; offVal: number; onVal: number }[] = [
-  { key: "intMod",     label: "Interrupt Moderation",       keyword: "*InterruptModeration",      offVal: 0, onVal: 1 },
-  { key: "rss",        label: "Receive Side Scaling (RSS)", keyword: "*RSS",                       offVal: 0, onVal: 1 },
-  { key: "tcpOffload", label: "TCP Checksum Offload",       keyword: "*TCPChecksumOffloadIPv4",   offVal: 0, onVal: 1 },
-  { key: "lsoV2",      label: "Large Send Offload v2",      keyword: "*LsoV2IPv4",                offVal: 0, onVal: 1 },
-];
-
 function NetCard({ admin }: { admin: boolean }) {
+  const { t } = useLang();
   const [data, setData] = useState<any>(null);
   const [busy, setBusy] = useState(false);
   const [log, setLog] = useState("");
+
+  const NET_PROPS: { key: string; label: string; keyword: string; offVal: number; onVal: number }[] = [
+    { key: "intMod",     label: t("perfNetIntMod"),     keyword: "*InterruptModeration",      offVal: 0, onVal: 1 },
+    { key: "rss",        label: t("perfNetRss"),        keyword: "*RSS",                       offVal: 0, onVal: 1 },
+    { key: "tcpOffload", label: t("perfNetTcpOffload"), keyword: "*TCPChecksumOffloadIPv4",   offVal: 0, onVal: 1 },
+    { key: "lsoV2",      label: t("perfNetLsoV2"),      keyword: "*LsoV2IPv4",                offVal: 0, onVal: 1 },
+  ];
 
   const load = async () => setData(await api.netAdapters());
   useEffect(() => { load(); }, []);
@@ -201,7 +204,7 @@ function NetCard({ admin }: { admin: boolean }) {
   };
 
   const resetAll = async () => {
-    if (!window.confirm("Reset all adapter properties to driver defaults?")) return;
+    if (!window.confirm(t("perfNetResetConfirm"))) return;
     setBusy(true);
     try { setLog(await api.netResetAll()); await load(); }
     catch (e: any) { setLog(String(e)); }
@@ -214,13 +217,13 @@ function NetCard({ admin }: { admin: boolean }) {
     val == null || val === "" || val === "0" || val?.toLowerCase().includes("disab");
 
   return (
-    <Card title="Network Adapter Tweaks">
+    <Card title={t("perfNetTitle")}>
       <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
-        Disabling interrupt moderation and offloading reduces latency at the cost of slightly more CPU usage — ideal for gaming/low-latency workloads.
+        {t("perfNetDesc")}
       </div>
       {!data ? <Spinner /> : (
         <>
-          {adapters.length === 0 && <div className="muted">No active physical adapters found.</div>}
+          {adapters.length === 0 && <div className="muted">{t("perfNetNoAdapters")}</div>}
           {adapters.map((a: any, ai: number) => (
             <div key={ai} style={{ marginBottom: 14 }}>
               <div className="row" style={{ marginBottom: 6, alignItems: "center", gap: 8 }}>
@@ -248,20 +251,20 @@ function NetCard({ admin }: { admin: boolean }) {
                       disabled={busy || !admin}
                       onClick={() => tweak(a.name, p.keyword, off ? p.onVal : p.offVal)}
                     >
-                      {off ? "Enable" : "Disable"}
+                      {off ? t("perfEnable") : t("perfDisable")}
                     </button>
                   </div>
                 );
               })}
             </div>
           ))}
-          {!admin && <div className="muted" style={{ fontSize: 12 }}>⚠ Requires admin rights.</div>}
+          {!admin && <div className="muted" style={{ fontSize: 12 }}>⚠ {t("perfAdminRequired")}</div>}
           <div className="row" style={{ gap: 8, marginTop: 10 }}>
             <button className="btn small" onClick={allGaming} disabled={busy || !admin}>
-              ⚡ Disable all (gaming preset)
+              ⚡ {t("perfNetDisableAllGaming")}
             </button>
             <button className="btn small ghost" onClick={resetAll} disabled={busy || !admin}>
-              ↩ Reset all to defaults
+              ↩ {t("perfNetResetAllDefaults")}
             </button>
             <button className="btn small ghost" onClick={load} disabled={busy}>↺</button>
           </div>
@@ -275,6 +278,7 @@ function NetCard({ admin }: { admin: boolean }) {
 // ─── RAM Standby Cleaner ──────────────────────────────────────────────────────
 
 function RamCard({ admin }: { admin: boolean }) {
+  const { t } = useLang();
   const [data, setData] = useState<any>(null);
   const [busy, setBusy] = useState(false);
   const [log, setLog] = useState("");
@@ -293,42 +297,41 @@ function RamCard({ admin }: { admin: boolean }) {
   const usedPct    = data?.totalMb > 0 ? Math.round((data.usedMb    / data.totalMb) * 100) : 0;
 
   return (
-    <Card title="RAM Standby Cleaner">
+    <Card title={t("perfRamTitle")}>
       <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
-        Standby cache holds recently freed pages — Windows reclaims it automatically, but flushing can immediately free RAM
-        for latency-sensitive workloads (e.g. before launching a game).
+        {t("perfRamDesc")}
       </div>
       {!data ? <Spinner /> : data.error ? (
         <div className="muted">{data.error}</div>
       ) : (
         <>
           <table className="tbl" style={{ marginBottom: 10 }}><tbody>
-            <tr><td className="muted">Total RAM</td><td>{mb(data.totalMb)}</td></tr>
+            <tr><td className="muted">{t("perfRamTotal")}</td><td>{mb(data.totalMb)}</td></tr>
             <tr>
-              <td className="muted">In use</td>
+              <td className="muted">{t("perfRamInUse")}</td>
               <td>
                 {mb(data.usedMb)} ({usedPct}%)
                 <TempBar pct={usedPct} color={usedPct > 85 ? "var(--red)" : "var(--accent)"} />
               </td>
             </tr>
             <tr>
-              <td className="muted">Standby cache</td>
+              <td className="muted">{t("perfRamStandbyCache")}</td>
               <td>
                 {mb(data.standbyMb)} ({standbyPct}%)
                 <TempBar pct={standbyPct} color="var(--muted)" />
               </td>
             </tr>
-            <tr><td className="muted">Modified list</td><td>{mb(data.modifiedMb)}</td></tr>
-            <tr><td className="muted">Free</td><td style={{ color: "var(--green)" }}>{mb(data.freeMb)}</td></tr>
+            <tr><td className="muted">{t("perfRamModifiedList")}</td><td>{mb(data.modifiedMb)}</td></tr>
+            <tr><td className="muted">{t("perfRamFree")}</td><td style={{ color: "var(--green)" }}>{mb(data.freeMb)}</td></tr>
           </tbody></table>
           <div className="row" style={{ gap: 8, alignItems: "center" }}>
             <button className="btn small" onClick={flush} disabled={busy || !admin}>
-              {busy ? <><Spinner /> Flushing…</> : "⚡ Flush Standby List"}
+              {busy ? <><Spinner /> {t("perfRamFlushing")}</> : `⚡ ${t("perfRamFlushStandby")}`}
             </button>
-            <button className="btn small ghost" onClick={load} disabled={busy}>↺ Refresh</button>
+            <button className="btn small ghost" onClick={load} disabled={busy}>↺ {t("perfRefresh")}</button>
             <RiskBadge id="ram_flush_standby" />
           </div>
-          {!admin && <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>⚠ Requires admin rights.</div>}
+          {!admin && <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>⚠ {t("perfAdminRequired")}</div>}
           {log && <div className="mono muted" style={{ fontSize: 11, marginTop: 8 }}>{log}</div>}
         </>
       )}
@@ -339,6 +342,7 @@ function RamCard({ admin }: { admin: boolean }) {
 // ─── Pagefile ─────────────────────────────────────────────────────────────────
 
 function PagefileCard({ admin }: { admin: boolean }) {
+  const { t } = useLang();
   const [data, setData] = useState<any>(null);
   const [busy, setBusy] = useState(false);
   const [log, setLog] = useState("");
@@ -366,53 +370,52 @@ function PagefileCard({ admin }: { admin: boolean }) {
   const files: any[] = data?.files ?? [];
 
   return (
-    <Card title="Pagefile Manager">
+    <Card title={t("perfPagefileTitle")}>
       <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
-        Fixed-size pagefile eliminates OS resizing overhead. Disable entirely only if you have 32 GB+ RAM —
-        some apps and crash dumps still require a pagefile. All changes need a reboot.
+        {t("perfPagefileDesc")}
       </div>
       {!data ? <Spinner /> : data.error ? (
         <div className="muted">{data.error}</div>
       ) : (
         <>
           <table className="tbl" style={{ marginBottom: 10 }}><tbody>
-            <tr><td className="muted">RAM installed</td><td>{data.ramGb} GB</td></tr>
+            <tr><td className="muted">{t("perfPagefileRamInstalled")}</td><td>{data.ramGb} GB</td></tr>
             <tr>
-              <td className="muted">Mode</td>
+              <td className="muted">{t("perfPagefileMode")}</td>
               <td style={{ color: data.autoManaged ? "var(--accent)" : "var(--fg)" }}>
-                {data.autoManaged ? "Auto-managed (Windows default)" : "Custom / Disabled"}
+                {data.autoManaged ? t("perfPagefileAutoManaged") : t("perfPagefileCustomDisabled")}
               </td>
             </tr>
             {files.map((f: any, i: number) => (
               <React.Fragment key={i}>
-                <tr><td className="muted">Path</td><td className="mono">{f.path}</td></tr>
-                <tr><td className="muted">Size</td><td>{f.initialMb}–{f.maxMb} MB (peak: {f.peakMb} MB)</td></tr>
+                <tr><td className="muted">{t("perfPagefilePath")}</td><td className="mono">{f.path}</td></tr>
+                <tr><td className="muted">{t("perfPagefileSize")}</td><td>{f.initialMb}–{f.maxMb} MB ({t("perfPagefilePeak")}: {f.peakMb} MB)</td></tr>
               </React.Fragment>
             ))}
             {files.length === 0 && !data.autoManaged && (
-              <tr><td className="muted" colSpan={2}>No pagefile (disabled)</td></tr>
+              <tr><td className="muted" colSpan={2}>{t("perfPagefileNone")}</td></tr>
             )}
           </tbody></table>
 
-          {!admin && <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>⚠ Requires admin rights.</div>}
+          {!admin && <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>⚠ {t("perfAdminRequired")}</div>}
 
           <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
             <button className="btn small ghost" onClick={() => act(api.pagefileSetAuto)} disabled={busy || !admin}>
-              ↩ Auto (Windows default)
+              ↩ {t("perfPagefileAutoBtn")}
             </button>
             <button className="btn small ghost" onClick={() => setShowCustom(s => !s)} disabled={!admin}>
-              ✎ Custom size…
+              ✎ {t("perfPagefileCustomSize")}
             </button>
             <button
               className="btn small danger"
               onClick={() => {
-                if (pfRisk && !window.confirm(`${pfRisk.title}\n\n${pfRisk.message}\n\nContinue anyway?`)) return;
-                if (!pfRisk && data.ramGb < 28 && !window.confirm(`You only have ${data.ramGb} GB RAM. Disabling the pagefile can cause system instability. Continue?`)) return;
+                if (pfRisk && !window.confirm(`${pfRisk.title}\n\n${pfRisk.message}\n\n${t("perfPagefileContinueAnyway")}`)) return;
+                if (!pfRisk && data.ramGb < 28 && !window.confirm(`${t("perfPagefileLowRamWarnPrefix")} ${data.ramGb} GB ${t("perfPagefileLowRamWarnSuffix")}`)) return;
                 act(api.pagefileDisable);
               }}
               disabled={busy || !admin}
             >
-              ⛔ Disable pagefile
+              ⛔ {t("perfPagefileDisableBtn")}
             </button>
           </div>
           <div style={{ marginTop: 6 }}><RiskBadge id="pagefile_disable" /></div>
@@ -422,7 +425,7 @@ function PagefileCard({ admin }: { admin: boolean }) {
             <div style={{ marginTop: 12, padding: 10, background: "var(--bg2)", borderRadius: 6, border: "1px solid var(--border)" }}>
               <div className="row" style={{ gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                 <div>
-                  <div className="muted" style={{ fontSize: 11 }}>Path</div>
+                  <div className="muted" style={{ fontSize: 11 }}>{t("perfPagefilePath")}</div>
                   <input
                     className="input"
                     value={customPath}
@@ -431,7 +434,7 @@ function PagefileCard({ admin }: { admin: boolean }) {
                   />
                 </div>
                 <div>
-                  <div className="muted" style={{ fontSize: 11 }}>Initial MB</div>
+                  <div className="muted" style={{ fontSize: 11 }}>{t("perfPagefileInitialMb")}</div>
                   <input
                     className="input" type="number"
                     value={customInit}
@@ -440,7 +443,7 @@ function PagefileCard({ admin }: { admin: boolean }) {
                   />
                 </div>
                 <div>
-                  <div className="muted" style={{ fontSize: 11 }}>Max MB</div>
+                  <div className="muted" style={{ fontSize: 11 }}>{t("perfPagefileMaxMb")}</div>
                   <input
                     className="input" type="number"
                     value={customMax}
@@ -454,13 +457,13 @@ function PagefileCard({ admin }: { admin: boolean }) {
                     onClick={() => act(() => api.pagefileSetCustom(customPath, parseInt(customInit), parseInt(customMax)))}
                     disabled={busy}
                   >
-                    Apply
+                    {t("perfPagefileApply")}
                   </button>
                   <RiskBadge id="pagefile_custom_size" />
                 </div>
               </div>
               <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>
-                Recommended: Initial = Max = 1.5× RAM ({Math.round(data.ramGb * 1.5 * 1024)} MB) for stability, or 4096–8192 MB for most cases.
+                {t("perfPagefileRecPrefix")} ({Math.round(data.ramGb * 1.5 * 1024)} MB) {t("perfPagefileRecSuffix")}
               </div>
             </div>
           )}
@@ -475,12 +478,12 @@ function PagefileCard({ admin }: { admin: boolean }) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function PerfTweaks({ admin }: { admin: boolean }) {
+  const { t } = useLang();
   return (
     <>
-      <div className="page-title">⚡ Performance Tweaks</div>
+      <div className="page-title">⚡ {t("perfPageTitle")}</div>
       <div className="page-sub">
-        Advanced system-level tuning — timer resolution, interrupt routing, network latency, memory management.
-        All changes are reversible. Admin rights required for most features.
+        {t("perfPageSub")}
       </div>
       <HwWarnings page="perf_tweaks" />
 

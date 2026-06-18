@@ -3,6 +3,8 @@ import { api } from "../api";
 import { Card, Badge, Spinner, ActionBtn } from "../components/ui";
 import { RiskBadge, RiskNotice } from "../components/HwWarnings";
 import { useHwProfile } from "../hooks/useHwProfile";
+import { useLang } from "../i18n";
+import { localizeTweak } from "../localize";
 import type { Mode } from "../App";
 
 export default function Optimize({ mode, admin }: { mode: Mode; admin: boolean }) {
@@ -13,6 +15,7 @@ export default function Optimize({ mode, admin }: { mode: Mode; admin: boolean }
   const [confirm, setConfirm] = useState<string | null>(null);
   const [riskAck, setRiskAck] = useState<string | null>(null);
   const profile = useHwProfile();
+  const { lang } = useLang();
 
   const refresh = () => api.listTweaks().then(setTweaks);
   useEffect(() => { refresh(); }, []);
@@ -76,6 +79,7 @@ export default function Optimize({ mode, admin }: { mode: Mode; admin: boolean }
         <div key={cat} className="mt">
           <h3 style={{ color: "var(--muted)", textTransform: "uppercase", fontSize: 12, letterSpacing: ".5px", marginBottom: 8 }}>{cat}</h3>
           {visible.filter((t) => t.category === cat).map((t) => {
+            t = localizeTweak(t, lang);
             const hwRisk = profile?.tweakRisks?.[t.id];
             const needsAck = hwRisk?.severity === "danger" && riskAck !== t.id;
             return (

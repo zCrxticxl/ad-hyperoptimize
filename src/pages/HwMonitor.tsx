@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { api } from "../api";
 import { Card, Spinner } from "../components/ui";
+import { useLang } from "../i18n";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -25,6 +26,7 @@ function TempGauge({ tempC, label }: { tempC: number | null; label: string }) {
 }
 
 function WearBar({ pct }: { pct: number | null }) {
+  const { t } = useLang();
   if (pct == null) return <span className="muted">—</span>;
   const color = pct < 50 ? "var(--green)" : pct < 80 ? "var(--orange)" : "var(--red)";
   return (
@@ -32,7 +34,7 @@ function WearBar({ pct }: { pct: number | null }) {
       <div style={{ background: "var(--bg2)", borderRadius: 4, height: 5, marginTop: 3 }}>
         <div style={{ width: `${pct}%`, height: "100%", background: color, borderRadius: 4 }} />
       </div>
-      <span style={{ fontSize: 11, color }}>{pct}% worn</span>
+      <span style={{ fontSize: 11, color }}>{pct}% {t("hwmonWorn")}</span>
     </div>
   );
 }
@@ -40,27 +42,28 @@ function WearBar({ pct }: { pct: number | null }) {
 // ─── CPU Temps ────────────────────────────────────────────────────────────────
 
 function CpuTempsCard({ data }: { data: any }) {
+  const { t } = useLang();
   const zones: any[] = data?.cpuZones ?? [];
 
   return (
-    <Card title="CPU Thermal Zones">
+    <Card title={t("hwmonCpuThermalZones")}>
       {zones.length === 0 ? (
         <div>
           <div className="muted" style={{ marginBottom: 8 }}>
             {data?.cpuError
-              ? `No ACPI thermal data: ${data.cpuError}`
-              : "No ACPI thermal zones reported."}
+              ? `${t("hwmonNoAcpiData")} ${data.cpuError}`
+              : t("hwmonNoAcpiZones")}
           </div>
           <div className="muted" style={{ fontSize: 12 }}>
-            For accurate CPU temps install{" "}
-            <span style={{ color: "var(--accent)" }}>HWiNFO64</span> or{" "}
-            <span style={{ color: "var(--accent)" }}>LibreHardwareMonitor</span> (free).
-            Windows WMI thermal zones are often not exposed on modern motherboards.
+            {t("hwmonInstallHint1")}{" "}
+            <span style={{ color: "var(--accent)" }}>HWiNFO64</span> {t("hwmonOr")}{" "}
+            <span style={{ color: "var(--accent)" }}>LibreHardwareMonitor</span> {t("hwmonFree")}.
+            {t("hwmonWmiHint")}
           </div>
         </div>
       ) : (
         zones.map((z: any, i: number) => (
-          <TempGauge key={i} tempC={z.tempC} label={z.name || `Zone ${i}`} />
+          <TempGauge key={i} tempC={z.tempC} label={z.name || `${t("hwmonZone")} ${i}`} />
         ))
       )}
     </Card>
@@ -70,17 +73,18 @@ function CpuTempsCard({ data }: { data: any }) {
 // ─── GPU ──────────────────────────────────────────────────────────────────────
 
 function GpuCard({ data }: { data: any }) {
+  const { t } = useLang();
   const gpus: any[] = data?.gpus ?? [];
 
   if (gpus.length === 0) {
     return (
       <Card title="GPU">
         <div className="muted" style={{ marginBottom: 8 }}>
-          No GPU data — nvidia-smi not found or AMD/Intel GPU.
+          {t("hwmonNoGpuData")}
         </div>
         <div className="muted" style={{ fontSize: 12 }}>
-          NVIDIA: install latest Game Ready or Studio drivers (includes nvidia-smi).<br />
-          AMD: GPU temps visible via AMD Adrenalin or HWiNFO64.
+          {t("hwmonNvidiaHint")}<br />
+          {t("hwmonAmdHint")}
         </div>
       </Card>
     );
@@ -89,12 +93,12 @@ function GpuCard({ data }: { data: any }) {
   return (
     <>
       {gpus.map((g: any, i: number) => (
-        <Card key={i} title={`GPU · ${g.name ?? "Unknown"}`}>
-          <TempGauge tempC={g.tempC} label="Temperature" />
+        <Card key={i} title={`GPU · ${g.name ?? t("hwmonUnknown")}`}>
+          <TempGauge tempC={g.tempC} label={t("hwmonTempLabel")} />
           {g.utilPct != null && (
             <div style={{ marginBottom: 10 }}>
               <div className="row" style={{ justifyContent: "space-between", marginBottom: 3 }}>
-                <span style={{ fontSize: 13 }}>GPU utilisation</span>
+                <span style={{ fontSize: 13 }}>{t("hwmonGpuUtilisation")}</span>
                 <span style={{ fontWeight: 700 }}>{g.utilPct}%</span>
               </div>
               <div style={{ background: "var(--bg2)", borderRadius: 4, height: 6 }}>
@@ -105,13 +109,13 @@ function GpuCard({ data }: { data: any }) {
           <table className="tbl"><tbody>
             {g.memUsedMb != null && (
               <tr>
-                <td className="muted">VRAM</td>
+                <td className="muted">{t("hwmonVram")}</td>
                 <td>{g.memUsedMb} / {g.memTotalMb} MB ({Math.round(g.memUsedMb / g.memTotalMb * 100)}%)</td>
               </tr>
             )}
-            {g.powerW != null && <tr><td className="muted">Power draw</td><td>{g.powerW} W</td></tr>}
-            {g.clockMhz != null && <tr><td className="muted">Core clock</td><td>{g.clockMhz} MHz</td></tr>}
-            <tr><td className="muted">Vendor</td><td>{g.vendor}</td></tr>
+            {g.powerW != null && <tr><td className="muted">{t("hwmonPowerDraw")}</td><td>{g.powerW} W</td></tr>}
+            {g.clockMhz != null && <tr><td className="muted">{t("hwmonCoreClock")}</td><td>{g.clockMhz} MHz</td></tr>}
+            <tr><td className="muted">{t("hwmonVendor")}</td><td>{g.vendor}</td></tr>
           </tbody></table>
         </Card>
       ))}
@@ -131,11 +135,12 @@ const HEALTH_COLOR: Record<string, string> = {
 };
 
 function SmartCard({ data }: { data: any }) {
+  const { t } = useLang();
   const disks: any[] = data?.disks ?? [];
 
   return (
-    <Card title={`Disk Health / S.M.A.R.T. (${disks.length} drives)`}>
-      {disks.length === 0 && <div className="muted">No disk data.</div>}
+    <Card title={`${t("hwmonDiskHealth")} (${disks.length} ${t("hwmonDrives")})`}>
+      {disks.length === 0 && <div className="muted">{t("hwmonNoDiskData")}</div>}
       {disks.map((d: any, i: number) => (
         <div key={i} style={{ marginBottom: i < disks.length - 1 ? 16 : 0, paddingBottom: i < disks.length - 1 ? 16 : 0, borderBottom: i < disks.length - 1 ? "1px solid var(--border)" : "none" }}>
           {d.error ? (
@@ -151,24 +156,24 @@ function SmartCard({ data }: { data: any }) {
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 20px" }}>
                 <div>
-                  <div className="muted" style={{ fontSize: 11 }}>Temperature</div>
+                  <div className="muted" style={{ fontSize: 11 }}>{t("hwmonTempLabel")}</div>
                   {d.tempC != null
                     ? <TempGauge tempC={d.tempC} label="" />
                     : <span className="muted">—</span>}
                 </div>
                 <div>
-                  <div className="muted" style={{ fontSize: 11 }}>Wear level</div>
+                  <div className="muted" style={{ fontSize: 11 }}>{t("hwmonWearLevel")}</div>
                   <WearBar pct={d.wearPct} />
                 </div>
                 <div>
-                  <div className="muted" style={{ fontSize: 11 }}>Power-on hours</div>
+                  <div className="muted" style={{ fontSize: 11 }}>{t("hwmonPowerOnHours")}</div>
                   <span>{d.powerOnHours != null ? `${d.powerOnHours} h` : "—"}</span>
                 </div>
                 <div>
-                  <div className="muted" style={{ fontSize: 11 }}>Read errors</div>
+                  <div className="muted" style={{ fontSize: 11 }}>{t("hwmonReadErrors")}</div>
                   <span style={{ color: d.uncorrected > 0 ? "var(--red)" : "var(--fg)" }}>
                     {d.readErrors != null ? d.readErrors : "—"}
-                    {d.uncorrected > 0 && <span style={{ color: "var(--red)" }}> ({d.uncorrected} uncorrected!)</span>}
+                    {d.uncorrected > 0 && <span style={{ color: "var(--red)" }}> ({d.uncorrected} {t("hwmonUncorrected")})</span>}
                   </span>
                 </div>
               </div>

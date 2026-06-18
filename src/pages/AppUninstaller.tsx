@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { Card, Spinner } from "../components/ui";
+import { useLang } from "../i18n";
 
 function fmtMb(mb: number) {
   if (!mb) return "";
@@ -9,6 +10,7 @@ function fmtMb(mb: number) {
 }
 
 export default function AppUninstaller({ admin }: { admin: boolean }) {
+  const { t } = useLang();
   const [apps, setApps]             = useState<any[]>([]);
   const [loading, setLoading]       = useState(true);
   const [search, setSearch]         = useState("");
@@ -41,7 +43,7 @@ export default function AppUninstaller({ admin }: { admin: boolean }) {
 
   const uninstall = async (app: any) => {
     if (!app.uninstallString) return;
-    if (!window.confirm(`Uninstall "${app.name}"?\n\nThe uninstaller will open. Wait for it to finish, then scan for leftovers.`)) return;
+    if (!window.confirm(`${t("uninstConfirmTitle")} "${app.name}"?\n\n${t("uninstConfirmBody")}`)) return;
     setBusy(app.name);
     try {
       const msg = await api.uninstallApp(app.uninstallString);
@@ -84,27 +86,27 @@ export default function AppUninstaller({ admin }: { admin: boolean }) {
 
   return (
     <>
-      <div className="page-title">🗑 App Uninstaller</div>
+      <div className="page-title">🗑 {t("uninstTitle")}</div>
       <div className="page-sub">
-        Uninstall apps and clean up leftover files and registry keys they leave behind.
-        · {apps.length} apps installed
+        {t("uninstSub")}
+        · {apps.length} {t("uninstAppsInstalled")}
       </div>
 
       <Card title="">
         <div className="row" style={{ gap: 8, marginBottom: 12 }}>
           <input
-            placeholder={`Search ${apps.length} apps…`}
+            placeholder={`${t("uninstSearchPlaceholder")} ${apps.length} ${t("uninstAppsWord")}…`}
             value={search}
             onChange={e => setSearch(e.target.value)}
             style={{ flex: 1, padding: "5px 10px", fontSize: 13, background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 4, color: "var(--fg)" }}
           />
-          <button className="btn small ghost" onClick={load} disabled={loading}>↺ Refresh</button>
+          <button className="btn small ghost" onClick={load} disabled={loading}>↺ {t("uninstRefresh")}</button>
         </div>
 
         {loading ? (
-          <div className="row" style={{ gap: 10 }}><Spinner /><span className="muted">Scanning installed apps…</span></div>
+          <div className="row" style={{ gap: 10 }}><Spinner /><span className="muted">{t("uninstScanning")}</span></div>
         ) : filtered.length === 0 ? (
-          <div className="muted">No apps found{search ? " matching filter" : ""}.</div>
+          <div className="muted">{t("uninstNoApps")}{search ? ` ${t("uninstMatchingFilter")}` : ""}.</div>
         ) : (
           <div style={{ maxHeight: "65vh", overflowY: "auto" }}>
             {filtered.map((app: any) => {
@@ -131,7 +133,7 @@ export default function AppUninstaller({ admin }: { admin: boolean }) {
                         onClick={() => scanLeft(app)}
                         disabled={scanning === app.name}
                       >
-                        {scanning === app.name ? <><Spinner /> Scanning…</> : "🔍 Scan leftovers"}
+                        {scanning === app.name ? <><Spinner /> {t("uninstScanningShort")}</> : `🔍 ${t("uninstScanLeftovers")}`}
                       </button>
                     ) : (
                       <button
@@ -139,7 +141,7 @@ export default function AppUninstaller({ admin }: { admin: boolean }) {
                         onClick={() => uninstall(app)}
                         disabled={busy === app.name || !app.uninstallString}
                       >
-                        {busy === app.name ? "…" : "Uninstall"}
+                        {busy === app.name ? "…" : t("uninstUninstallBtn")}
                       </button>
                     )}
                   </div>
@@ -151,14 +153,14 @@ export default function AppUninstaller({ admin }: { admin: boolean }) {
                   {appLeft.length > 0 && (
                     <div style={{ marginTop: 8, padding: 8, background: "var(--bg2)", borderRadius: 4, border: "1px solid var(--border)" }}>
                       <div className="row" style={{ marginBottom: 6, alignItems: "center", gap: 8 }}>
-                        <span style={{ fontSize: 12, fontWeight: 600 }}>{appLeft.length} leftovers found</span>
+                        <span style={{ fontSize: 12, fontWeight: 600 }}>{appLeft.length} {t("uninstLeftoversFound")}</span>
                         <div style={{ flex: 1 }} />
                         <button
                           className="btn small danger"
                           onClick={() => cleanLeft(app.name)}
                           disabled={!appSel.size || cleaning === app.name}
                         >
-                          {cleaning === app.name ? "…" : `🗑 Clean (${appSel.size})`}
+                          {cleaning === app.name ? "…" : `🗑 ${t("uninstClean")} (${appSel.size})`}
                         </button>
                       </div>
                       {appLeft.map((item: any) => (
@@ -181,7 +183,7 @@ export default function AppUninstaller({ admin }: { admin: boolean }) {
 
                   {wasLaunched && appLeft.length === 0 && scanning !== app.name && (
                     <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
-                      No leftovers found (or app not yet fully uninstalled — wait for the uninstaller to finish).
+                      {t("uninstNoLeftovers")}
                     </div>
                   )}
                 </div>

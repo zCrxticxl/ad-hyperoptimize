@@ -2,6 +2,7 @@ import React, { useEffect, useState, useMemo } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "../api";
 import { Card, Spinner } from "../components/ui";
+import { useLang } from "../i18n";
 
 type App = {
   id: string;
@@ -21,15 +22,6 @@ type AppState = {
   message: string;
 };
 
-const CATEGORIES: { key: string; label: string; icon: string }[] = [
-  { key: "all",       label: "All",           icon: "⬡" },
-  { key: "gaming",    label: "Gaming",         icon: "🎮" },
-  { key: "comms",     label: "Communication",  icon: "💬" },
-  { key: "browsers",  label: "Browsers",       icon: "🌐" },
-  { key: "utilities", label: "Utilities",      icon: "🔧" },
-  { key: "tools",     label: "Tools",          icon: "📊" },
-];
-
 const STATUS_COLOR: Record<InstallStatus, string> = {
   idle:       "transparent",
   installing: "var(--accent)",
@@ -45,6 +37,7 @@ const STATUS_ICON: Record<InstallStatus, string> = {
 };
 
 export default function SoftwareInstaller() {
+  const { t } = useLang();
   const [apps, setApps]       = useState<App[]>([]);
   const [states, setStates]   = useState<Record<string, AppState>>({});
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -52,6 +45,15 @@ export default function SoftwareInstaller() {
   const [loading, setLoading] = useState(true);
   const [installing, setInstalling] = useState(false);
   const [log, setLog]         = useState("");
+
+  const CATEGORIES: { key: string; label: string; icon: string }[] = [
+    { key: "all",       label: t("softinstCatAll"),     icon: "⬡" },
+    { key: "gaming",    label: t("softinstCatGaming"),   icon: "🎮" },
+    { key: "comms",     label: t("softinstCatComms"),    icon: "💬" },
+    { key: "browsers",  label: t("softinstCatBrowsers"), icon: "🌐" },
+    { key: "utilities", label: t("softinstCatUtilities"),icon: "🔧" },
+    { key: "tools",     label: t("softinstCatTools"),    icon: "📊" },
+  ];
 
   // load catalog + check installed
   useEffect(() => {
@@ -136,10 +138,9 @@ export default function SoftwareInstaller() {
 
   return (
     <>
-      <div className="page-title">📦 Software Installer</div>
+      <div className="page-title">📦 {t("softinstTitle")}</div>
       <div className="page-sub">
-        Install curated apps via winget — no browser, no installer hunting.
-        Select what you need and install everything in one click.
+        {t("softinstSub")}
       </div>
 
       {/* Category tabs */}
@@ -157,12 +158,12 @@ export default function SoftwareInstaller() {
 
       {/* Toolbar */}
       <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center" }}>
-        <button className="btn small ghost" onClick={selectRecommended}>⭐ Recommended</button>
+        <button className="btn small ghost" onClick={selectRecommended}>⭐ {t("softinstRecommended")}</button>
         <button className="btn small ghost" onClick={selectCategory}>
-          Select {cat === "all" ? "All" : CATEGORIES.find(c => c.key === cat)?.label}
+          {t("softinstSelect")} {cat === "all" ? t("softinstCatAll") : CATEGORIES.find(c => c.key === cat)?.label}
         </button>
         {selected.size > 0 && (
-          <button className="btn small ghost" onClick={clearAll}>Clear</button>
+          <button className="btn small ghost" onClick={clearAll}>{t("softinstClear")}</button>
         )}
         <div style={{ flex: 1 }} />
         <button
@@ -172,15 +173,15 @@ export default function SoftwareInstaller() {
           style={{ minWidth: 160 }}
         >
           {installing
-            ? <><Spinner /> Installing…</>
-            : `⬇ Install (${selected.size})`}
+            ? <><Spinner /> {t("softinstInstalling")}</>
+            : `⬇ ${t("softinstInstallBtn")} (${selected.size})`}
         </button>
       </div>
 
       {/* App grid */}
       {loading ? (
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <Spinner /> <span className="muted">Checking installed apps…</span>
+          <Spinner /> <span className="muted">{t("softinstCheckingInstalled")}</span>
         </div>
       ) : (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 8 }}>
@@ -236,7 +237,7 @@ export default function SoftwareInstaller() {
                       <span style={{ fontSize: 10, color: "var(--yellow)", fontWeight: 700 }}>★</span>
                     )}
                     {st.installed && st.status === "idle" && (
-                      <span style={{ fontSize: 10, color: "var(--green)", fontWeight: 700 }}>✓ installed</span>
+                      <span style={{ fontSize: 10, color: "var(--green)", fontWeight: 700 }}>✓ {t("softinstInstalled")}</span>
                     )}
                   </div>
                   <div className="muted" style={{ fontSize: 11, marginTop: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
@@ -256,9 +257,9 @@ export default function SoftwareInstaller() {
       )}
 
       <div className="muted" style={{ fontSize: 11, marginTop: 16 }}>
-        ★ = Recommended for a fresh gaming setup &nbsp;·&nbsp;
-        Already installed apps can be reinstalled to repair/upgrade &nbsp;·&nbsp;
-        Requires internet connection
+        {t("softinstFootRecommended")} &nbsp;·&nbsp;
+        {t("softinstFootReinstall")} &nbsp;·&nbsp;
+        {t("softinstFootInternet")}
       </div>
     </>
   );

@@ -2,9 +2,11 @@ import React, { useEffect, useState } from "react";
 import { api, fmtAge } from "../api";
 import { Card, Stat, Badge, Spinner, RawJson } from "../components/ui";
 import { HwWarnings, HwProfileCard } from "../components/HwWarnings";
+import { useLang } from "../i18n";
 import type { Mode } from "../App";
 
 export default function Dashboard({ mode, go }: { mode: Mode; go: (p: string) => void }) {
+  const { t } = useLang();
   const [analysis, setAnalysis] = useState<any | null>(null);
   const [meta, setMeta] = useState<{ time: string; fromCache: boolean } | null>(null);
   const [err, setErr] = useState("");
@@ -31,13 +33,15 @@ export default function Dashboard({ mode, go }: { mode: Mode; go: (p: string) =>
   const score = analysis?.healthScore ?? null;
   const color = score === null ? undefined : score >= 80 ? "var(--green)" : score >= 50 ? "var(--yellow)" : "var(--red)";
 
+  const SEV_LABELS = ["", t("dashSevInfo"), t("dashSevLow"), t("dashSevMedium"), t("dashSevHigh"), t("dashSevCritical")];
+
   return (
     <>
-      <div className="page-title">Dashboard</div>
-      <div className="page-sub">Analysis-engine summary of your system's health, performance and security posture.</div>
+      <div className="page-title">{t("dashTitle")}</div>
+      <div className="page-sub">{t("dashSub")}</div>
 
       <div className="grid grid-3">
-        <Card title="Health score">
+        <Card title={t("dashHealthScore")}>
           {busy && !analysis ? (
             <Spinner />
           ) : (
@@ -46,18 +50,18 @@ export default function Dashboard({ mode, go }: { mode: Mode; go: (p: string) =>
                 {score ?? "—"}<span style={{ fontSize: 18, color: "var(--muted)" }}>/100</span>
               </div>
               <button className="btn small ghost mt" onClick={() => run(true)} disabled={busy}>
-                {busy ? "Analyzing…" : "Re-analyze"}
+                {busy ? t("dashAnalyzing") : t("dashReanalyze")}
               </button>
               {meta && (
                 <div className="stat-sub">
-                  {meta.fromCache ? "cached · " : ""}analyzed {fmtAge(meta.time)}
+                  {meta.fromCache ? `${t("dashCached")} · ` : ""}{t("dashAnalyzed")} {fmtAge(meta.time)}
                 </div>
               )}
             </>
           )}
         </Card>
-        <Card title="Summary" style={{ gridColumn: "span 2" }}>
-          <div style={{ lineHeight: 1.6 }}>{analysis?.summary ?? (busy ? "Running full analysis…" : "—")}</div>
+        <Card title={t("dashSummary")} style={{ gridColumn: "span 2" }}>
+          <div style={{ lineHeight: 1.6 }}>{analysis?.summary ?? (busy ? t("dashRunningFullAnalysis") : "—")}</div>
           {err && <div style={{ color: "var(--red)" }}>{err}</div>}
         </Card>
       </div>
@@ -65,25 +69,25 @@ export default function Dashboard({ mode, go }: { mode: Mode; go: (p: string) =>
       <HwWarnings page="dashboard" />
 
       <div className="grid grid-2" style={{ marginBottom: 14 }}>
-        <Card title="Hardware Profile">
+        <Card title={t("dashHardwareProfile")}>
           <HwProfileCard />
         </Card>
       </div>
 
       <div className="mt" />
-      <Card title={`Findings ${analysis ? `(${analysis.findings.length})` : ""}`}>
+      <Card title={`${t("dashFindings")} ${analysis ? `(${analysis.findings.length})` : ""}`}>
         {!analysis && busy && <Spinner />}
-        {analysis?.findings.length === 0 && <div className="muted">No issues found.</div>}
+        {analysis?.findings.length === 0 && <div className="muted">{t("dashNoIssues")}</div>}
         {analysis?.findings.map((f: any, i: number) => (
           <div key={i} className="tweak">
             <div className="tweak-head">
               <Badge cls={`sev-${f.severity}`}>
-                {["", "INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL"][f.severity]}
+                {SEV_LABELS[f.severity]}
               </Badge>
               <span className="tweak-name">{f.title}</span>
               {f.tweakIds.length > 0 && (
                 <button className="btn small ghost" onClick={() => go("optimize")}>
-                  Fix in Optimize →
+                  {t("dashFixInOptimize")} →
                 </button>
               )}
             </div>

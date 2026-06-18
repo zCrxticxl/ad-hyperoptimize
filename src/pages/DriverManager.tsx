@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { Card, Spinner } from "../components/ui";
+import { useLang } from "../i18n";
 
 type Driver = {
   DeviceName: string;
@@ -19,6 +20,7 @@ type Driver = {
 type WingetStatus = { available: boolean; current?: string; newVersion?: string; error?: string };
 
 function DriverRow({ d, admin }: { d: Driver; admin?: boolean }) {
+  const { t } = useLang();
   const [open, setOpen]           = useState(false);
   const [wgStatus, setWgStatus]   = useState<WingetStatus | null>(null);
   const [wgChecking, setWgChecking] = useState(false);
@@ -39,7 +41,7 @@ function DriverRow({ d, admin }: { d: Driver; admin?: boolean }) {
   const installWinget = async () => {
     if (!d.wingetId) return;
     setBusy(true);
-    setLog("Installing via winget — this may take several minutes…");
+    setLog(t("drvInstallingWinget"));
     try {
       const r = await api.driversInstallWinget(d.wingetId);
       setLog(r);
@@ -55,7 +57,7 @@ function DriverRow({ d, admin }: { d: Driver; admin?: boolean }) {
 
   const updateViaWU = async () => {
     setBusy(true);
-    setLog("Triggering Windows Update driver scan…");
+    setLog(t("drvTriggeringWU"));
     try { setLog(await api.driversScanWindowsUpdate()); }
     catch (e: any) { setLog(String(e)); }
     finally { setBusy(false); }
@@ -76,13 +78,13 @@ function DriverRow({ d, admin }: { d: Driver; admin?: boolean }) {
           <div className="row" style={{ gap: 6, alignItems: "center", flexWrap: "wrap" }}>
             <b style={{ fontSize: 13 }}>{d.DeviceName}</b>
             {d.old && !d.inbox && (
-              <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4, background: "var(--red)", color: "#fff", fontWeight: 700 }}>OLD</span>
+              <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4, background: "var(--red)", color: "#fff", fontWeight: 700 }}>{t("drvOldBadge")}</span>
             )}
             {!d.IsSigned && (
-              <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4, background: "var(--orange)", color: "#fff", fontWeight: 700 }}>UNSIGNED</span>
+              <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4, background: "var(--orange)", color: "#fff", fontWeight: 700 }}>{t("drvUnsignedBadge")}</span>
             )}
             {wgStatus?.available && (
-              <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4, background: "var(--green)", color: "#fff", fontWeight: 700 }}>UPDATE AVAILABLE</span>
+              <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4, background: "var(--green)", color: "#fff", fontWeight: 700 }}>{t("drvUpdateAvailableBadge")}</span>
             )}
           </div>
           <div className="muted" style={{ fontSize: 11 }}>
@@ -98,11 +100,11 @@ function DriverRow({ d, admin }: { d: Driver; admin?: boolean }) {
       {open && (
         <div style={{ padding: "10px 12px 12px", background: "var(--bg2)", borderRadius: 6, marginBottom: 8, marginTop: -2 }}>
           <div className="muted" style={{ fontSize: 11, marginBottom: 10 }}>
-            <b>Class:</b> {d.DeviceClass} &nbsp;·&nbsp;
-            <b>Manufacturer:</b> {d.Manufacturer} &nbsp;·&nbsp;
-            <b>Version:</b> {d.DriverVersion} &nbsp;·&nbsp;
-            <b>Date:</b> {d.dateStr || "unknown"} &nbsp;·&nbsp;
-            <b>Signed:</b> {d.IsSigned ? "Yes" : "No"}
+            <b>{t("drvClassLabel")}</b> {d.DeviceClass} &nbsp;·&nbsp;
+            <b>{t("drvManufacturerLabel")}</b> {d.Manufacturer} &nbsp;·&nbsp;
+            <b>{t("drvVersionLabel")}</b> {d.DriverVersion} &nbsp;·&nbsp;
+            <b>{t("drvDateLabel")}</b> {d.dateStr || t("drvUnknown")} &nbsp;·&nbsp;
+            <b>{t("drvSignedLabel")}</b> {d.IsSigned ? t("drvYes") : t("drvNo")}
           </div>
 
           <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
@@ -110,16 +112,16 @@ function DriverRow({ d, admin }: { d: Driver; admin?: boolean }) {
             {d.wingetId && (
               wgStatus?.available ? (
                 <button className="btn small" disabled={busy} onClick={installWinget}>
-                  {busy ? <><Spinner /> Installing…</> : `⬆ Install via winget${wgStatus.newVersion ? ` (${wgStatus.newVersion})` : ""}`}
+                  {busy ? <><Spinner /> {t("drvInstalling")}</> : `⬆ ${t("drvInstallViaWinget")}${wgStatus.newVersion ? ` (${wgStatus.newVersion})` : ""}`}
                 </button>
               ) : (
                 <button className="btn small ghost" disabled={wgChecking || busy} onClick={checkWinget}>
-                  {wgChecking ? <><Spinner /> Checking…</> : "🔍 Check winget"}
+                  {wgChecking ? <><Spinner /> {t("drvChecking")}</> : `🔍 ${t("drvCheckWinget")}`}
                 </button>
               )
             )}
             {wgStatus && !wgStatus.available && !wgStatus.error && (
-              <span className="muted" style={{ fontSize: 12, alignSelf: "center" }}>winget: up to date</span>
+              <span className="muted" style={{ fontSize: 12, alignSelf: "center" }}>{t("drvWingetUpToDate")}</span>
             )}
 
             {/* vendor download page */}
@@ -129,17 +131,17 @@ function DriverRow({ d, admin }: { d: Driver; admin?: boolean }) {
 
             {/* Windows Update */}
             <button className="btn small ghost" disabled={busy} onClick={updateViaWU}>
-              🪟 Windows Update scan
+              🪟 {t("drvWindowsUpdateScan")}
             </button>
 
             {/* Device Manager */}
             <button className="btn small ghost" onClick={() => api.driversOpenDevmgr()}>
-              ⚙ Device Manager
+              ⚙ {t("drvDeviceManager")}
             </button>
           </div>
 
           {wgStatus?.error && (
-            <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>winget: {wgStatus.error}</div>
+            <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>{t("drvWingetLabel")} {wgStatus.error}</div>
           )}
           {log && (
             <div className="mono muted" style={{ fontSize: 11, marginTop: 8, whiteSpace: "pre-wrap", maxHeight: 120, overflowY: "auto" }}>
@@ -149,7 +151,7 @@ function DriverRow({ d, admin }: { d: Driver; admin?: boolean }) {
 
           {d.wingetId && (
             <div className="muted" style={{ fontSize: 10, marginTop: 8 }}>
-              winget ID: <span className="mono">{d.wingetId}</span>
+              {t("drvWingetIdLabel")} <span className="mono">{d.wingetId}</span>
             </div>
           )}
         </div>
@@ -159,6 +161,7 @@ function DriverRow({ d, admin }: { d: Driver; admin?: boolean }) {
 }
 
 export default function DriverManager() {
+  const { t } = useLang();
   const [data, setData]       = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch]   = useState("");
@@ -195,56 +198,56 @@ export default function DriverManager() {
 
   return (
     <>
-      <div className="page-title">🔧 Driver Manager</div>
+      <div className="page-title">🔧 {t("drvPageTitle")}</div>
       <div className="page-sub">
-        Click any driver to see update options — winget, vendor page, or Windows Update.
-        Inbox/system drivers (managed by Windows) are excluded from the OLD flag.
+        {t("drvPageSub1")}
+        {t("drvPageSub2")}
       </div>
 
       <Card title="">
         <div className="row" style={{ gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
           <button className="btn small ghost" onClick={() => api.driversOpenWindowsUpdate().catch(() => {})}>
-            🪟 Open Windows Update
+            🪟 {t("drvOpenWindowsUpdate")}
           </button>
           <button className="btn small ghost" onClick={() => api.driversOpenDevmgr().catch(() => {})}>
-            ⚙ Device Manager
+            ⚙ {t("drvDeviceManager")}
           </button>
-          <button className="btn small ghost" onClick={load} disabled={loading}>↺ Refresh</button>
+          <button className="btn small ghost" onClick={load} disabled={loading}>↺ {t("drvRefresh")}</button>
         </div>
 
         {loading ? (
           <div className="row" style={{ gap: 10 }}>
-            <Spinner /><span className="muted">Scanning drivers — may take 15–30s…</span>
+            <Spinner /><span className="muted">{t("drvScanning")}</span>
           </div>
         ) : (
           <>
             <div className="row" style={{ gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
               <input
-                placeholder="Search name, class, manufacturer…"
+                placeholder={t("drvSearchPlaceholder")}
                 value={search}
                 onChange={e => setSearch(e.target.value)}
                 style={{ flex: 1, minWidth: 160, padding: "5px 10px", fontSize: 13, background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 4, color: "var(--fg)" }}
               />
               {(["all", "old", "unsigned"] as const).map(f => (
                 <button key={f} className={`btn small ${filter === f ? "" : "ghost"}`} onClick={() => setFilter(f)}>
-                  {f === "all" ? `All (${drivers.length})`
-                    : f === "old" ? `⚠ Old (${oldCount})`
-                    : `⚠ Unsigned (${unsignedCount})`}
+                  {f === "all" ? `${t("drvFilterAll")} (${drivers.length})`
+                    : f === "old" ? `⚠ ${t("drvFilterOld")} (${oldCount})`
+                    : `⚠ ${t("drvFilterUnsigned")} (${unsignedCount})`}
                 </button>
               ))}
             </div>
 
             <div style={{ maxHeight: "60vh", overflowY: "auto" }}>
               {filtered.length === 0 ? (
-                <div className="muted">No drivers match filter.</div>
+                <div className="muted">{t("drvNoMatch")}</div>
               ) : filtered.map((d, i) => (
                 <DriverRow key={`${d.DeviceName}-${i}`} d={d} />
               ))}
             </div>
 
             <div className="muted" style={{ fontSize: 12, marginTop: 10 }}>
-              Click a driver row to expand update options. winget covers NVIDIA, AMD, Intel, Realtek.
-              For everything else, use Windows Update or the vendor page.
+              {t("drvFooterHint1")}
+              {t("drvFooterHint2")}
             </div>
           </>
         )}

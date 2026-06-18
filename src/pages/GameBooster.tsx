@@ -2,8 +2,10 @@ import React, { useEffect, useState } from "react";
 import { api } from "../api";
 import { Card, Spinner } from "../components/ui";
 import { HwWarnings } from "../components/HwWarnings";
+import { useLang } from "../i18n";
 
 export default function GameBooster({ admin }: { admin: boolean }) {
+  const { t } = useLang();
   const [games, setGames]       = useState<any[]>([]);
   const [bg, setBg]             = useState<any[]>([]);
   const [selBg, setSelBg]       = useState<Set<number>>(new Set());
@@ -48,25 +50,24 @@ export default function GameBooster({ admin }: { admin: boolean }) {
 
   return (
     <>
-      <div className="page-title">🎮 Game Booster</div>
+      <div className="page-title">🎮 {t("gameboostTitle")}</div>
       <div className="page-sub">
-        Boost your game's process priority, kill background bloat, and switch to max-perf power plan.
-        Click "Stop Boost" when done to restore settings.
-        {!admin && <span style={{ color: "var(--orange)" }}> · Admin recommended for power plan switch.</span>}
+        {t("gameboostSub")}
+        {!admin && <span style={{ color: "var(--orange)" }}> · {t("gameboostAdminHint")}</span>}
       </div>
       <HwWarnings page="game_booster" />
 
       {/* Running games */}
-      <Card title="Detected Games / Heavy Processes" style={{ marginBottom: 14 }}>
+      <Card title={t("gameboostDetectedGames")} style={{ marginBottom: 14 }}>
         {loading ? <Spinner /> : games.length === 0 ? (
-          <div className="muted">No heavy foreground processes detected. Launch a game first, then refresh.</div>
+          <div className="muted">{t("gameboostNoHeavyProcs")}</div>
         ) : games.map((g: any) => (
           <div key={g.Id} className="row" style={{ padding: "8px 0", borderBottom: "1px solid var(--border)", gap: 12, alignItems: "center" }}>
             <div style={{ flex: 1 }}>
               <div style={{ fontWeight: 600, fontSize: 13 }}>
                 {g.Name}
                 {boosted === g.Id && (
-                  <span style={{ marginLeft: 8, fontSize: 11, color: "var(--green)", fontWeight: 700 }}>● BOOSTED</span>
+                  <span style={{ marginLeft: 8, fontSize: 11, color: "var(--green)", fontWeight: 700 }}>● {t("gameboostBoosted")}</span>
                 )}
               </div>
               <div className="muted" style={{ fontSize: 11 }}>
@@ -84,7 +85,7 @@ export default function GameBooster({ admin }: { admin: boolean }) {
                   return r;
                 })}
               >
-                {busy ? <><Spinner /> …</> : "⚡ Boost"}
+                {busy ? <><Spinner /> …</> : `⚡ ${t("gameboostBoost")}`}
               </button>
             ) : (
               <button
@@ -96,13 +97,13 @@ export default function GameBooster({ admin }: { admin: boolean }) {
                   return r;
                 })}
               >
-                {busy ? "…" : "⏹ Stop Boost"}
+                {busy ? "…" : `⏹ ${t("gameboostStopBoost")}`}
               </button>
             )}
           </div>
         ))}
         <div className="row" style={{ marginTop: 10, gap: 8 }}>
-          <button className="btn small ghost" onClick={refresh} disabled={loading}>↺ Refresh</button>
+          <button className="btn small ghost" onClick={refresh} disabled={loading}>↺ {t("gameboostRefresh")}</button>
           {boosted !== null && (
             <button
               className="btn small ghost danger"
@@ -113,21 +114,21 @@ export default function GameBooster({ admin }: { admin: boolean }) {
                 return r;
               })}
             >
-              ⏹ Stop All Boosts
+              ⏹ {t("gameboostStopAllBoosts")}
             </button>
           )}
         </div>
       </Card>
 
       {/* Background killers */}
-      <Card title={`Background Processes to Kill (${bg.length} found)`}>
+      <Card title={`${t("gameboostBgProcsToKill")} (${bg.length} ${t("gameboostFound")})`}>
         {loading ? <Spinner /> : bg.length === 0 ? (
-          <div className="muted">No known background bloat running.</div>
+          <div className="muted">{t("gameboostNoKnownBloat")}</div>
         ) : (
           <>
             <div className="row" style={{ gap: 8, marginBottom: 10 }}>
-              <button className="btn small ghost" onClick={selectAllBg}>Select all</button>
-              <button className="btn small ghost" onClick={clearSelBg}>Clear</button>
+              <button className="btn small ghost" onClick={selectAllBg}>{t("gameboostSelectAll")}</button>
+              <button className="btn small ghost" onClick={clearSelBg}>{t("gameboostClear")}</button>
               <div style={{ flex: 1 }} />
               <button
                 className="btn small danger"
@@ -139,7 +140,7 @@ export default function GameBooster({ admin }: { admin: boolean }) {
                   return r;
                 })}
               >
-                {busy ? "…" : `💀 Kill (${selBg.size})`}
+                {busy ? "…" : `💀 ${t("gameboostKill")} (${selBg.size})`}
               </button>
             </div>
             {bg.map((p: any) => (
@@ -168,9 +169,9 @@ export default function GameBooster({ admin }: { admin: boolean }) {
       )}
 
       <div className="muted" style={{ fontSize: 12, marginTop: 14 }}>
-        Boost: sets game to High priority + switches to max-perf power plan + silences notifications.
-        Stop Boost: reverts power plan to Balanced and re-enables notifications.
-             Killed processes must be manually restarted.
+        {t("gameboostFooterBoost")}
+        {" "}{t("gameboostFooterStop")}
+        {" "}{t("gameboostFooterKilled")}
       </div>
     </>
   );
