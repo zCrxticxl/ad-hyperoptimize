@@ -1882,4 +1882,6 @@ export function LangProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
-export function 
+export function useLang() {
+  return useContext(LangContext);
+}
