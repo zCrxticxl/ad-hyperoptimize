@@ -3,6 +3,7 @@ import { api, fmtAge } from "../api";
 import { Card, Stat, Badge, Spinner, RawJson } from "../components/ui";
 import { HwWarnings, HwProfileCard } from "../components/HwWarnings";
 import { useLang } from "../i18n";
+import { localizeFinding, localizeSummary } from "../localize";
 import type { Mode } from "../App";
 
 export default function Dashboard({ mode, go }: { mode: Mode; go: (p: string) => void }) {
@@ -61,7 +62,9 @@ export default function Dashboard({ mode, go }: { mode: Mode; go: (p: string) =>
           )}
         </Card>
         <Card title={t("dashSummary")} style={{ gridColumn: "span 2" }}>
-          <div style={{ lineHeight: 1.6 }}>{analysis?.summary ?? (busy ? t("dashRunningFullAnalysis") : "—")}</div>
+          <div style={{ lineHeight: 1.6 }}>
+            {analysis ? localizeSummary(analysis.findings, t) : (busy ? t("dashRunningFullAnalysis") : "—")}
+          </div>
           {err && <div style={{ color: "var(--red)" }}>{err}</div>}
         </Card>
       </div>
@@ -78,23 +81,26 @@ export default function Dashboard({ mode, go }: { mode: Mode; go: (p: string) =>
       <Card title={`${t("dashFindings")} ${analysis ? `(${analysis.findings.length})` : ""}`}>
         {!analysis && busy && <Spinner />}
         {analysis?.findings.length === 0 && <div className="muted">{t("dashNoIssues")}</div>}
-        {analysis?.findings.map((f: any, i: number) => (
+        {analysis?.findings.map((f: any, i: number) => {
+          const loc = localizeFinding(f, t);
+          return (
           <div key={i} className="tweak">
             <div className="tweak-head">
               <Badge cls={`sev-${f.severity}`}>
                 {SEV_LABELS[f.severity]}
               </Badge>
-              <span className="tweak-name">{f.title}</span>
-              {f.tweakIds.length > 0 && (
+              <span className="tweak-name">{loc.title}</span>
+              {f.tweakIds?.length > 0 && (
                 <button className="btn small ghost" onClick={() => go("optimize")}>
                   {t("dashFixInOptimize")} →
                 </button>
               )}
             </div>
-            <div className="tweak-desc">{f.detail}</div>
-            <div className="tweak-desc" style={{ color: "var(--cyan)" }}>→ {f.recommendation}</div>
+            <div className="tweak-desc">{loc.detail}</div>
+            <div className="tweak-desc" style={{ color: "var(--cyan)" }}>→ {loc.recommendation}</div>
           </div>
-        ))}
+          );
+        })}
         {mode === "expert" && analysis && <RawJson data={analysis} />}
       </Card>
     </>

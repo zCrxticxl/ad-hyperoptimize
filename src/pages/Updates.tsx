@@ -34,7 +34,16 @@ function SelfUpdateCard() {
         setStatus("up_to_date");
       }
     } catch (e: any) {
-      setErrMsg(String(e));
+      const msg = String(e);
+      // Network/DNS/404 → update server not yet live; show a calm message instead
+      // of the raw Tauri plugin error which confuses end users.
+      const isNoServer =
+        msg.includes("fetch") || msg.includes("release JSON") ||
+        msg.includes("404") || msg.includes("network") ||
+        msg.includes("connect") || msg.includes("ENOTFOUND");
+      setErrMsg(isNoServer
+        ? "No update server reachable — you are on the latest available build."
+        : msg);
       setStatus("error");
     }
   };
@@ -60,7 +69,9 @@ function SelfUpdateCard() {
 
   const statusColor: Record<UpdateStatus, string> = {
     idle: "var(--muted)", checking: "var(--accent)", up_to_date: "var(--green)",
-    available: "var(--accent)", downloading: "var(--accent)", ready: "var(--green)", error: "var(--red)",
+    available: "var(--accent)", downloading: "var(--accent)", ready: "var(--green)",
+    // yellow instead of red: "no server" is informational, not an app crash
+    error: errMsg.includes("No update server") ? "var(--muted)" : "var(--red)",
   };
   const statusLabel: Record<UpdateStatus, string> = {
     idle: "", checking: "Checking…", up_to_date: "✓ Already on latest version",

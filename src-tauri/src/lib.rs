@@ -93,6 +93,9 @@ fn cmd_revert_tweak(id: String) -> Result<Value, String> { tweaks::revert(&id) }
 #[tauri::command(async)]
 fn cmd_history() -> Value { tweaks::history() }
 
+#[tauri::command(async)]
+fn cmd_revert_entry(entry_id: String) -> Result<Value, String> { tweaks::revert_entry(&entry_id) }
+
 // ---- safety / restore points ----
 #[tauri::command(async)]
 fn cmd_create_restore_point(description: String) -> Result<String, String> {
@@ -149,6 +152,21 @@ fn cmd_hosts_disable_entries(entries: Vec<String>) -> Result<String, String> {
 #[tauri::command(async)]
 fn cmd_hosts_enable_entries(entries: Vec<String>) -> Result<String, String> {
     security::hosts_enable_entries(entries)
+}
+
+#[tauri::command(async)]
+fn cmd_security_disable_driver(device_id: String) -> Result<String, String> {
+    security::disable_unsigned_driver(device_id)
+}
+
+#[tauri::command(async)]
+fn cmd_security_enable_driver(device_id: String) -> Result<String, String> {
+    security::enable_unsigned_driver(device_id)
+}
+
+#[tauri::command(async)]
+fn cmd_security_remove_driver(device_id: String) -> Result<String, String> {
+    security::remove_unsigned_driver(device_id)
 }
 
 // ---- benchmarks ----
@@ -411,6 +429,16 @@ fn cmd_gameboost_gpu_perf(enable: bool) -> Result<String, String> {
     gameboost::set_gpu_max_perf(enable)
 }
 
+#[tauri::command(async)]
+fn cmd_gameboost_quick_boost(process_name: String) -> Result<Value, String> {
+    gameboost::quick_boost_start(process_name)
+}
+
+#[tauri::command(async)]
+fn cmd_gameboost_quick_boost_revert(restore_token: String) -> Result<Value, String> {
+    gameboost::quick_boost_revert(restore_token)
+}
+
 
 // ---- uninstaller ----
 #[tauri::command(async)]
@@ -445,6 +473,18 @@ fn cmd_gpu_tweak_revert(id: String, driver_key: String) -> Result<String, String
     gputweaks::do_tweak(id, driver_key, false)
 }
 
+// ---- nvidia control panel ----
+#[tauri::command(async)]
+fn cmd_nv_get_settings() -> Value { gputweaks::nv_get_settings() }
+
+#[tauri::command(async)]
+fn cmd_nv_set_setting(setting: String, value: String) -> Result<Value, String> {
+    gputweaks::nv_set_setting(setting, value)
+}
+
+#[tauri::command(async)]
+fn cmd_nv_open_panel() -> Result<String, String> { gputweaks::nv_open_panel() }
+
 // ---- registry clean ----
 #[tauri::command(async)]
 fn cmd_regclean_scan() -> Value { regclean::scan() }
@@ -466,7 +506,10 @@ fn cmd_disk_organize_apply(items: Vec<Value>) -> Value {
 // ---- analysis / report ----
 #[tauri::command(async)]
 fn cmd_analyze(force: bool) -> Value {
-    cache::get_or("analysis", force, || {
+    // v2: findings now carry `code`+`params` for i18n (old cached "analysis"
+    // entries lack these fields and crash the localizer) — bump the cache key
+    // so stale pre-v2 files on disk are ignored instead of served.
+    cache::get_or("analysis_v2", force, || {
         let scan     = cache::data_or("scan",     force, crate::scan::full_scan);
         let security = cache::data_or("security", force, crate::security::scan);
         let cleanup  = cache::data_or("cleanup",  force, crate::cleanup::scan);
@@ -479,7 +522,7 @@ fn cmd_generate_report() -> Result<Value, String> {
     let scan     = cache::data_or("scan",      false, crate::scan::full_scan);
     let security = cache::data_or("security",  false, crate::security::scan);
     let cleanup  = cache::data_or("cleanup",   false, crate::cleanup::scan);
-    let analysis = cache::data_or("analysis",  false, || {
+    let analysis = cache::data_or("analysis_v2",  false, || {
         crate::analysis::analyze(&scan, &security, &cleanup)
     });
     let history  = crate::tweaks::history();
@@ -515,8 +558,14 @@ fn cmd_game_revert(state: State<AppState>) -> serde_json::Value {
 // ---- misc ----
 #[tauri::command(async)]
 fn cmd_open_path(path: String) -> Result<(), String> {
-    std::process::Command::new("explorer")
-        .arg(&path)
+    // `start` (via cmd) dispatches both URLs and filesystem paths to their
+    // correct default handler (browser / file association / Explorer for
+    // folders). Calling `explorer.exe <url>` directly is unreliable — when
+    // its relay to the running shell process fails to parse the argument,
+    // it silently opens the default Explorer location instead of the URL.
+    // The empty "" is the required window-title placeholder for `start`.
+    std::process::Command::new("cmd")
+        .args(["/C", "start", "", &path])
         .spawn()
         .map(|_| ())
         .map_err(|e| e.to_string())
@@ -715,6 +764,7 @@ pub fn run() {
             cmd_apply_tweak,
             cmd_revert_tweak,
             cmd_history,
+            cmd_revert_entry,
             // safety
             cmd_create_restore_point,
             cmd_list_restore_points,
@@ -729,6 +779,9 @@ pub fn run() {
             cmd_hosts_list_all,
             cmd_hosts_disable_entries,
             cmd_hosts_enable_entries,
+            cmd_security_disable_driver,
+            cmd_security_enable_driver,
+            cmd_security_remove_driver,
             cmd_disable_scheduled_task,
             cmd_enable_scheduled_task,
             cmd_defender_set_realtime,
@@ -794,6 +847,8 @@ pub fn run() {
             cmd_gameboost_stop,
             cmd_gameboost_get_status,
             cmd_gameboost_gpu_perf,
+            cmd_gameboost_quick_boost,
+            cmd_gameboost_quick_boost_revert,
             // privacy
             cmd_privacy_scan,
             cmd_privacy_apply,
@@ -828,6 +883,9 @@ pub fn run() {
             cmd_gpu_scan,
             cmd_gpu_tweak_apply,
             cmd_gpu_tweak_revert,
+            cmd_nv_get_settings,
+            cmd_nv_set_setting,
+            cmd_nv_open_panel,
             // registry clean
             cmd_regclean_scan,
             cmd_regclean_clean,
