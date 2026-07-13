@@ -850,20 +850,53 @@ fn vals_eq(a: &RegVal, b: &RegVal) -> bool {
 
 // ---------- public API ----------
 
+// Known Windows default startup types for every service we touch in the
+// catalog. Used by the force-revert path when no journal entry is available.
+fn service_default(name: &str) -> &'static str {
+    match name {
+        "DiagTrack"                                => "Automatic",
+        "SysMain"                                  => "Automatic",
+        "MapsBroker"                               => "Automatic",
+        "TrkWks"                                   => "Automatic",
+        "WSearch"                                  => "Automatic",
+        // These are Manual by default — our tweak sets them to Disabled.
+        "XblAuthManager" | "XblGameSave"
+        | "XboxNetApiSvc" | "RemoteRegistry"
+        | "lfsvc" | "Fax" | "wisvc"
+        | "diagnosticshub.standardcollector.service"
+        | "WMPNetworkSvc"                          => "Manual",
+        _                                          => "Manual", // safe fallback
+    }
+}
+
 /// Catalog + live status, ready for the UI.
 pub fn list_with_status() -> Value {
     let journal = safety::load_journal();
     let out: Vec<Value> = catalog()
         .iter()
         .map(|t| {
-            let status = detect_status(t);
             let undoable = journal.iter().any(|e| e.tweak_id == t.id && !e.reverted);
+            // Cmd-only tweaks (powercfg/fsutil/netsh one-shots) have no live
+            // state detect_status() can read back, so it always returns
+            // "unknown" — fall back to the journal: a successful, unreverted
+            // apply means it IS applied, even though we can't re-verify it.
+            let live = detect_status(t);
+            let status = match live {
+                "unknown" if undoable => "applied",
+                s => s,
+            };
+            // canUndo: true when we have a journal entry (precise restore with
+            // saved previous values) OR when live detection confirms the tweak
+            // is currently active — covers the "app reinstalled / journal lost"
+            // case for all RegSet + Service tweaks. Cmd-only tweaks return
+            // "unknown" from detect_status so they still require the journal.
+            let can_undo = undoable || live == "applied";
             json!({
                 "id": t.id, "name": t.name, "category": t.category,
                 "description": t.description, "rationale": t.rationale,
                 "impact": t.impact, "risk": t.risk,
                 "requiresAdmin": t.requires_admin, "reversible": t.reversible,
-                "status": status, "undoable": undoable,
+                "status": status, "undoable": undoable, "canUndo": can_undo,
             })
         })
         .collect();
@@ -987,7 +1020,7 @@ pub fn apply(tweak_id: &str) -> Result<Value, String> {
     Ok(json!({ "entryId": entry_id, "status": "applied" }))
 }
 
-fn apply_item(item: &ChangeItem) -> Result<(), String> {
+pub(crate) fn apply_item(item: &ChangeItem) -> Result<(), String> {
     match item {
         #[cfg(windows)]
         ChangeItem::Registry { root, path, name, new, .. } => reg_write(root, path, name, new),
@@ -998,7 +1031,7 @@ fn apply_item(item: &ChangeItem) -> Result<(), String> {
     }
 }
 
-fn revert_item(item: &ChangeItem) -> Result<(), String> {
+pub(crate) fn revert_item(item: &ChangeItem) -> Result<(), String> {
     match item {
         #[cfg(windows)]
         ChangeItem::Registry { root, path, name, prev, .. } => match prev {
@@ -1013,13 +1046,109 @@ fn revert_item(item: &ChangeItem) -> Result<(), String> {
 }
 
 /// Undo the most recent non-reverted journal entry for a tweak.
+/// If no journal entry exists but the tweak is currently active (detected via
+/// live registry / service state), falls back to a synthesized force-revert:
+///   • RegSet  → deletes the value we wrote  (restores Windows default-absent state)
+///   • Service → resets to the known Windows default startup type
+///   • Cmd     → executes the catalog's revert command
+/// Cmd-only tweaks (powercfg / fsutil) with no live detection still require a
+/// journal entry — if the journal is gone for those, return an error telling
+/// the user to apply-then-undo.
 pub fn revert(tweak_id: &str) -> Result<Value, String> {
+    // ── 1. Journal path (precise: uses saved previous values + reg backups) ──
     let mut journal = safety::load_journal();
-    let entry = journal
+    if let Some(entry) = journal
         .iter_mut()
         .rev()
         .find(|e| e.tweak_id == tweak_id && !e.reverted)
-        .ok_or("nothing to undo for this tweak")?;
+    {
+        let mut errs = Vec::new();
+        for item in entry.items.iter().rev() {
+            if let Err(e) = revert_item(item) {
+                errs.push(e);
+            }
+        }
+        return if errs.is_empty() {
+            entry.reverted = true;
+            let id = entry.id.clone();
+            safety::save_journal(&journal)?;
+            Ok(json!({ "entryId": id, "status": "reverted" }))
+        } else {
+            Err(format!("partial revert, errors: {}", errs.join("; ")))
+        };
+    }
+
+    // ── 2. Force-revert path (no journal — synthesize from catalog + live state) ──
+    let t = catalog()
+        .into_iter()
+        .find(|t| t.id == tweak_id)
+        .ok_or_else(|| format!("unknown tweak '{tweak_id}'"))?;
+
+    let live = detect_status(&t);
+    if live == "not_applied" {
+        return Err("tweak is not currently active — nothing to undo".into());
+    }
+    if live == "unknown" {
+        // Cmd-only tweak: we have no live signal. Running the revert command
+        // blind is still safe — offer it anyway so users who applied these
+        // manually (or lost the journal) can still reset.
+        let mut errs = Vec::new();
+        for a in t.actions.iter().rev() {
+            if let Action::Cmd { revert, .. } = a {
+                if let Err(e) = run_cmdline(revert) { errs.push(e); }
+            }
+        }
+        return if errs.is_empty() {
+            Ok(json!({ "status": "force_reverted", "journaled": false }))
+        } else {
+            Err(format!("force revert errors: {}", errs.join("; ")))
+        };
+    }
+
+    // live == "applied" | "partial" → undo each action using catalog defaults
+    let mut errs = Vec::new();
+    for a in t.actions.iter().rev() {
+        let res: Result<(), String> = match a {
+            #[cfg(windows)]
+            Action::RegSet { root, path, name, .. } => {
+                // Delete the value we wrote. For all our catalog tweaks the
+                // value either didn't exist before (deletion → absent = default)
+                // or was at the Windows built-in default which also wins when
+                // the key is absent. reg_delete returns Ok(()) if already gone.
+                reg_delete(root, path, name).or(Ok(()))
+            }
+            #[cfg(not(windows))]
+            Action::RegSet { .. } => Ok(()),
+            Action::Service { name, .. } => {
+                service_set_start(name, service_default(name))
+            }
+            Action::Cmd { revert, .. } => run_cmdline(revert),
+        };
+        if let Err(e) = res { errs.push(e); }
+    }
+
+    if errs.is_empty() {
+        Ok(json!({ "status": "force_reverted", "journaled": false }))
+    } else {
+        Err(format!("force revert errors: {}", errs.join("; ")))
+    }
+}
+
+/// Undo one specific journal entry by its id — the "restore token" handed
+/// back by any apply-style call (e.g. Quick Boost). Unlike `revert(tweak_id)`,
+/// which always targets the *latest* entry for a tweak id, this targets an
+/// exact entry, so callers that can have multiple concurrent instances active
+/// (Quick Boost on two different games at once) each get an independent,
+/// unambiguous undo handle.
+pub fn revert_entry(entry_id: &str) -> Result<Value, String> {
+    let mut journal = safety::load_journal();
+    let entry = journal
+        .iter_mut()
+        .find(|e| e.id == entry_id)
+        .ok_or("unknown restore token")?;
+    if entry.reverted {
+        return Err("already reverted".into());
+    }
     let mut errs = Vec::new();
     for item in entry.items.iter().rev() {
         if let Err(e) = revert_item(item) {

@@ -10,10 +10,24 @@ export default function Reports() {
   const [restorePts, setRestorePts] = useState<any | null>(null);
   const [logs, setLogs] = useState<any | null>(null);
   const [health, setHealth] = useState<any | null>(null);
+  const [undoBusy, setUndoBusy] = useState<string | null>(null);
+  const [undoErr, setUndoErr] = useState<string>("");
+
+  const loadHistory = () => api.history().then(setHistory).catch(() => {});
 
   useEffect(() => {
-    api.history().then(setHistory).catch(() => {});
+    loadHistory();
   }, []);
+
+  const undoEntry = async (id: string) => {
+    setUndoBusy(id);
+    setUndoErr("");
+    try {
+      await api.revertEntry(id);
+      await loadHistory();
+    } catch (e: any) { setUndoErr(String(e)); }
+    finally { setUndoBusy(null); }
+  };
 
   return (
     <>
@@ -39,19 +53,27 @@ export default function Reports() {
 
       <Card title={`${t("repChangeHistory")} (${history.length})`} style={{ marginTop: 14 }}>
         <table className="tbl">
-          <thead><tr><th>{t("repTime")}</th><th>{t("repTweak")}</th><th>{t("repState")}</th><th>{t("repBackups")}</th></tr></thead>
+          <thead><tr><th>{t("repTime")}</th><th>{t("repTweak")}</th><th>{t("repState")}</th><th>{t("repBackups")}</th><th></th></tr></thead>
           <tbody>
             {[...history].reverse().map((h, i) => (
-              <tr key={i}>
+              <tr key={h.id ?? i}>
                 <td className="muted">{new Date(h.time).toLocaleString()}</td>
                 <td>{h.tweak_name}</td>
                 <td style={{ color: h.reverted ? "var(--muted)" : "var(--green)" }}>{h.reverted ? t("repReverted") : t("repApplied")}</td>
                 <td className="muted">{h.backup_files?.length ?? 0} {t("repRegFiles")}</td>
+                <td>
+                  {!h.reverted && h.id && (
+                    <button className="btn small ghost" disabled={undoBusy === h.id} onClick={() => undoEntry(h.id)}>
+                      {undoBusy === h.id ? "…" : t("revert")}
+                    </button>
+                  )}
+                </td>
               </tr>
             ))}
-            {history.length === 0 && <tr><td colSpan={4} className="muted">{t("repNoChanges")}</td></tr>}
+            {history.length === 0 && <tr><td colSpan={5} className="muted">{t("repNoChanges")}</td></tr>}
           </tbody>
         </table>
+        {undoErr && <div className="muted" style={{ fontSize: 12, marginTop: 8, color: "var(--orange)" }}>{undoErr}</div>}
       </Card>
 
       <div className="grid grid-2 mt">

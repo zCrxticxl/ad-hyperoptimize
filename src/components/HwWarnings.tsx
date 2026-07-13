@@ -1,5 +1,8 @@
 import React, { useState } from "react";
 import { useHwWarnings, useHwProfile, useTweakRisk, HwWarning, HwProfile, TweakRisk } from "../hooks/useHwProfile";
+import { Badge } from "./ui";
+import { useLang } from "../i18n";
+import { analyzeBottleneck, RATING_CLS, RATING_KEY, ComponentRating, Rating } from "../lib/pcAdvisor";
 
 // ─── severity styling ────────────────────────────────────────────────────────
 const SEV: Record<string, { bg: string; border: string; icon: string; label: string }> = {
@@ -168,40 +171,21 @@ export function useRequiresRiskConfirm(id: string): boolean {
 }
 
 // ─── hardware summary card (for Dashboard) ───────────────────────────────────
-const TIER_COLOR: Record<string, string> = {
-  high:      "var(--green)",
-  mid:       "var(--yellow)",
-  ok:        "var(--green)",
-  good:      "var(--green)",
-  nvme:      "var(--green)",
-  sata_ssd:  "var(--yellow)",
-  budget:    "var(--orange)",
-  low:       "var(--red)",
-  hdd:       "var(--red)",
-  integrated:"var(--red)",
-  unknown:   "var(--muted)",
-};
-
-function TierBadge({ tier }: { tier: string }) {
-  const color = TIER_COLOR[tier] ?? "var(--muted)";
-  return (
-    <span style={{
-      fontSize: 10, fontWeight: 700, textTransform: "uppercase",
-      padding: "1px 7px", borderRadius: 10,
-      background: `${color}22`, color, border: `1px solid ${color}`,
-      marginLeft: 6,
-    }}>
-      {tier.replace("_", " ")}
-    </span>
-  );
+// Badge shows pcAdvisor's bottleneck-RELATIVE rating (real benchmark scores,
+// CPU-vs-GPU aware) rather than hwprofile.rs's coarse absolute tier — an
+// absolute "HIGH" on both CPU and GPU previously hid the fact that the CPU
+// is the actual bottleneck next to that specific GPU. The raw tier is still
+// used elsewhere (RiskBadge / tweak gating); only this display changed.
+function RatingBadge({ rating, t }: { rating: Rating; t: (key: any) => string }) {
+  return <Badge cls={RATING_CLS[rating]}>{t(RATING_KEY[rating] as any)}</Badge>;
 }
 
-function Row({ label, value, tier }: { label: string; value: string; tier?: string }) {
+function Row({ label, value, rating, t }: { label: string; value: string; rating?: Rating; t?: (key: any) => string }) {
   return (
     <div style={{ display: "flex", alignItems: "center", padding: "5px 0", borderBottom: "1px solid var(--border)", fontSize: 12, gap: 8 }}>
       <span className="muted" style={{ minWidth: 80 }}>{label}</span>
       <span style={{ flex: 1, fontWeight: 500 }}>{value}</span>
-      {tier && <TierBadge tier={tier} />}
+      {rating && t && <RatingBadge rating={rating} t={t} />}
     </div>
   );
 }
@@ -213,7 +197,11 @@ function fmtRam(mb: number) {
 
 export function HwProfileCard() {
   const p: HwProfile | null = useHwProfile();
+  const { t } = useLang();
   if (!p) return <div className="muted" style={{ fontSize: 12 }}>Detecting hardware…</div>;
+
+  const bottleneck = analyzeBottleneck(p);
+  const ratingOf = (key: ComponentRating["key"]) => bottleneck.components.find(c => c.key === key)?.rating;
 
   const storageLabel = p.storage.hasNvme
     ? "NVMe SSD" + (p.storage.hasHdd ? " + HDD" : "")
@@ -225,12 +213,21 @@ export function HwProfileCard() {
 
   return (
     <div>
-      <Row label="CPU" value={p.cpu.name} tier={p.cpu.tier} />
-      <Row label="GPU" value={`${p.gpu.name}${p.gpu.vramMb ? ` · ${p.gpu.vramMb >= 1024 ? (p.gpu.vramMb / 1024).toFixed(0) + " GB" : p.gpu.vramMb + " MB"} VRAM` : ""}`} tier={p.gpu.tier} />
-      <Row label="RAM" value={`${fmtRam(p.ram.totalMb)}${p.ram.speedMhz ? ` · ${p.ram.speedMhz} MHz` : ""} · ${p.ram.sticks} stick${p.ram.sticks !== 1 ? "s" : ""}`} tier={p.ram.tier} />
-      <Row label="Storage" value={storageLabel} tier={p.storage.tier} />
+      <Row label="CPU" value={p.cpu.name} rating={ratingOf("cpu")} t={t} />
+      <Row label="GPU" value={`${p.gpu.name}${p.gpu.vramMb ? ` · ${p.gpu.vramMb >= 1024 ? (p.gpu.vramMb / 1024).toFixed(0) + " GB" : p.gpu.vramMb + " MB"} VRAM` : ""}`} rating={ratingOf("gpu")} t={t} />
+      <Row label="RAM" value={`${fmtRam(p.ram.totalMb)}${p.ram.speedMhz ? ` · ${p.ram.speedMhz} MHz` : ""} · ${p.ram.sticks} stick${p.ram.sticks !== 1 ? "s" : ""}`} rating={ratingOf("ram")} t={t} />
+      <Row label="Storage" value={storageLabel} rating={ratingOf("storage")} t={t} />
       {p.isLaptop && <Row label="Platform" value="Laptop" />}
       {p.isWifi && <Row label="Network" value="Wi-Fi" />}
+      <div className="muted" style={{ marginTop: 8, fontSize: 12, lineHeight: 1.5 }}>
+        {t(
+          (bottleneck.cpuGpuImbalance === "cpu_limited"
+            ? "pcconfImbalanceCpuLimited"
+            : bottleneck.cpuGpuImbalance === "gpu_limited"
+            ? "pcconfImbalanceGpuLimited"
+            : "pcconfImbalanceBalanced") as any
+        )}
+      </div>
     </div>
   );
 }
