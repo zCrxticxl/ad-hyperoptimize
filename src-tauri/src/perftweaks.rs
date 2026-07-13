@@ -114,36 +114,30 @@ try {
 // ── MSI Mode ─────────────────────────────────────────────────────────────────
 
 pub fn msi_list() -> Value {
-    // Search Enum\PCI directly — works regardless of class GUID location.
+    // Get-PnpDevice gives a normalized Class + InstanceId regardless of how the
+    // driver/INF registered the device — far more reliable than manually
+    // walking Enum\PCI and reading a raw Class string off the instance key.
+    // InstanceId -> "HKLM:\SYSTEM\CurrentControlSet\Enum\<InstanceId>" is the
+    // standard, documented mapping (same one pnputil/Device Manager use).
     let script = r#"
 $results = @()
-$pciBase = 'HKLM:\SYSTEM\CurrentControlSet\Enum\PCI'
-if (Test-Path $pciBase) {
-    Get-ChildItem $pciBase -ErrorAction SilentlyContinue | ForEach-Object {
-        $devFolder = $_.PSPath
-        Get-ChildItem $devFolder -ErrorAction SilentlyContinue | ForEach-Object {
-            $instPath = $_.PSPath
-            $props = Get-ItemProperty $instPath -ErrorAction SilentlyContinue
-            $cls = $props.Class
-            if ($cls -notin @('Display','Net')) { return }
-            $name = if ($props.FriendlyName) { $props.FriendlyName }
-                    elseif ($props.DeviceDesc) { $props.DeviceDesc } else { $null }
-            if (-not $name) { return }
-            $msiKey = Join-Path $instPath 'Device Parameters\Interrupt Management\MessageSignaledInterruptProperties'
-            $msiEnabled = $false
-            if (Test-Path $msiKey) {
-                $mp = Get-ItemProperty $msiKey -ErrorAction SilentlyContinue
-                $msiEnabled = ($mp.MSISupported -eq 1)
-            }
-            $results += [PSCustomObject]@{
-                name       = $name
-                type       = if ($cls -eq 'Display') { 'GPU' } else { 'NIC' }
-                msiEnabled = $msiEnabled
-                regPath    = $instPath -replace 'Microsoft\.PowerShell\.Core\\Registry::',''
-            }
+Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue |
+    Where-Object { $_.Class -in @('Display','Net') -and $_.InstanceId } |
+    ForEach-Object {
+        $instPath = "HKLM:\SYSTEM\CurrentControlSet\Enum\$($_.InstanceId)"
+        $msiKey = Join-Path $instPath 'Device Parameters\Interrupt Management\MessageSignaledInterruptProperties'
+        $msiEnabled = $false
+        if (Test-Path $msiKey) {
+            $mp = Get-ItemProperty $msiKey -ErrorAction SilentlyContinue
+            $msiEnabled = ($mp.MSISupported -eq 1)
+        }
+        $results += [PSCustomObject]@{
+            name       = $_.FriendlyName
+            type       = if ($_.Class -eq 'Display') { 'GPU' } else { 'NIC' }
+            msiEnabled = $msiEnabled
+            regPath    = $instPath
         }
     }
-}
 if ($results.Count -eq 0) { '[]' } else { @($results) | ConvertTo-Json -Depth 2 -Compress }
 "#;
     match ps::run_json(script) {
@@ -155,7 +149,9 @@ if ($results.Count -eq 0) { '[]' } else { @($results) | ConvertTo-Json -Depth 2 
 
 pub fn msi_set(reg_path: String, enabled: bool) -> Result<String, String> {
     let val = if enabled { 1 } else { 0 };
-    // reg_path is like HKEY_LOCAL_MACHINE\SYSTEM\... — convert to HKLM: for PS
+    // regPath from msi_list() is already "HKLM:\SYSTEM\..." (PS-ready); this
+    // replacen is a no-op for that shape, kept only for back-compat with any
+    // stale HKEY_LOCAL_MACHINE-prefixed value a client might still send.
     let ps_path = reg_path.replacen("HKEY_LOCAL_MACHINE", "HKLM:", 1);
     let script = format!(
         r#"
@@ -173,31 +169,36 @@ Set-ItemProperty -Path $msiKey -Name 'MSISupported' -Value {val} -Type DWord -Fo
 // ── Network Adapter Tweaks ────────────────────────────────────────────────────
 
 pub fn net_adapters() -> Value {
-    // No Status filter — include all physical adapters regardless of link state.
+    // No Status filter — include all adapters regardless of link state.
+    // Plain foreach + hashtable lookups instead of ForEach-Object with a
+    // closure-capturing scriptblock ($gv = { ... }; & $gv ...): if any
+    // single adapter's advanced-property fetch threw, the old version's
+    // single shared try/catch around the *whole* loop discarded every
+    // adapter collected so far, not just the failing one. Each adapter now
+    // gets its own try/catch so one bad device can't zero out the list.
     let script = r#"
 $adapters = @()
-try {
-    $all = Get-NetAdapter -ErrorAction SilentlyContinue | Where-Object {
-        $_.HardwareInterface -eq $true -or $_.PhysicalMediaType -notin @('Unspecified','802.3')
-    }
-    # Fallback: just get everything if the above is empty
-    if (-not $all) { $all = Get-NetAdapter -ErrorAction SilentlyContinue }
-    $all | ForEach-Object {
-        $n = $_.Name
-        $props = Get-NetAdapterAdvancedProperty -Name $n -ErrorAction SilentlyContinue
-        $gv = { param($kw) ($props | Where-Object { $_.RegistryKeyword -eq $kw } | Select-Object -First 1).DisplayValue }
-        $adapters += [PSCustomObject]@{
-            name        = $n
-            description = $_.InterfaceDescription
-            status      = $_.Status
-            speedMbps   = if ($_.LinkSpeed) { [math]::Round($_.LinkSpeed / 1e6) } else { 0 }
-            intMod      = & $gv '*InterruptModeration'
-            rss         = & $gv '*RSS'
-            tcpOffload  = & $gv '*TCPChecksumOffloadIPv4'
-            lsoV2       = & $gv '*LsoV2IPv4'
+$all = $null
+try { $all = Get-NetAdapter -ErrorAction SilentlyContinue } catch {}
+foreach ($a in $all) {
+    $name = $a.Name
+    $kwmap = @{}
+    try {
+        Get-NetAdapterAdvancedProperty -Name $name -ErrorAction SilentlyContinue | ForEach-Object {
+            $kwmap[$_.RegistryKeyword] = $_.DisplayValue
         }
+    } catch {}
+    $adapters += [PSCustomObject]@{
+        name        = $name
+        description = $a.InterfaceDescription
+        status      = $a.Status
+        speedMbps   = if ($a.LinkSpeed) { [math]::Round($a.LinkSpeed / 1e6) } else { 0 }
+        intMod      = $kwmap['*InterruptModeration']
+        rss         = $kwmap['*RSS']
+        tcpOffload  = $kwmap['*TCPChecksumOffloadIPv4']
+        lsoV2       = $kwmap['*LsoV2IPv4']
     }
-} catch {}
+}
 if ($adapters.Count -eq 0) { '[]' } else { @($adapters) | ConvertTo-Json -Depth 2 -Compress }
 "#;
     match ps::run_json(script) {

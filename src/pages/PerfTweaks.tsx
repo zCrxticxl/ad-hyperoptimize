@@ -135,12 +135,16 @@ function MsiCard({ admin }: { admin: boolean }) {
   };
 
   const devices: any[] = data?.devices ?? [];
+  const hasNic = devices.some(d => d.type !== "GPU");
+  const hasGpu = devices.some(d => d.type === "GPU");
 
   return (
     <Card title={t("perfMsiTitle")}>
-      <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
         {t("perfMsiDesc")}
       </div>
+      {hasNic && <div className="muted" style={{ fontSize: 11, marginBottom: 2 }}>[NIC] {t("perfMsiHintNic")}</div>}
+      {hasGpu && <div className="muted" style={{ fontSize: 11, marginBottom: 10 }}>[GPU] {t("perfMsiHintGpu")}</div>}
       {!data ? <Spinner /> : (
         <>
           {devices.length === 0 && <div className="muted">{t("perfMsiNoDevices")}</div>}
@@ -148,7 +152,7 @@ function MsiCard({ admin }: { admin: boolean }) {
             <div key={i} className="row" style={{ padding: "6px 0", borderBottom: "1px solid var(--border)", alignItems: "center", gap: 10 }}>
               <span style={{ color: "var(--muted)", fontSize: 11, width: 36, flexShrink: 0 }}>[{d.type}]</span>
               <span style={{ flex: 1 }}>{d.name}</span>
-              <span style={{ color: d.msiEnabled ? "var(--green)" : "var(--red)", fontWeight: 700, fontSize: 12 }}>
+              <span style={{ color: d.msiEnabled ? "var(--green)" : "var(--red)", fontWeight: 700, fontSize: 12, flexShrink: 0 }}>
                 {d.msiEnabled ? `● ${t("perfMsiOn")}` : `● ${t("perfMsiLine")}`}
               </span>
               <RiskBadge id="msi_mode_toggle" />
@@ -179,11 +183,11 @@ function NetCard({ admin }: { admin: boolean }) {
   const [busy, setBusy] = useState(false);
   const [log, setLog] = useState("");
 
-  const NET_PROPS: { key: string; label: string; keyword: string; offVal: number; onVal: number }[] = [
-    { key: "intMod",     label: t("perfNetIntMod"),     keyword: "*InterruptModeration",      offVal: 0, onVal: 1 },
-    { key: "rss",        label: t("perfNetRss"),        keyword: "*RSS",                       offVal: 0, onVal: 1 },
-    { key: "tcpOffload", label: t("perfNetTcpOffload"), keyword: "*TCPChecksumOffloadIPv4",   offVal: 0, onVal: 1 },
-    { key: "lsoV2",      label: t("perfNetLsoV2"),      keyword: "*LsoV2IPv4",                offVal: 0, onVal: 1 },
+  const NET_PROPS: { key: string; label: string; hint: string; keyword: string; offVal: number; onVal: number }[] = [
+    { key: "intMod",     label: t("perfNetIntMod"),     hint: t("perfNetIntModHint"),     keyword: "*InterruptModeration",    offVal: 0, onVal: 1 },
+    { key: "rss",        label: t("perfNetRss"),        hint: t("perfNetRssHint"),        keyword: "*RSS",                     offVal: 0, onVal: 1 },
+    { key: "tcpOffload", label: t("perfNetTcpOffload"), hint: t("perfNetTcpOffloadHint"), keyword: "*TCPChecksumOffloadIPv4", offVal: 0, onVal: 1 },
+    { key: "lsoV2",      label: t("perfNetLsoV2"),      hint: t("perfNetLsoV2Hint"),      keyword: "*LsoV2IPv4",              offVal: 0, onVal: 1 },
   ];
 
   const load = async () => setData(await api.netAdapters());
@@ -238,9 +242,12 @@ function NetCard({ admin }: { admin: boolean }) {
                 const raw = a[p.key];
                 const off = isDisabled(raw);
                 return (
-                  <div key={p.key} className="row" style={{ padding: "3px 0", borderBottom: "1px solid var(--border)", alignItems: "center", gap: 8 }}>
-                    <span style={{ flex: 1, fontSize: 13 }}>{p.label}</span>
-                    <span className="muted" style={{ fontSize: 11, minWidth: 70, textAlign: "right" }}>{raw ?? "—"}</span>
+                  <div key={p.key} className="row" style={{ padding: "5px 0", borderBottom: "1px solid var(--border)", alignItems: "flex-start", gap: 8 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13 }}>{p.label}</div>
+                      <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>{p.hint}</div>
+                    </div>
+                    <span className="muted" style={{ fontSize: 11, minWidth: 70, textAlign: "right", flexShrink: 0 }}>{raw ?? "—"}</span>
                     <span style={{ color: off ? "var(--green)" : "var(--muted)", fontWeight: 700, fontSize: 11, minWidth: 24 }}>
                       {off ? "●" : "○"}
                     </span>

@@ -18,6 +18,7 @@ import Profiles from "./pages/Profiles";
 import ScheduledTasks from "./pages/ScheduledTasks";
 import RegClean from "./pages/RegClean";
 import GpuTweaks from "./pages/GpuTweaks";
+import NvidiaControlPanel from "./pages/NvidiaControlPanel";
 import DiskAnalyzer from "./pages/DiskAnalyzer";
 import BootOptimizer from "./pages/BootOptimizer";
 import PrivacyCenter from "./pages/PrivacyCenter";
@@ -35,6 +36,7 @@ import AutoOptimizer from "./pages/AutoOptimizer";
 import RestorePointManager from "./pages/RestorePointManager";
 import GameProfiles from "./pages/GameProfiles";
 import SoftwareInstaller from "./pages/SoftwareInstaller";
+import PcConfigurator from "./pages/PcConfigurator";
 
 type NavItem = { id: string; icon: string; label: string };
 type NavGroup = { group: string; items: NavItem[] };
@@ -62,8 +64,10 @@ const buildNav: NavBuilder = (t) => [
       { id: "powerplan",  icon: "🔋", label: t("navPowerPlan") },
       { id: "latency",    icon: "⚠",  label: t("navLatency") },
       { id: "gputweaks",    icon: "▣",  label: t("navGpuTweaks") },
+      { id: "nvcontrol",    icon: "🟢", label: t("navNvControl") },
       { id: "profiles",     icon: "◎",  label: t("navProfiles") },
       { id: "gameprofiles", icon: "🎮", label: t("navGameProfiles") },
+      { id: "pcconfig",     icon: "🖥", label: t("navPcConfig") },
     ],
   },
   {
@@ -262,6 +266,7 @@ function AppInner() {
         {page === "cleanup"        && <Cleanup />}
         {page === "regclean"       && <RegClean admin={!!admin} />}
         {page === "gputweaks"      && <GpuTweaks admin={!!admin} />}
+        {page === "nvcontrol"      && <NvidiaControlPanel />}
         {page === "diskanalyzer"   && <DiskAnalyzer />}
         {page === "bootopt"        && <BootOptimizer admin={!!admin} />}
         {page === "privacy"        && <PrivacyCenter admin={!!admin} />}
@@ -282,6 +287,7 @@ function AppInner() {
         {page === "autoopt"        && <AutoOptimizer admin={!!admin} />}
         {page === "restorepoints"  && <RestorePointManager admin={!!admin} />}
         {page === "softinstaller"  && <SoftwareInstaller />}
+        {page === "pcconfig"       && <PcConfigurator />}
       </main>
     </div>
   );
