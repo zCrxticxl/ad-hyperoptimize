@@ -6,6 +6,14 @@ import { useLang } from "../i18n";
 
 const ok = (v: any) => v === true || v === "True";
 
+/** Collapse long GUID suffixes (e.g. "...TaskMachineCore{3AECA2AC-...}")
+ * down to "...TaskMachineCore{…}" so autorun rows don't wrap to 2-3 lines
+ * and blow out the card height. Full name is still available via title=. */
+function shortenTaskName(name: string): string {
+  const collapsed = name.replace(/\{[0-9A-Fa-f-]{8,}\}/g, "{…}");
+  return collapsed.length > 46 ? collapsed.slice(0, 44) + "…" : collapsed;
+}
+
 function HostsCard({ count, hoDisabledCount }: { count: number; hoDisabledCount: number }) {
   const [data, setData] = useState<{ active: string[]; hoDisabled: string[] } | null>(null);
   const [loading, setLoading] = useState(false);
@@ -13,7 +21,6 @@ function HostsCard({ count, hoDisabledCount }: { count: number; hoDisabledCount:
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState<"active" | "disabled">("active");
   const [busy, setBusy] = useState(false);
-  const [taskMsg, setTaskMsg] = useState<{ text: string; ok: boolean } | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
   const load = async () => {
@@ -78,7 +85,7 @@ function HostsCard({ count, hoDisabledCount }: { count: number; hoDisabledCount:
     }
   };
 
-  const title = `Hosts file entries (${count} active${hoDisabledCount > 0 ? `, ${hoDisabledCount} disabled` : ""})`;
+  const title = `🌐 Hosts file entries (${count} active${hoDisabledCount > 0 ? `, ${hoDisabledCount} disabled` : ""})`;
 
   return (
     <Card title={title} style={{ marginTop: 14 }}>
@@ -213,6 +220,7 @@ export default function Security({ mode }: { mode: Mode }) {
   const [meta, setMeta] = useState<{ time: string; fromCache: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
   const [taskMsg, setTaskMsg] = useState<{ text: string; ok: boolean } | null>(null);
+  const [driverBusy, setDriverBusy] = useState<string | null>(null);
 
   const load = (force: boolean) => {
     setBusy(true);
@@ -295,9 +303,9 @@ export default function Security({ mode }: { mode: Mode }) {
         <div style={{ color: "var(--red)", marginBottom: 10, fontSize: 13 }}>⚠ {sec.error}</div>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, alignItems: "start" }}>
         {/* Defender + Firewall */}
-        <Card title="Windows Defender & Firewall">
+        <Card title="🛡️ Windows Defender & Firewall">
           {defenderRows.map(r => (
             <div key={r.label} className="row" style={{ justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid var(--border)", fontSize: 13, alignItems: "center" }}>
               <span className="muted">{r.label}</span>
@@ -325,87 +333,177 @@ export default function Security({ mode }: { mode: Mode }) {
         </Card>
 
         {/* Drivers */}
-        <Card title={`Unsigned / Suspicious Drivers (${susDrivers.length})`}>
+        <Card title={`⚠️ Unsigned / Suspicious Drivers (${susDrivers.length})`}>
           {susDrivers.length === 0 ? (
             <span className="muted" style={{ fontSize: 13 }}>✓ No suspicious drivers found.</span>
-          ) : susDrivers.map((dr: any) => (
-            <div key={dr.name} style={{ fontSize: 12, padding: "4px 0", borderBottom: "1px solid var(--border)" }}>
-              <div style={{ fontWeight: 600 }}>{dr.name}</div>
-              <div className="muted">{dr.path}</div>
-              {dr.signer && <div style={{ color: "var(--orange)" }}>Signer: {dr.signer}</div>}
-            </div>
-          ))}
+          ) : (
+            <>
+              <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", gap: 8, marginBottom: 6 }}>
+                <div className="muted" style={{ fontSize: 11 }}>
+                  Disable is reversible (driver stays installed, just stops loading). Remove uninstalls it —
+                  if the hardware is still plugged in, Windows usually redetects and reinstalls a driver on its own
+                  (the same "repair" trick as Device Manager's own Uninstall button). Consider a restore point first.
+                </div>
+                <button
+                  className="btn small ghost"
+                  style={{ fontSize: 11, flexShrink: 0, whiteSpace: "nowrap" }}
+                  onClick={async () => {
+                    try {
+                      await api.driversOpenDevmgr();
+                      setTaskMsg({ text: "Device Manager opened.", ok: true });
+                    } catch (e: any) {
+                      setTaskMsg({ text: String(e), ok: false });
+                    }
+                  }}
+                >
+                  Open Device Manager
+                </button>
+              </div>
+              <div style={{ maxHeight: 280, overflowY: "auto" }}>
+                {susDrivers.map((raw: any, i: number) => {
+                  const dr = typeof raw === "string" ? { device: raw } : raw ?? {};
+                  const label = dr.device || dr.name || "Unknown driver";
+                  const deviceId: string = dr.deviceId || "";
+                  const rowBusy = driverBusy === deviceId;
+                  const run = async (
+                    action: (id: string) => Promise<string>,
+                    confirmMsg: string | null,
+                    busyLabel: string
+                  ) => {
+                    if (!deviceId) {
+                      setTaskMsg({ text: `No device instance ID for "${label}" — open Device Manager instead.`, ok: false });
+                      return;
+                    }
+                    if (confirmMsg && !window.confirm(confirmMsg)) return;
+                    setDriverBusy(deviceId);
+                    try {
+                      const msg = await action(deviceId);
+                      setTaskMsg({ text: `${busyLabel} "${label}": ${msg}`, ok: true });
+                      load(true);
+                    } catch (e: any) {
+                      setTaskMsg({ text: String(e), ok: false });
+                    } finally {
+                      setDriverBusy(null);
+                    }
+                  };
+                  return (
+                    <div key={deviceId || i} className="row" style={{ fontSize: 12, padding: "6px 0", borderBottom: "1px solid var(--border)", gap: 8, alignItems: "center" }}>
+                      <div style={{ flex: 1, minWidth: 0 }} title={deviceId || label}>
+                        <div style={{ fontWeight: 600, color: "var(--orange)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                          {label}
+                        </div>
+                        <div className="muted" style={{ fontSize: 11, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                          {dr.manufacturer || "Unknown manufacturer"}{dr.deviceClass ? ` · ${dr.deviceClass}` : ""}
+                        </div>
+                      </div>
+                      <div className="row" style={{ gap: 6, flexShrink: 0 }}>
+                        <button
+                          className="btn small ghost"
+                          style={{ fontSize: 11 }}
+                          disabled={rowBusy || !deviceId}
+                          onClick={() => run(api.securityDisableDriver, null, "Disabled")}
+                        >
+                          {rowBusy ? "…" : "Disable"}
+                        </button>
+                        <button
+                          className="btn small ghost danger"
+                          style={{ fontSize: 11 }}
+                          disabled={rowBusy || !deviceId}
+                          onClick={() =>
+                            run(
+                              api.securityRemoveDriver,
+                              `Remove "${label}"?\n\nThis uninstalls the driver. If the hardware is still connected, Windows will likely reinstall a driver for it automatically. A restore point is recommended first.`,
+                              "Removed"
+                            )
+                          }
+                        >
+                          {rowBusy ? "…" : "Remove"}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
         </Card>
       </div>
 
-      <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-        {/* Autoruns */}
       {taskMsg && (
-        <div style={{ margin: "0 0 10px", padding: "8px 12px", borderRadius: 6, fontSize: 13,
+        <div style={{ marginTop: 12, padding: "8px 12px", borderRadius: 6, fontSize: 13,
           background: taskMsg.ok ? "rgba(80,200,120,0.08)" : "rgba(255,80,80,0.08)",
           border: `1px solid ${taskMsg.ok ? "var(--green)" : "var(--red)"}`,
           color: taskMsg.ok ? "var(--green)" : "var(--red)",
           display: "flex", gap: 10, alignItems: "center" }}>
           <span>{taskMsg.ok ? "✓" : "✗"}</span>
           <span style={{ flex: 1 }}>{taskMsg.text}</span>
-          <button onClick={() => setTaskMsg(null)} style={{ background:"none",border:"none",cursor:"pointer",color:"inherit",fontSize:16 }}>×</button>
+          <button onClick={() => setTaskMsg(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "inherit", fontSize: 16 }}>×</button>
         </div>
       )}
-        <Card title={`Autoruns / Scheduled Tasks (${susAutoruns.length})`}>
+
+      <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, alignItems: "start" }}>
+        {/* Autoruns */}
+        <Card title={`📋 Autoruns / Scheduled Tasks (${susAutoruns.length})`}>
           {susAutoruns.length === 0 ? (
             <span className="muted" style={{ fontSize: 13 }}>✓ No non-Microsoft startup tasks found.</span>
-          ) : susAutoruns.map((a: any, i: number) => {
-            const taskName = a.TaskName ?? a.Name ?? a.name ?? "";
-            const taskPath = a.TaskPath ?? "\\";
-            const isDisabled = a.State === "Disabled";
-            return (
-              <div key={i} className="row" style={{ padding: "6px 0", borderBottom: "1px solid var(--border)", gap: 8, alignItems: "center" }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 600, fontSize: 12, color: isDisabled ? "var(--muted)" : undefined }}>{taskName}</div>
-                  <div className="muted" style={{ fontSize: 11 }}>{taskPath}</div>
-                </div>
-                <span style={{ fontSize: 10, color: isDisabled ? "var(--muted)" : "var(--green)", flexShrink: 0 }}>
-                  {isDisabled ? "Disabled" : "Enabled"}
-                </span>
-                <button
-                  className="btn small ghost"
-                  style={{ fontSize: 11, flexShrink: 0, color: isDisabled ? "var(--green)" : "var(--red)", borderColor: isDisabled ? "var(--green)" : "var(--red)" }}
-                  disabled={busy}
-                  onClick={async () => {
-                    setBusy(true);
-                    setTaskMsg(null);
-                    try {
-                      const msg = isDisabled
-                        ? await api.enableScheduledTask(taskPath, taskName)
-                        : await api.disableScheduledTask(taskPath, taskName);
-                      setTaskMsg({ text: msg || (isDisabled ? `Enabled: ${taskName}` : `Disabled: ${taskName}`), ok: true });
-                      // optimistic UI flip
-                      setSec((prev: any) => {
-                        if (!prev?.autoruns?.tasks_nonms) return prev;
-                        return {
-                          ...prev,
-                          autoruns: {
-                            ...prev.autoruns,
-                            tasks_nonms: prev.autoruns.tasks_nonms.map((t: any) =>
-                              t.TaskName === taskName && t.TaskPath === taskPath
-                                ? { ...t, State: isDisabled ? "Ready" : "Disabled" }
-                                : t
-                            ),
-                          },
-                        };
-                      });
-                    } catch (e: any) {
-                      setTaskMsg({ text: String(e), ok: false });
-                    } finally {
-                      setBusy(false);
-                    }
-                  }}
-                >
-                  {isDisabled ? "Enable" : "Disable"}
-                </button>
-              </div>
-            );
-          })}
+          ) : (
+            <div style={{ maxHeight: 360, overflowY: "auto" }}>
+              {susAutoruns.map((a: any, i: number) => {
+                const taskName = a.TaskName ?? a.Name ?? a.name ?? "";
+                const taskPath = a.TaskPath ?? "\\";
+                const isDisabled = a.State === "Disabled";
+                return (
+                  <div key={i} className="row" style={{ padding: "6px 0", borderBottom: "1px solid var(--border)", gap: 8, alignItems: "center" }}>
+                    <div style={{ flex: 1, minWidth: 0 }} title={taskName}>
+                      <div style={{ fontWeight: 600, fontSize: 12, color: isDisabled ? "var(--muted)" : undefined, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {shortenTaskName(taskName)}
+                      </div>
+                      <div className="muted" style={{ fontSize: 11, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{taskPath}</div>
+                    </div>
+                    <span style={{ fontSize: 10, color: isDisabled ? "var(--muted)" : "var(--green)", flexShrink: 0 }}>
+                      {isDisabled ? "Disabled" : "Enabled"}
+                    </span>
+                    <button
+                      className="btn small ghost"
+                      style={{ fontSize: 11, flexShrink: 0, color: isDisabled ? "var(--green)" : "var(--red)", borderColor: isDisabled ? "var(--green)" : "var(--red)" }}
+                      disabled={busy}
+                      onClick={async () => {
+                        setBusy(true);
+                        setTaskMsg(null);
+                        try {
+                          const msg = isDisabled
+                            ? await api.enableScheduledTask(taskPath, taskName)
+                            : await api.disableScheduledTask(taskPath, taskName);
+                          setTaskMsg({ text: msg || (isDisabled ? `Enabled: ${taskName}` : `Disabled: ${taskName}`), ok: true });
+                          // optimistic UI flip
+                          setSec((prev: any) => {
+                            if (!prev?.autoruns?.tasks_nonms) return prev;
+                            return {
+                              ...prev,
+                              autoruns: {
+                                ...prev.autoruns,
+                                tasks_nonms: prev.autoruns.tasks_nonms.map((t: any) =>
+                                  t.TaskName === taskName && t.TaskPath === taskPath
+                                    ? { ...t, State: isDisabled ? "Ready" : "Disabled" }
+                                    : t
+                                ),
+                              },
+                            };
+                          });
+                        } catch (e: any) {
+                          setTaskMsg({ text: String(e), ok: false });
+                        } finally {
+                          setBusy(false);
+                        }
+                      }}
+                    >
+                      {isDisabled ? "Enable" : "Disable"}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </Card>
 
         {/* Hosts file */}

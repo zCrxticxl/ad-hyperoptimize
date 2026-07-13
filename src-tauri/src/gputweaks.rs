@@ -10,6 +10,9 @@ use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ};
 #[cfg(windows)]
 use winreg::RegKey;
 
+use crate::safety::{self, ChangeItem, JournalEntry, RegVal};
+use crate::tweaks;
+
 const GPU_CLASS: &str =
     "SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e968-e325-11ce-bfc1-08002be10318}";
 
@@ -362,11 +365,10 @@ fn detect_status(tweak: &GpuTweak, driver_key: &str) -> &'static str {
         match action {
             TweakAction::DriverReg { name, apply, .. } => {
                 checkable += 1;
-                let driver_path = format!(
-                    "SYSTEM\\CurrentControlSet\\Control\\Class\\{{4d36e968-e325-11ce-bfc1-08002be10318}}\\{}",
-                    driver_key
-                );
-                if reg_read_dword("HKLM", &driver_path, name) == Some(*apply) {
+                // `driver_key` (from detect_gpu) is already the full path under
+                // HKLM — do not re-prepend GPU_CLASS, or this reads/writes a
+                // bogus doubled key and every DriverReg tweak silently no-ops.
+                if reg_read_dword("HKLM", driver_key, name) == Some(*apply) {
                     matching += 1;
                 }
             }
@@ -403,13 +405,11 @@ fn detect_status(_tweak: &GpuTweak, _driver_key: &str) -> &'static str { "unknow
 
 #[cfg(windows)]
 fn apply_action(action: &TweakAction, driver_key: &str, applying: bool) -> Result<(), String> {
-    let driver_path = format!(
-        "SYSTEM\\CurrentControlSet\\Control\\Class\\{{4d36e968-e325-11ce-bfc1-08002be10318}}\\{}",
-        driver_key
-    );
+    // See the matching comment in detect_status: driver_key is already a
+    // full HKLM path, so it must be used as-is here too.
     match action {
         TweakAction::DriverReg { name, apply, revert } => {
-            reg_write_dword("HKLM", &driver_path, name, if applying { *apply } else { *revert })
+            reg_write_dword("HKLM", driver_key, name, if applying { *apply } else { *revert })
         }
         TweakAction::FixedReg { root, path, name, apply, revert } => {
             reg_write_dword(root, path, name, if applying { *apply } else { *revert })
@@ -478,4 +478,189 @@ pub fn do_tweak(id: String, driver_key: String, applying: bool) -> Result<String
         }
     }
     Err(format!("Unknown GPU tweak: {id}"))
+}
+
+// ── NVIDIA Control Panel — editable global 3D settings ──────────────────────
+// Mirrors a subset of "Manage 3D Settings → Global Settings" from NVIDIA's
+// own Control Panel: the handful of options that are genuinely backed by a
+// plain registry DWORD. NVIDIA stores most other global settings (texture
+// filtering quality, antialiasing, vertical sync, digital vibrance, per-app
+// profiles, …) only in its own undocumented driver settings database (DRS),
+// which has no public Windows registry or API surface — those are left to
+// `nv_open_panel()`, which launches NVIDIA's real app instead of faking a
+// control that wouldn't actually do anything.
+//
+// Every change here is captured as a `ChangeItem::Registry` (prev value read
+// live, before writing) and written to the same write-ahead journal as every
+// other tweak in this app, so it shows up in Reports.tsx and is undone with
+// `tweaks::revert_entry` — identical plumbing to Quick Boost.
+
+const NV_TWEAK_HKCU: &str = "Software\\NVIDIA Corporation\\Global\\NVTweak";
+
+#[cfg(windows)]
+pub fn nv_get_settings() -> Value {
+    let (vendor, name, driver_key) = detect_gpu();
+    if vendor != Vendor::Nvidia {
+        return json!({ "supported": false, "name": name });
+    }
+
+    let power_mode = if reg_read_dword("HKLM", &driver_key, "PowerMizerEnable") == Some(0) {
+        "preferMaxPerformance"
+    } else {
+        "adaptive"
+    };
+
+    let max_prerendered = reg_read_dword("HKCU", NV_TWEAK_HKCU, "Prerenderlimit")
+        .unwrap_or(3)
+        .to_string();
+
+    let low_latency = match reg_read_dword("HKCU", NV_TWEAK_HKCU, "NVPCFLatencyPolicy") {
+        Some(2) => "ultra",
+        Some(1) => "on",
+        _ => "off",
+    };
+
+    let threaded_opt = match reg_read_dword("HKCU", NV_TWEAK_HKCU, "Enabled") {
+        Some(0xFF) => "on",
+        _ => "off",
+    };
+
+    json!({
+        "supported": true,
+        "name": name,
+        "driverKeyMissing": driver_key.is_empty(),
+        "powerManagementMode": power_mode,
+        "maxPreRenderedFrames": max_prerendered,
+        "lowLatencyMode": low_latency,
+        "threadedOptimization": threaded_opt,
+    })
+}
+
+#[cfg(not(windows))]
+pub fn nv_get_settings() -> Value {
+    json!({ "supported": false })
+}
+
+#[cfg(windows)]
+pub fn nv_set_setting(setting: String, value: String) -> Result<Value, String> {
+    let (vendor, _name, driver_key) = detect_gpu();
+    if vendor != Vendor::Nvidia {
+        return Err("No NVIDIA GPU detected".into());
+    }
+
+    // (root, path, name, new dword value)
+    let targets: Vec<(&'static str, String, &'static str, u32)> = match setting.as_str() {
+        "powerManagementMode" => {
+            if driver_key.is_empty() {
+                return Err("NVIDIA driver registry key not found".into());
+            }
+            match value.as_str() {
+                "adaptive" => vec![
+                    ("HKLM", driver_key.clone(), "PowerMizerEnable", 1),
+                    ("HKLM", driver_key.clone(), "PowerMizerLevel", 2),
+                    ("HKLM", driver_key.clone(), "PowerMizerLevelAC", 2),
+                ],
+                "preferMaxPerformance" => vec![
+                    ("HKLM", driver_key.clone(), "PowerMizerEnable", 0),
+                    ("HKLM", driver_key.clone(), "PowerMizerLevel", 1),
+                    ("HKLM", driver_key.clone(), "PowerMizerLevelAC", 1),
+                ],
+                _ => return Err(format!("unknown value '{value}' for powerManagementMode")),
+            }
+        }
+        "maxPreRenderedFrames" => {
+            let n: u32 = value
+                .parse()
+                .map_err(|_| format!("invalid value '{value}'"))?;
+            if !(1..=4).contains(&n) {
+                return Err("value must be 1-4".into());
+            }
+            vec![("HKCU", NV_TWEAK_HKCU.to_string(), "Prerenderlimit", n)]
+        }
+        "lowLatencyMode" => {
+            if driver_key.is_empty() {
+                return Err("NVIDIA driver registry key not found".into());
+            }
+            let n: u32 = match value.as_str() {
+                "off" => 0,
+                "on" => 1,
+                "ultra" => 2,
+                _ => return Err(format!("unknown value '{value}' for lowLatencyMode")),
+            };
+            vec![
+                ("HKCU", NV_TWEAK_HKCU.to_string(), "NVPCFLatencyPolicy", n),
+                ("HKLM", driver_key.clone(), "RTHM_MODE", n),
+            ]
+        }
+        "threadedOptimization" => {
+            let n: u32 = match value.as_str() {
+                "off" => 0,
+                "on" => 0xFF,
+                _ => return Err(format!("unknown value '{value}' for threadedOptimization")),
+            };
+            vec![("HKCU", NV_TWEAK_HKCU.to_string(), "Enabled", n)]
+        }
+        _ => return Err(format!("unknown setting '{setting}'")),
+    };
+
+    let items: Vec<ChangeItem> = targets
+        .iter()
+        .map(|(root, path, name, new)| ChangeItem::Registry {
+            root: root.to_string(),
+            path: path.clone(),
+            name: name.to_string(),
+            prev: reg_read_dword(root, path, name).map(RegVal::Dword),
+            new: RegVal::Dword(*new),
+        })
+        .collect();
+
+    let entry_id = format!(
+        "nvCtrlPanel-{setting}-{}",
+        chrono::Local::now().format("%Y%m%d%H%M%S")
+    );
+    safety::append_entry(JournalEntry {
+        id: entry_id.clone(),
+        tweak_id: format!("nvCtrlPanel:{setting}"),
+        tweak_name: format!("NVIDIA Control Panel — {setting} = {value}"),
+        time: chrono::Local::now().to_rfc3339(),
+        items: items.clone(),
+        reverted: false,
+        backup_files: vec![],
+    })?;
+
+    let mut done: Vec<&ChangeItem> = Vec::new();
+    for item in &items {
+        if let Err(e) = tweaks::apply_item(item) {
+            for d in done.iter().rev() {
+                let _ = tweaks::revert_item(d);
+            }
+            return Err(format!("failed to apply ({e}); changes rolled back"));
+        }
+        done.push(item);
+    }
+
+    Ok(json!({ "restoreToken": entry_id, "setting": setting, "value": value }))
+}
+
+#[cfg(not(windows))]
+pub fn nv_set_setting(_setting: String, _value: String) -> Result<Value, String> {
+    Err("Windows only".into())
+}
+
+/// Launch NVIDIA's own Control Panel app, for the settings (anisotropic
+/// filtering, antialiasing, vertical sync, digital vibrance, per-app
+/// profiles, …) that live only in NVIDIA's proprietary DRS database.
+pub fn nv_open_panel() -> Result<String, String> {
+    crate::ps::run(
+        r#"
+$exe = Get-ChildItem 'C:\Program Files\NVIDIA Corporation\Control Panel Client\nvcplui.exe' -ErrorAction SilentlyContinue
+if ($exe) {
+    Start-Process $exe.FullName
+} else {
+    Start-Process 'shell:AppsFolder\NVIDIACorp.NVIDIAControlPanel_56jybvy8c3kt8!NVIDIAControlPanel' -ErrorAction SilentlyContinue
+}
+'opened'
+"#,
+    )
+    .map(|_| "Opened NVIDIA Control Panel".to_string())
 }

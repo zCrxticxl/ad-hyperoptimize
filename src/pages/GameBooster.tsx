@@ -13,6 +13,9 @@ export default function GameBooster({ admin }: { admin: boolean }) {
   const [boosted, setBoosted]   = useState<number | null>(null);
   const [busy, setBusy]         = useState(false);
   const [log, setLog]           = useState("");
+  const [qbToken, setQbToken]   = useState<Record<number, string>>({});
+  const [qbConfirm, setQbConfirm] = useState<number | null>(null);
+  const [qbBusy, setQbBusy]     = useState<number | null>(null);
 
   const refresh = async () => {
     setLoading(true);
@@ -47,6 +50,29 @@ export default function GameBooster({ admin }: { admin: boolean }) {
 
   const selectAllBg = () => setSelBg(new Set(bg.map((p: any) => p.Id)));
   const clearSelBg  = () => setSelBg(new Set());
+
+  const quickBoost = async (g: any) => {
+    setQbBusy(g.Id);
+    try {
+      const r = await api.quickBoostStart(g.Name);
+      setQbToken(prev => ({ ...prev, [g.Id]: r.restoreToken }));
+      const closed = (r.killedBackground ?? []).join(", ");
+      setLog(closed ? `${t("gameboostQuickBoostActive")} · ${t("gameboostQuickBoostClosed")} ${closed}` : t("gameboostQuickBoostActive"));
+    } catch (e: any) { setLog(String(e)); }
+    finally { setQbBusy(null); setQbConfirm(null); }
+  };
+
+  const undoQuickBoost = async (g: any) => {
+    const token = qbToken[g.Id];
+    if (!token) return;
+    setQbBusy(g.Id);
+    try {
+      await api.quickBoostRevert(token);
+      setQbToken(prev => { const n = { ...prev }; delete n[g.Id]; return n; });
+      setLog(t("gameboostQuickBoostUndone"));
+    } catch (e: any) { setLog(String(e)); }
+    finally { setQbBusy(null); }
+  };
 
   return (
     <>
@@ -98,6 +124,23 @@ export default function GameBooster({ admin }: { admin: boolean }) {
                 })}
               >
                 {busy ? "…" : `⏹ ${t("gameboostStopBoost")}`}
+              </button>
+            )}
+            {qbToken[g.Id] ? (
+              <button className="btn small ghost" disabled={qbBusy === g.Id} onClick={() => undoQuickBoost(g)}>
+                {qbBusy === g.Id ? <Spinner /> : t("gameboostQuickBoostUndo")}
+              </button>
+            ) : qbConfirm === g.Id ? (
+              <>
+                <span className="muted" style={{ fontSize: 11 }}>{t("gameboostQuickBoostConfirm")}</span>
+                <button className="btn small" disabled={qbBusy === g.Id} onClick={() => quickBoost(g)}>
+                  {qbBusy === g.Id ? <Spinner /> : t("apply")}
+                </button>
+                <button className="btn small ghost" onClick={() => setQbConfirm(null)}>{t("cancel")}</button>
+              </>
+            ) : (
+              <button className="btn small ghost" disabled={busy || qbBusy !== null} onClick={() => setQbConfirm(g.Id)}>
+                {t("gameboostQuickBoost")}
               </button>
             )}
           </div>
@@ -172,6 +215,9 @@ export default function GameBooster({ admin }: { admin: boolean }) {
         {t("gameboostFooterBoost")}
         {" "}{t("gameboostFooterStop")}
         {" "}{t("gameboostFooterKilled")}
+      </div>
+      <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+        <b>{t("gameboostQuickBoost")}:</b> {t("gameboostQuickBoostWhat")} {t("gameboostQuickBoostWhy")} {t("gameboostQuickBoostRisk")}
       </div>
     </>
   );

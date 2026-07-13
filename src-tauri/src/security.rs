@@ -1,5 +1,6 @@
-//! Read-only security & anomaly inspection. This module never removes
-//! anything — it surfaces findings for the user to act on.
+//! Security & anomaly inspection. Mostly read-only (Defender/firewall/
+//! autoruns/hosts surfacing), but unsigned drivers can be disabled or
+//! removed directly via pnputil.exe (see disable/enable/remove_unsigned_driver).
 
 use crate::ps;
 use serde_json::{json, Value};
@@ -35,31 +36,89 @@ pub fn scan() -> Value {
 }
 
 fn unsigned_drivers() -> Value {
-    match ps::exec("driverquery.exe", &["/si", "/fo", "csv", "/nh"]) {
-        Ok(csv) => {
-            // columns: DeviceName, InfName, IsSigned, Manufacturer
-            let mut agg: std::collections::HashMap<String, (u32, String)> = Default::default();
-            for l in csv.lines() {
-                let cols: Vec<&str> = l.split("\",\"").collect();
-                if cols.len() >= 3 && cols[2].to_uppercase().contains("FALSE") {
-                    let device = cols[0].trim_matches('"').to_string();
-                    let manu = cols.get(3).map(|s| s.trim_matches('"')).unwrap_or("").to_string();
-                    let e = agg.entry(device).or_insert((0, manu));
-                    e.0 += 1;
-                }
-            }
-            let total: u32 = agg.values().map(|(c, _)| c).sum();
-            let mut items: Vec<Value> = agg
-                .into_iter()
-                .map(|(device, (count, manufacturer))| {
-                    json!({ "device": device, "count": count, "manufacturer": manufacturer })
-                })
-                .collect();
-            items.sort_by(|a, b| b["count"].as_u64().cmp(&a["count"].as_u64()));
-            json!({ "count": total, "items": items })
+    // Win32_PnPSignedDriver.DeviceID is the PnP *device instance ID* (e.g.
+    // "PCI\VEN_10DE&DEV_...\4&1a2b3c4d&0&0008") — unlike driverquery's
+    // DeviceName, this uniquely identifies one physical/virtual device, which
+    // is required to safely target disable/remove actions at exactly the
+    // flagged device and nothing else.
+    let script = r#"
+Get-CimInstance Win32_PnPSignedDriver -ErrorAction SilentlyContinue |
+    Where-Object { $_.IsSigned -eq $false -and $_.DeviceID } |
+    Select-Object DeviceName, DeviceID, Manufacturer, DeviceClass |
+    Sort-Object DeviceName
+"#;
+    let to_item = |d: &Value| {
+        json!({
+            "device": d["DeviceName"].as_str().unwrap_or("Unknown driver"),
+            "manufacturer": d["Manufacturer"].as_str().unwrap_or(""),
+            "deviceClass": d["DeviceClass"].as_str().unwrap_or(""),
+            "deviceId": d["DeviceID"].as_str().unwrap_or(""),
+        })
+    };
+    match ps::run_json(script) {
+        Ok(Value::Array(arr)) => {
+            let items: Vec<Value> = arr.iter().map(to_item).collect();
+            json!({ "count": items.len(), "items": items })
         }
+        Ok(v @ Value::Object(_)) => json!({ "count": 1, "items": [to_item(&v)] }),
+        Ok(_) => json!({ "count": 0, "items": [] }),
         Err(e) => json!({ "error": e.trim() }),
     }
+}
+
+/// Run pnputil.exe directly (no shell/string interpolation — args go straight
+/// to argv, so a device ID containing `&`/`\`/spaces can't break out or
+/// inject anything). Treats reboot-pending exit codes as success.
+fn pnputil(args: &[&str]) -> Result<String, String> {
+    use std::process::Command;
+    #[cfg(windows)]
+    use std::os::windows::process::CommandExt;
+    let mut cmd = Command::new("pnputil.exe");
+    cmd.args(args);
+    #[cfg(windows)]
+    cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    let out = cmd.output().map_err(|e| format!("pnputil spawn: {e}"))?;
+    let code = out.status.code().unwrap_or(-1);
+    let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    match code {
+        0 => Ok(if stdout.is_empty() { "Done.".into() } else { stdout }),
+        3010 | 1641 => Ok(format!("{} (restart required to finish)", if stdout.is_empty() { "Done." } else { &stdout })),
+        _ => {
+            let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+            Err(if !stderr.is_empty() { stderr } else if !stdout.is_empty() { stdout } else { format!("pnputil exited with code {code}") })
+        }
+    }
+}
+
+fn require_device_id(device_id: &str) -> Result<(), String> {
+    if device_id.trim().is_empty() {
+        Err("Missing device instance ID".into())
+    } else {
+        Ok(())
+    }
+}
+
+/// Reversible: device stays installed but stops loading/binding. Safe first
+/// step — can be undone with enable_unsigned_driver.
+pub fn disable_unsigned_driver(device_id: String) -> Result<String, String> {
+    require_device_id(&device_id)?;
+    pnputil(&["/disable-device", &device_id])
+}
+
+/// Undo for disable_unsigned_driver.
+pub fn enable_unsigned_driver(device_id: String) -> Result<String, String> {
+    require_device_id(&device_id)?;
+    pnputil(&["/enable-device", &device_id])
+}
+
+/// Uninstalls the device + driver package. If the hardware is still
+/// physically/logically present, Windows PnP will typically re-enumerate and
+/// reinstall a driver for it (on its own or after a rescan/reboot) — this is
+/// the same "repair by reinstall" path Device Manager's own Uninstall-device
+/// button uses, not a guaranteed permanent removal.
+pub fn remove_unsigned_driver(device_id: String) -> Result<String, String> {
+    require_device_id(&device_id)?;
+    pnputil(&["/remove-device", &device_id])
 }
 
 /// Launch a Defender quick scan detached (survives this process).

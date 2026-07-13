@@ -39,10 +39,15 @@ export default function Optimize({ mode, admin }: { mode: Mode; admin: boolean }
   };
 
   const doRevert = async (t: any) => {
-    push(`Reverting: ${t.name}…`);
+    const label = t.undoable ? "Reverting" : "Force-resetting";
+    push(`${label}: ${t.name}…`);
     try {
-      await api.revertTweak(t.id);
-      push(`✔ Reverted ${t.name} to previous values`);
+      const res = await api.revertTweak(t.id);
+      if ((res as any)?.journaled === false) {
+        push(`✔ ${t.name} force-reset to Windows defaults (no backup — registry value deleted)`);
+      } else {
+        push(`✔ Reverted ${t.name} to previous values (from journal backup)`);
+      }
     } catch (e: any) {
       push(`✘ ${t.name}: ${e}`);
     }
@@ -113,8 +118,14 @@ export default function Optimize({ mode, admin }: { mode: Mode; admin: boolean }
                     </button>
                   )
                 )}
-                {t.undoable && (
-                  <button className="btn small ghost" onClick={() => doRevert(t)}>Undo</button>
+                {t.canUndo && (
+                  <button
+                    className="btn small ghost"
+                    title={t.undoable ? "Undo (restores from saved backup)" : "Reset to Windows default (no backup available — app journal was lost)"}
+                    onClick={() => doRevert(t)}
+                  >
+                    {t.undoable ? "Undo" : "Reset"}
+                  </button>
                 )}
               </div>
               <div className="tweak-desc">{t.description}</div>

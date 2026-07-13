@@ -61,3 +61,68 @@ export function localizeRisk<T extends { title: string; message: string }>(
   if (!overlay) return risk;
   return { ...risk, title: overlay.title ?? risk.title, message: overlay.message ?? risk.message };
 }
+
+// Dashboard analysis findings (analysis.rs) — backend ships a stable `code` +
+// raw `params` per finding (English title/detail/recommendation too, used
+// only by the Rust-side HTML report which has no i18n). The live UI instead
+// renders fully localized text built from `find<Code>Title/Detail/Rec` i18n
+// keys + simple {placeholder} substitution, so it follows the selected
+// language like everything else in the app instead of being English-only.
+function interpolate(template: string, params: Record<string, unknown>): string {
+  return template.replace(/\{(\w+)\}/g, (m, key) => (key in params ? String(params[key]) : m));
+}
+
+function toPascalCase(code: string): string {
+  return code.split("_").map(s => s.charAt(0).toUpperCase() + s.slice(1)).join("");
+}
+
+export type Finding = {
+  severity: number;
+  code: string;
+  title: string;
+  detail: string;
+  recommendation: string;
+  tweakIds: string[];
+  params: Record<string, unknown>;
+};
+
+export function localizeFinding(finding: Finding, t: (key: any) => string): { title: string; detail: string; recommendation: string } {
+  // Defensive: stale pre-v2 cached findings (or any future shape drift) may
+  // lack `code`/`params` — fall back to whatever English text is present
+  // instead of throwing and taking down the whole Dashboard render.
+  if (!finding || typeof finding.code !== "string" || !finding.code) {
+    return {
+      title: finding?.title ?? "",
+      detail: finding?.detail ?? "",
+      recommendation: finding?.recommendation ?? "",
+    };
+  }
+  const base = toPascalCase(finding.code);
+  const titleKey = `find${base}Title`;
+  const detailKey = `find${base}Detail`;
+  const recKey = `find${base}Rec`;
+  const title = t(titleKey);
+  const detailTpl = t(detailKey);
+  const rec = t(recKey);
+  // t() returns the raw key string if missing (see i18n.tsx's t() fallback
+  // chain) — fall back to the backend's English text for any finding code
+  // that doesn't (yet) have a translation, rather than showing a raw key.
+  return {
+    title: title === titleKey ? finding.title : title,
+    detail: detailTpl === detailKey ? finding.detail : interpolate(detailTpl, finding.params ?? {}),
+    recommendation: rec === recKey ? finding.recommendation : rec,
+  };
+}
+
+// Builds the Dashboard's localized one-line summary from the already-sorted
+// findings list (severity descending), mirroring analysis.rs's English
+// summary construction but driven by `dashSummaryTemplate`/`dashSummaryNone`.
+export function localizeSummary(findings: Finding[], t: (key: any) => string): string {
+  if (findings.length === 0) return t("dashSummaryNone");
+  const top = localizeFinding(findings[0], t);
+  return interpolate(t("dashSummaryTemplate"), {
+    count: findings.length,
+    title: top.title,
+    recommendation: top.recommendation,
+  });
+}
