@@ -1,91 +1,135 @@
-# PC Optimization & Deep Diagnostic Suite
+<div align="center">
 
-Join my dc for help: https://discord.gg/GPcTdABdcY
+<img src="assets/banner.svg" alt="AD HyperOptimize" width="100%"/>
 
-Modern, safe, fully reversible Windows 10/11 optimization + diagnostics desktop app.
-**Stack:** Tauri 2 (Rust backend) · React 18 + TypeScript · Recharts · WMI/PowerShell/SMART/Event Log integration.
+# ⚡ AD HyperOptimize
 
-## Architecture
+**Windows optimization that tells the truth.**
+No registry-cleaner snake oil. Only documented, measurable tweaks — journaled, backed up and revertible with one click.
+
+[![Stars](https://img.shields.io/github/stars/zCrxticxl/ad-hyperoptimize?style=for-the-badge&logo=github&color=7c5cff&labelColor=0b0d14)](https://github.com/zCrxticxl/ad-hyperoptimize/stargazers)
+[![License](https://img.shields.io/github/license/zCrxticxl/ad-hyperoptimize?style=for-the-badge&color=38bdf8&labelColor=0b0d14)](LICENSE)
+[![Last commit](https://img.shields.io/github/last-commit/zCrxticxl/ad-hyperoptimize?style=for-the-badge&color=4ade80&labelColor=0b0d14)](https://github.com/zCrxticxl/ad-hyperoptimize/commits)
+[![Discord](https://img.shields.io/badge/Discord-join-5865F2?style=for-the-badge&logo=discord&logoColor=white&labelColor=0b0d14)](https://discord.gg/GPcTdABdcY)
+
+![Windows 10/11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?style=flat-square&logo=windows11&logoColor=white)
+![Tauri 2](https://img.shields.io/badge/Tauri-2-FFC131?style=flat-square&logo=tauri&logoColor=black)
+![Rust](https://img.shields.io/badge/Rust-backend-F74C00?style=flat-square&logo=rust&logoColor=white)
+![React](https://img.shields.io/badge/React%2018-TypeScript-61DAFB?style=flat-square&logo=react&logoColor=black)
+
+<img src="assets/demo.gif" alt="AD HyperOptimize dashboard — health score, live metrics, journaled tweaks" width="90%"/>
+
+<sup>UI preview — health scoring, 1s live metrics stream, journaled tweaks with one-click revert</sup>
+
+</div>
+
+---
+
+## Why another optimizer?
+
+Because most Windows "optimizers" are placebo generators. AD HyperOptimize takes the opposite approach:
+
+| 🚫 Typical optimizer | ✅ AD HyperOptimize |
+|---|---|
+| "Cleans" the registry | Only documented, measurable tweaks (MMCSS, Game DVR, power plans, telemetry policy…) |
+| Changes things silently | Per-tweak confirm with **what / why / impact / risk / reversibility** |
+| No way back | Write-ahead journal + `.reg` backups + restore points — **everything reverts** |
+| Phones home | **Zero telemetry.** Security page is read-only |
+
+## ✨ Features
+
+- 🩺 **Health Score** — rule-based findings engine scans WMI, SMART, boot, event logs, DNS & network and turns it into one score with concrete findings
+- 📊 **Live Monitor** — 1-second real-time metrics stream (CPU, GPU, RAM, disk, temps) straight into the dashboard
+- 🎮 **Gaming tweaks** — MMCSS profile, Game DVR/Game Bar, power plans, latency-focused options. Built by someone who plays comp R6, not a checkbox farm
+- 🧹 **Cleanup** — whitelisted cache/temp roots only; locked files skipped, never forced
+- 🛡️ **Security audit** — Defender, firewall, unsigned drivers, autoruns, hosts file — read-only
+- 🏁 **Benchmarks** — CPU / memory / disk with history
+- 📄 **Reports** — dark-mode HTML + JSON exports (print → PDF)
+- 🔰 **Beginner ⇄ Expert mode** — same engine, two levels of detail
+
+## 🛟 Safety model (the important part)
+
+Every tweak goes through the same pipeline:
 
 ```
-optimize app/
-├── src/                      # React + TS frontend
-│   ├── App.tsx               # Shell: sidebar, beginner/expert mode, admin badge
-│   ├── api.ts                # Typed invoke() wrappers + metrics event stream
-│   ├── components/ui.tsx     # Card, Badge, Bar, ActionBtn, RawJson
-│   └── pages/                # Dashboard, Hardware, Monitor, Optimize,
-│                             # Cleanup, Security, Benchmark, Reports
-└── src-tauri/
-    ├── tauri.conf.json       # NSIS + MSI bundling config
-    ├── capabilities/         # Tauri 2 permission scoping (least privilege)
-    └── src/
-        ├── ps.rs             # PowerShell/exec bridge (no console flashes)
-        ├── scan.rs           # Full WMI/SMART/boot/event/DNS/network analysis
-        ├── monitor.rs        # 1s real-time metrics thread → "metrics" events
-        ├── tweaks.rs         # Declarative tweak catalog + apply/revert engine
-        ├── safety.rs         # Restore points, .reg backups, write-ahead journal
-        ├── cleanup.rs        # Whitelisted-roots cache/temp cleaner
-        ├── security.rs       # Defender/firewall/unsigned drivers/autoruns/hosts
-        ├── bench.rs          # CPU/memory/disk benchmarks + history
-        ├── analysis.rs       # Rule-based findings engine + health score
-        └── report.rs         # Dark HTML + JSON reports (print → PDF)
+confirm → restore point (medium risk) → .reg backup → write-ahead journal → apply → verify
+                                                          └── failure? auto-rollback ──┘
 ```
 
-### Module responsibilities & safety model
-- **Write-ahead journaling:** every tweak captures previous values and writes a journal entry (`%APPDATA%\PCOptSuite\journal.json`) *before* mutating anything. Failed applies auto-roll back.
-- **Registry backups:** each touched key is exported via `reg.exe` to `%APPDATA%\PCOptSuite\backups\*.reg` first.
-- **Restore points:** one click (`Checkpoint-Computer`), surfaced before Medium-risk tweaks.
-- **Explicit consent:** UI requires per-tweak confirm; details panel shows what/why/impact/risk/reversibility.
-- **No myths:** catalog contains only documented, measurable tweaks (MMCSS, Game DVR, power plans, telemetry policy, etc.). No "registry cleaning".
-- **Cleanup whitelist:** deletion only inside hardcoded cache/temp roots; locked files skipped, never forced.
-- **Security page is read-only.** Telemetry of the app itself: none.
+1. **Write-ahead journaling** — previous values are captured to `journal.json` *before* anything is mutated. Failed applies roll back automatically.
+2. **Registry backups** — every touched key exported via `reg.exe` first.
+3. **Restore points** — one click, surfaced before medium-risk tweaks.
+4. **Least privilege** — runs as standard user; asks for admin only where required. Tauri capabilities expose no FS/network surface to the webview.
 
-## Prerequisites (build machine, Windows)
-1. **Rust** — https://rustup.rs (MSVC toolchain: `rustup default stable-msvc`)
-2. **Node.js 20+** — https://nodejs.org
-3. **Visual Studio Build Tools** with "Desktop development with C++"
-4. **WebView2 runtime** (preinstalled on Win 10/11; installer bootstraps it otherwise)
+## 📥 Get it
 
-## Build
+Grab the latest installer (`.exe` / `.msi`) from [**Releases**](https://github.com/zCrxticxl/ad-hyperoptimize/releases) — or build from source below.
+
+> Unsigned builds trigger SmartScreen ("More info" → "Run anyway"). Expected until code signing lands.
+
+## 🔨 Build from source
+
+<details>
+<summary><b>Prerequisites & build steps</b></summary>
+
+1. [Rust](https://rustup.rs) (MSVC toolchain: `rustup default stable-msvc`)
+2. [Node.js 20+](https://nodejs.org)
+3. Visual Studio Build Tools — "Desktop development with C++"
+4. WebView2 runtime (preinstalled on Win 10/11)
 
 ```powershell
-cd "E:\optimize app"
+git clone https://github.com/zCrxticxl/ad-hyperoptimize.git
+cd ad-hyperoptimize
 npm install
 
-# one-time: generate app icons from any 1024px PNG
-npx tauri icon path\to\icon.png    # creates src-tauri/icons/* incl. icon.ico
-
-# dev (hot reload)
-npm run tauri dev
-
-# release: produces NSIS .exe installer + .msi
-npm run tauri build
+npm run tauri dev     # dev with hot reload
+npm run tauri build   # NSIS .exe + .msi in src-tauri/target/release/bundle/
 ```
 
-Artifacts land in `src-tauri\target\release\bundle\nsis\*.exe` and `...\msi\*.msi`.
-**Portable build:** `src-tauri\target\release\pc-opt-suite.exe` runs standalone (requires WebView2 runtime present).
+</details>
 
-## Code signing (release-ready)
-`tauri.conf.json → bundle.windows` accepts:
-```json
-"certificateThumbprint": "<thumbprint>",
-"digestAlgorithm": "sha256",
-"timestampUrl": "http://timestamp.digicert.com"
+## 🏗️ Architecture
+
+<details>
+<summary><b>Module map</b></summary>
+
 ```
-Or sign post-build: `signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /sha1 <thumbprint> <installer.exe>`.
-Unsigned builds trigger SmartScreen — expected; sign with an EV/OV cert for distribution.
+src/                      # React + TS frontend
+├── App.tsx               # Shell: sidebar, beginner/expert mode, admin badge
+├── api.ts                # Typed invoke() wrappers + metrics event stream
+└── pages/                # Dashboard, Hardware, Monitor, Optimize,
+                          # Cleanup, Security, Benchmark, Reports
+src-tauri/src/
+├── ps.rs                 # PowerShell/exec bridge (no console flashes)
+├── scan.rs               # WMI/SMART/boot/event/DNS/network analysis
+├── monitor.rs            # 1s real-time metrics thread → "metrics" events
+├── tweaks.rs             # Declarative tweak catalog + apply/revert engine
+├── safety.rs             # Restore points, .reg backups, write-ahead journal
+├── cleanup.rs            # Whitelisted-roots cache/temp cleaner
+├── security.rs           # Defender/firewall/drivers/autoruns/hosts (read-only)
+├── bench.rs              # CPU/memory/disk benchmarks + history
+├── analysis.rs           # Rule-based findings engine + health score
+└── report.rs             # Dark HTML + JSON reports
+```
 
-## Admin elevation
-The app runs as standard user; HKLM/service/powercfg tweaks detect non-admin and instruct a restart "as administrator". To force elevation for the installer build, add an NSIS `installMode: "perMachine"` or embed a manifest (`requestedExecutionLevel: requireAdministrator`) — deliberately not default, least privilege first.
+**Extending the catalog:** add one `Tweak {}` block in `tweaks.rs` — status detection, backup, journaling, confirm UI and undo come free.
 
-## Security considerations
-- All shell invocations are fixed strings or strictly interpolated identifiers (no user-supplied command text).
-- PowerShell runs `-NoProfile -NonInteractive`; no remote content executed.
-- Tauri capability file grants only `core` permissions; no FS/network plugin surface exposed to the webview.
-- Cleanup cannot escape whitelisted roots; tweak engine can only touch cataloged keys/services.
+</details>
 
-## Extending the tweak catalog
-Add one `Tweak {}` block in `src-tauri/src/tweaks.rs`. Status detection, backup, journaling, confirm UI and undo come free — no other code changes needed.
+## 🗺️ Roadmap
 
-## Roadmap hooks (architecture supports)
-ETW/DPC latency tracing (`tracelogging`/`xperf` integration point in `scan.rs`), crash-dump parsing, GPU vendor APIs (NVML/ADL), overlay (separate transparent Tauri window fed by the existing `metrics` event), LLM-backed summaries on top of `analysis.rs` findings JSON.
+- [ ] ETW / DPC latency tracing (`xperf` integration point exists in `scan.rs`)
+- [ ] Crash-dump parsing
+- [ ] GPU vendor APIs (NVML / ADL)
+- [ ] In-game overlay (transparent Tauri window fed by the metrics stream)
+- [ ] Code-signed releases
+
+## 🤝 Community & support
+
+Questions, bug reports, tweak suggestions → [**Discord**](https://discord.gg/GPcTdABdcY) or [open an issue](https://github.com/zCrxticxl/ad-hyperoptimize/issues).
+
+If this saved your frametimes, a ⭐ keeps the project visible.
+
+<div align="center">
+<sub>Built with 🦀 + ⚡ by <a href="https://github.com/zCrxticxl">Adrian (zCrxticxl)</a> — also check <a href="https://github.com/zCrxticxl/adhyper-linux">adhyper-linux</a> and <a href="https://github.com/zCrxticxl/adrice">adrice</a></sub>
+</div>
