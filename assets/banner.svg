@@ -1,0 +1,75 @@
+<svg width="960" height="240" viewBox="0 0 960 240" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0b0d14"/>
+      <stop offset="55%" stop-color="#131022"/>
+      <stop offset="100%" stop-color="#1b1035"/>
+    </linearGradient>
+    <linearGradient id="acc" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#7c5cff"/>
+      <stop offset="100%" stop-color="#38bdf8"/>
+    </linearGradient>
+    <linearGradient id="scan" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#7c5cff" stop-opacity="0"/>
+      <stop offset="50%" stop-color="#38bdf8" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#7c5cff" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="6" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <rect width="960" height="240" rx="14" fill="url(#bg)"/>
+  <rect x="1" y="1" width="958" height="238" rx="14" fill="none" stroke="#2c3454" stroke-width="1.5"/>
+
+  <!-- grid -->
+  <g stroke="#1e2440" stroke-width="1">
+    <path d="M0 60H960M0 120H960M0 180H960"/>
+    <path d="M120 0V240M240 0V240M360 0V240M480 0V240M600 0V240M720 0V240M840 0V240"/>
+  </g>
+
+  <!-- animated scanline -->
+  <rect x="-300" y="0" width="300" height="240" fill="url(#scan)" opacity="0.14">
+    <animate attributeName="x" from="-300" to="960" dur="3.6s" repeatCount="indefinite"/>
+  </rect>
+
+  <!-- lightning bolt -->
+  <g transform="translate(84,120)" filter="url(#glow)">
+    <path d="M14 -58 L-22 8 L-2 8 L-14 58 L26 -14 L4 -14 Z" fill="url(#acc)">
+      <animate attributeName="opacity" values="1;0.65;1" dur="2.2s" repeatCount="indefinite"/>
+    </path>
+  </g>
+
+  <!-- title -->
+  <text x="170" y="104" font-family="Segoe UI, Ubuntu, sans-serif" font-size="44" font-weight="800" fill="#e8ecf8" letter-spacing="1">AD HyperOptimize</text>
+  <rect x="172" y="120" width="0" height="5" rx="2.5" fill="url(#acc)">
+    <animate attributeName="width" from="0" to="430" dur="1.4s" fill="freeze"/>
+  </rect>
+  <text x="172" y="150" font-family="Segoe UI, Ubuntu, sans-serif" font-size="16" fill="#9aa4c4">Windows optimization that tells the truth —</text>
+  <text x="172" y="172" font-family="Segoe UI, Ubuntu, sans-serif" font-size="16" fill="#9aa4c4">measured tweaks, journaled changes, one-click revert.</text>
+
+  <!-- pill badges -->
+  <g font-family="Segoe UI, Ubuntu, sans-serif" font-size="13" font-weight="600">
+    <rect x="172" y="188" width="96" height="26" rx="13" fill="#1c2340" stroke="#38bdf8" stroke-opacity="0.5"/>
+    <text x="220" y="205" fill="#38bdf8" text-anchor="middle">Tauri 2</text>
+    <rect x="278" y="188" width="76" height="26" rx="13" fill="#1c2340" stroke="#f97316" stroke-opacity="0.5"/>
+    <text x="316" y="205" fill="#f9a06b" text-anchor="middle">Rust</text>
+    <rect x="364" y="188" width="106" height="26" rx="13" fill="#1c2340" stroke="#7c5cff" stroke-opacity="0.5"/>
+    <text x="417" y="205" fill="#a893ff" text-anchor="middle">React + TS</text>
+    <rect x="480" y="188" width="150" height="26" rx="13" fill="#1c2340" stroke="#4ade80" stroke-opacity="0.5"/>
+    <text x="555" y="205" fill="#4ade80" text-anchor="middle">100% revertible</text>
+  </g>
+
+  <!-- mini metric wave right -->
+  <g transform="translate(700,50)">
+    <rect x="0" y="0" width="220" height="140" rx="10" fill="#12172a" stroke="#2c3454"/>
+    <text x="14" y="24" font-family="Segoe UI, Ubuntu, sans-serif" font-size="11" fill="#7d88ab" font-weight="700">HEALTH SCORE</text>
+    <circle cx="110" cy="86" r="38" fill="none" stroke="#232b48" stroke-width="8"/>
+    <circle cx="110" cy="86" r="38" fill="none" stroke="url(#acc)" stroke-width="8" stroke-linecap="round"
+            stroke-dasharray="219 239" stroke-dashoffset="239" transform="rotate(-90 110 86)">
+      <animate attributeName="stroke-dashoffset" from="239" to="20" dur="1.8s" fill="freeze"/>
+    </circle>
+    <text x="110" y="97" font-family="Segoe UI, Ubuntu, sans-serif" font-size="28" font-weight="800" fill="#e8ecf8" text-anchor="middle">92</text>
+  </g>
+</svg>
