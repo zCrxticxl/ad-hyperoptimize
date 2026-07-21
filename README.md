@@ -69,7 +69,7 @@ confirm → restore point (medium risk) → .reg backup → write-ahead journal 
 
 Grab the latest installer (`.exe` / `.msi`) from [**Releases**](https://github.com/zCrxticxl/ad-hyperoptimize/releases) — or build from source below.
 
-> Unsigned builds trigger SmartScreen ("More info" → "Run anyway"). Expected until code signing lands.
+> Releases include `SHA256SUMS.txt` for installer verification. Windows Authenticode signing activates automatically once the repository's signing secrets and timestamp URL are configured; until then, unsigned builds can trigger SmartScreen ("More info" → "Run anyway"). See [CODE_SIGNING.md](CODE_SIGNING.md).
 
 ## 🔨 Build from source
 
