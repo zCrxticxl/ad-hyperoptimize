@@ -23,6 +23,10 @@ No registry-cleaner snake oil. Only documented, measurable tweaks — journaled,
 
 </div>
 
+## License, security & commercial use
+
+This project is source-available under the included non-commercial license. Personal and other non-commercial use is allowed; commercial use, redistribution in paid offerings, and enterprise deployment need a separate agreement. See [COMMERCIAL-LICENSING.md](COMMERCIAL-LICENSING.md). Security reports are handled under [SECURITY.md](SECURITY.md); please do not report vulnerabilities publicly.
+
 ---
 
 ## Why another optimizer?
