@@ -16,7 +16,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 20.19.0
           cache: npm
 
       - uses: dtolnay/rust-toolchain@stable
@@ -24,6 +24,33 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: './src-tauri -> target'
+
+      - name: Import Windows code-signing certificate
+        if: ${{ secrets.WINDOWS_CERTIFICATE != '' && secrets.WINDOWS_CERTIFICATE_PASSWORD != '' && vars.WINDOWS_TIMESTAMP_URL != '' }}
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          WINDOWS_TIMESTAMP_URL: ${{ vars.WINDOWS_TIMESTAMP_URL }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $certPath = Join-Path $env:RUNNER_TEMP 'ad-hyperoptimize-signing.pfx'
+          [System.IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+          try {
+            $password = ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -Force -AsPlainText
+            $certificate = Import-PfxCertificate -FilePath $certPath -CertStoreLocation Cert:\CurrentUser\My -Password $password
+            if (!$certificate -or !$certificate.Thumbprint) { throw 'Certificate import did not return a thumbprint.' }
+
+            $configPath = 'src-tauri/tauri.conf.json'
+            $config = Get-Content $configPath -Raw | ConvertFrom-Json
+            $config.bundle.windows | Add-Member -NotePropertyName certificateThumbprint -NotePropertyValue $certificate.Thumbprint -Force
+            $config.bundle.windows | Add-Member -NotePropertyName digestAlgorithm -NotePropertyValue 'sha256' -Force
+            $config.bundle.windows | Add-Member -NotePropertyName timestampUrl -NotePropertyValue $env:WINDOWS_TIMESTAMP_URL -Force
+            $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+            [System.IO.File]::WriteAllText((Resolve-Path $configPath), ($config | ConvertTo-Json -Depth 32), $utf8NoBom)
+          } finally {
+            Remove-Item -LiteralPath $certPath -Force -ErrorAction SilentlyContinue
+          }
 
       - name: Install frontend dependencies
         run: npm ci
@@ -40,6 +67,33 @@ jobs:
           releaseBody: "${{ github.event.head_commit.message }}"
           releaseDraft: false
           prerelease: false
+
+      - name: Verify Authenticode signatures
+        if: ${{ secrets.WINDOWS_CERTIFICATE != '' && secrets.WINDOWS_CERTIFICATE_PASSWORD != '' && vars.WINDOWS_TIMESTAMP_URL != '' }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $artifacts = Get-ChildItem 'src-tauri/target/release/bundle' -Recurse -File | Where-Object { $_.Extension -in '.exe', '.msi' }
+          if (!$artifacts) { throw 'No Windows installer artifacts were found to verify.' }
+          foreach ($artifact in $artifacts) {
+            $signature = Get-AuthenticodeSignature -FilePath $artifact.FullName
+            if ($signature.Status -ne 'Valid') { throw "Invalid Authenticode signature for $($artifact.Name): $($signature.Status)" }
+          }
+
+      - name: Publish SHA-256 checksums
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $artifacts = Get-ChildItem 'src-tauri/target/release/bundle' -Recurse -File | Where-Object { $_.Extension -in '.exe', '.msi' } | Sort-Object FullName
+          if (!$artifacts) { throw 'No Windows installer artifacts were found to checksum.' }
+          $lines = foreach ($artifact in $artifacts) {
+            $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $artifact.FullName).Hash.ToLowerInvariant()
+            "$hash  $($artifact.Name)"
+          }
+          [System.IO.File]::WriteAllLines((Join-Path $PWD 'SHA256SUMS.txt'), [string[]]$lines, (New-Object System.Text.UTF8Encoding $false))
+          gh release upload $env:GITHUB_REF_NAME 'SHA256SUMS.txt' --clobber
 
       - name: Generate latest.json
         shell: pwsh
