@@ -26,7 +26,6 @@ jobs:
           workspaces: './src-tauri -> target'
 
       - name: Import Windows code-signing certificate
-        if: ${{ secrets.WINDOWS_CERTIFICATE != '' && secrets.WINDOWS_CERTIFICATE_PASSWORD != '' && vars.WINDOWS_TIMESTAMP_URL != '' }}
         shell: pwsh
         env:
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
@@ -34,6 +33,11 @@ jobs:
           WINDOWS_TIMESTAMP_URL: ${{ vars.WINDOWS_TIMESTAMP_URL }}
         run: |
           $ErrorActionPreference = 'Stop'
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE) -or [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD) -or [string]::IsNullOrWhiteSpace($env:WINDOWS_TIMESTAMP_URL)) {
+            "WINDOWS_CODE_SIGNING=false" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            Write-Host 'Windows code-signing secrets are not configured; creating an unsigned release.'
+            exit 0
+          }
           $certPath = Join-Path $env:RUNNER_TEMP 'ad-hyperoptimize-signing.pfx'
           [System.IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
           try {
@@ -48,6 +52,7 @@ jobs:
             $config.bundle.windows | Add-Member -NotePropertyName timestampUrl -NotePropertyValue $env:WINDOWS_TIMESTAMP_URL -Force
             $utf8NoBom = New-Object System.Text.UTF8Encoding $false
             [System.IO.File]::WriteAllText((Resolve-Path $configPath), ($config | ConvertTo-Json -Depth 32), $utf8NoBom)
+            "WINDOWS_CODE_SIGNING=true" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           } finally {
             Remove-Item -LiteralPath $certPath -Force -ErrorAction SilentlyContinue
           }
@@ -69,7 +74,7 @@ jobs:
           prerelease: false
 
       - name: Verify Authenticode signatures
-        if: ${{ secrets.WINDOWS_CERTIFICATE != '' && secrets.WINDOWS_CERTIFICATE_PASSWORD != '' && vars.WINDOWS_TIMESTAMP_URL != '' }}
+        if: env.WINDOWS_CODE_SIGNING == 'true'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
