@@ -36,8 +36,11 @@ export default function Dashboard({ mode, go }: { mode: Mode; go: (p: string) =>
         <h1>{t("dashTitle")}</h1>
         <p>{analysis ? localizeSummary(findings, t) : busy ? t("dashRunningFullAnalysis") : t("dashSub")}</p>
         <div className="hero-actions">
-          <button className="btn" onClick={() => run(true)} disabled={busy}>{busy ? <><Spinner /> {t("dashAnalyzing")}</> : <>↻ {t("dashReanalyze")}</>}</button>
-          {actionable > 0 && <button className="btn ghost" onClick={() => go("optimize")}>Review {actionable} actions →</button>}
+          {/* Auto-Optimize is the "just make it faster" path — it stays the primary
+              action so a new user never has to pick tweaks by hand. */}
+          <button className="btn" onClick={() => go("autoopt")}>⚡ {t("navAutoOpt")}</button>
+          <button className="btn ghost" onClick={() => run(true)} disabled={busy}>{busy ? <><Spinner /> {t("dashAnalyzing")}</> : <>↻ {t("dashReanalyze")}</>}</button>
+          {actionable > 0 && <button className="btn ghost" onClick={() => go("optimize")}>{actionable} · {t("dashFixInOptimize")} →</button>}
         </div>
         {meta && <div className="analysis-meta"><span className="status-dot is-ready" />{meta.fromCache ? `${t("dashCached")} · ` : ""}{t("dashAnalyzed")} {fmtAge(meta.time)}</div>}
         {err && <div className="inline-error">{err}</div>}

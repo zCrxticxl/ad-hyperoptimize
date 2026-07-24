@@ -245,7 +245,10 @@ export default function GpuTweaks({ admin }: { admin: boolean }) {
                   tw = localizeTweak(tw, lang);
                   const isBusy   = busy === tw.id;
                   const isOpen   = open === tw.id;
-                  const applied  = tw.status === "applied";
+                  // Treat "partial" as applied for the buttons: the tweak IS
+                  // applied, some values just settle only after a reboot. Showing
+                  // Apply again would look permanently stuck. Undo stays available.
+                  const applied  = tw.status === "applied" || tw.status === "partial";
                   const blocked  = tw.driverKeyMissing;
                   const needsAdmin = !admin && tw.risk === "Medium";
                   const hwRisk   = profile?.tweakRisks?.[tw.id];
