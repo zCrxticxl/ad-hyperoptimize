@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { check as checkUpdate } from "@tauri-apps/plugin-updater";
 import { api } from "./api";
 import { LangProvider, useLang, LANG_NAMES, Lang } from "./i18n";
+import Onboarding from "./components/Onboarding";
 import Dashboard from "./pages/Dashboard";
 import Hardware from "./pages/Hardware";
 import Monitor from "./pages/Monitor";
@@ -38,56 +39,140 @@ import GameProfiles from "./pages/GameProfiles";
 import SoftwareInstaller from "./pages/SoftwareInstaller";
 import PcConfigurator from "./pages/PcConfigurator";
 
-type NavItem = { id: string; icon: string; label: string };
-type NavGroup = { group: string; items: NavItem[] };
+/**
+ * `basic: true` marks a tool as safe and self-explanatory enough for Beginner
+ * mode. Everything else is only reachable in Expert mode. `keywords` widen the
+ * search so people find tools by what they want, not by our wording. `desc` is a
+ * one-line explainer shown on the category grid tile.
+ */
+export type NavItem = { id: string; icon: string; label: string; desc?: string; basic?: boolean; keywords?: string };
+export type NavGroup = { id: string; group: string; icon: string; desc: string; accent: string; items: NavItem[] };
 type NavBuilder = (t: (key: any) => string) => NavGroup[];
 
-const buildNav: NavBuilder = (t) => [
-  { group: t("navGrpOverview"), items: [
-    { id: "dashboard", icon: "⌂", label: t("navDashboard") }, { id: "hardware", icon: "▦", label: t("navHardware") },
-    { id: "monitor", icon: "◫", label: t("navMonitor") }, { id: "hwmonitor", icon: "◌", label: t("navHwMonitor") },
-    { id: "healthcheck", icon: "✓", label: t("navHealthCheck") },
+export const buildNav: NavBuilder = (t) => [
+  { id: "overview", group: t("navGrpOverview"), icon: "🏠", desc: t("catDescOverview"), accent: "blue", items: [
+    { id: "dashboard", icon: "📋", label: t("navDashboard"), desc: t("toolDescDashboard"), basic: true, keywords: "home start overview status" },
+    { id: "autoopt", icon: "⚡", label: t("navAutoOpt"), desc: t("toolDescAutoOpt"), basic: true, keywords: "auto automatic oneclick one-click recommended empfohlen automatisch" },
+    { id: "healthcheck", icon: "🩺", label: t("navHealthCheck"), desc: t("toolDescHealthCheck"), basic: true, keywords: "health scan diagnose check zustand" },
   ] },
-  { group: t("navGrpPerformance"), items: [
-    { id: "autoopt", icon: "✦", label: t("navAutoOpt") }, { id: "perftweaks", icon: "ϟ", label: t("navPerfTweaks") },
-    { id: "optimize", icon: "↗", label: t("navOptimize") }, { id: "gameboost", icon: "◈", label: t("navGameBoost") },
-    { id: "powerplan", icon: "⌁", label: t("navPowerPlan") }, { id: "latency", icon: "◒", label: t("navLatency") },
-    { id: "gputweaks", icon: "▣", label: t("navGpuTweaks") }, { id: "nvcontrol", icon: "●", label: t("navNvControl") },
-    { id: "profiles", icon: "◎", label: t("navProfiles") }, { id: "gameprofiles", icon: "◇", label: t("navGameProfiles") },
-    { id: "pcconfig", icon: "▤", label: t("navPcConfig") },
+  { id: "performance", group: t("navGrpPerformance"), icon: "🚀", desc: t("catDescPerformance"), accent: "violet", items: [
+    { id: "optimize", icon: "🎚️", label: t("navOptimize"), desc: t("toolDescOptimize"), basic: true, keywords: "tweaks fps speed schneller performance" },
+    { id: "gameboost", icon: "🎮", label: t("navGameBoost"), desc: t("toolDescGameBoost"), basic: true, keywords: "gaming fps games spiele boost" },
+    { id: "powerplan", icon: "🔌", label: t("navPowerPlan"), desc: t("toolDescPowerPlan"), basic: true, keywords: "power energy energie plan cpu" },
+    { id: "perftweaks", icon: "⚙️", label: t("navPerfTweaks"), desc: t("toolDescPerfTweaks"), keywords: "advanced tweaks timer mmcss" },
+    { id: "latency", icon: "📉", label: t("navLatency"), desc: t("toolDescLatency"), keywords: "latency dpc ping input lag" },
+    { id: "gputweaks", icon: "🖼️", label: t("navGpuTweaks"), desc: t("toolDescGpuTweaks"), keywords: "gpu graphics grafik nvidia amd" },
+    { id: "nvcontrol", icon: "🎛️", label: t("navNvControl"), desc: t("toolDescNvControl"), keywords: "nvidia driver control panel" },
+    { id: "profiles", icon: "📁", label: t("navProfiles"), desc: t("toolDescProfiles"), keywords: "profile preset" },
+    { id: "gameprofiles", icon: "🕹️", label: t("navGameProfiles"), desc: t("toolDescGameProfiles"), keywords: "game profile per-game" },
   ] },
-  { group: t("navGrpCleanup"), items: [
-    { id: "cleanup", icon: "◫", label: t("navCleanup") }, { id: "uninstaller", icon: "×", label: t("navUninstaller") },
-    { id: "diskanalyzer", icon: "◉", label: t("navDiskAnalyzer") }, { id: "regclean", icon: "⌘", label: t("navRegClean") },
-    { id: "debloater", icon: "◌", label: t("navDebloater") }, { id: "ctxmenu", icon: "☰", label: t("navCtxMenu") },
+  { id: "cleanup", group: t("navGrpCleanup"), icon: "🧹", desc: t("catDescCleanup"), accent: "cyan", items: [
+    { id: "cleanup", icon: "🧼", label: t("navCleanup"), desc: t("toolDescCleanup"), basic: true, keywords: "clean temp cache junk speicher aufräumen" },
+    { id: "uninstaller", icon: "🗑️", label: t("navUninstaller"), desc: t("toolDescUninstaller"), basic: true, keywords: "uninstall remove apps programme deinstallieren" },
+    { id: "diskanalyzer", icon: "💾", label: t("navDiskAnalyzer"), desc: t("toolDescDiskAnalyzer"), keywords: "disk space storage speicherplatz" },
+    { id: "debloater", icon: "📦", label: t("navDebloater"), desc: t("toolDescDebloater"), keywords: "bloat debloat remove windows apps" },
+    { id: "regclean", icon: "🗂️", label: t("navRegClean"), desc: t("toolDescRegClean"), keywords: "registry regedit" },
+    { id: "ctxmenu", icon: "🖱️", label: t("navCtxMenu"), desc: t("toolDescCtxMenu"), keywords: "context menu rechtsklick explorer" },
   ] },
-  { group: t("navGrpPrivacySecurity"), items: [
-    { id: "privacy", icon: "◈", label: t("navPrivacy") }, { id: "security", icon: "◉", label: t("navSecurity") },
+  { id: "protection", group: t("navGrpProtection"), icon: "🛡️", desc: t("catDescProtection"), accent: "green", items: [
+    { id: "restorepoints", icon: "🛟", label: t("navRestorePoints"), desc: t("toolDescRestorePoints"), basic: true, keywords: "restore backup undo rückgängig wiederherstellen safety" },
+    { id: "privacy", icon: "🕵️", label: t("navPrivacy"), desc: t("toolDescPrivacy"), basic: true, keywords: "privacy telemetry tracking datenschutz" },
+    { id: "security", icon: "🔒", label: t("navSecurity"), desc: t("toolDescSecurity"), basic: true, keywords: "security defender firewall antivirus sicherheit" },
   ] },
-  { group: t("navGrpSystem"), items: [
-    { id: "processes", icon: "≡", label: t("navProcesses") }, { id: "startup", icon: "▶", label: t("navStartup") },
-    { id: "services", icon: "⚙", label: t("navServices") }, { id: "schedtasks", icon: "◷", label: t("navSchedTasks") },
-    { id: "drivers", icon: "⌕", label: t("navDrivers") }, { id: "bootopt", icon: "◴", label: t("navBootOpt") },
-    { id: "restorepoints", icon: "↶", label: t("navRestorePoints") }, { id: "updates", icon: "↻", label: t("navUpdates") },
-    { id: "softinstaller", icon: "□", label: t("navSoftInstaller") },
+  { id: "system", group: t("navGrpSystem"), icon: "🖥️", desc: t("catDescSystem"), accent: "amber", items: [
+    { id: "hardware", icon: "🧩", label: t("navHardware"), desc: t("toolDescHardware"), basic: true, keywords: "hardware specs cpu gpu ram komponenten" },
+    { id: "monitor", icon: "📈", label: t("navMonitor"), desc: t("toolDescMonitor"), basic: true, keywords: "monitor live metrics usage auslastung" },
+    { id: "hwmonitor", icon: "🌡️", label: t("navHwMonitor"), desc: t("toolDescHwMonitor"), keywords: "sensors temps temperature lüfter fans" },
+    { id: "processes", icon: "📑", label: t("navProcesses"), desc: t("toolDescProcesses"), keywords: "processes tasks task manager prozesse" },
+    { id: "startup", icon: "🚦", label: t("navStartup"), desc: t("toolDescStartup"), keywords: "startup autostart boot" },
+    { id: "services", icon: "🔧", label: t("navServices"), desc: t("toolDescServices"), keywords: "services dienste" },
+    { id: "schedtasks", icon: "⏰", label: t("navSchedTasks"), desc: t("toolDescSchedTasks"), keywords: "scheduled tasks aufgaben" },
+    { id: "drivers", icon: "💿", label: t("navDrivers"), desc: t("toolDescDrivers"), keywords: "drivers treiber" },
+    { id: "bootopt", icon: "🥾", label: t("navBootOpt"), desc: t("toolDescBootOpt"), keywords: "boot startup time bootzeit" },
+    { id: "updates", icon: "🔄", label: t("navUpdates"), desc: t("toolDescUpdates"), basic: true, keywords: "update upgrade version aktualisieren" },
+    { id: "softinstaller", icon: "📥", label: t("navSoftInstaller"), desc: t("toolDescSoftInstaller"), keywords: "install software apps winget" },
+    { id: "pcconfig", icon: "🛠️", label: t("navPcConfig"), desc: t("toolDescPcConfig"), keywords: "pc build configurator upgrade bottleneck" },
   ] },
-  { group: t("navGrpReports"), items: [
-    { id: "benchmark", icon: "◴", label: t("navBenchmark") }, { id: "reports", icon: "▤", label: t("navReports") },
+  { id: "reports", group: t("navGrpReports"), icon: "📊", desc: t("catDescReports"), accent: "slate", items: [
+    { id: "benchmark", icon: "🏁", label: t("navBenchmark"), desc: t("toolDescBenchmark"), basic: true, keywords: "benchmark test score messen" },
+    { id: "reports", icon: "📄", label: t("navReports"), desc: t("toolDescReports"), keywords: "reports export log journal berichte" },
   ] },
 ];
 
 export type Mode = "beginner" | "expert";
 
+const MODE_KEY = "ui.mode";
+const ONBOARDED_KEY = "ui.onboarded";
+
+/** Where the shell currently is: launcher home, a category grid, or a tool. */
+type Route = { kind: "home" } | { kind: "category"; id: string } | { kind: "tool"; id: string };
+
+function renderTool(page: string, mode: Mode, admin: boolean | null, go: (id: string) => void) {
+  switch (page) {
+    case "dashboard": return <Dashboard mode={mode} go={go} />;
+    case "hardware": return <Hardware mode={mode} />;
+    case "monitor": return <Monitor />;
+    case "latency": return <Latency />;
+    case "processes": return <Processes />;
+    case "startup": return <Startup admin={!!admin} />;
+    case "schedtasks": return <ScheduledTasks admin={!!admin} />;
+    case "optimize": return <Optimize mode={mode} admin={!!admin} />;
+    case "profiles": return <Profiles />;
+    case "gameprofiles": return <GameProfiles />;
+    case "cleanup": return <Cleanup />;
+    case "regclean": return <RegClean admin={!!admin} />;
+    case "gputweaks": return <GpuTweaks admin={!!admin} />;
+    case "nvcontrol": return <NvidiaControlPanel />;
+    case "diskanalyzer": return <DiskAnalyzer />;
+    case "bootopt": return <BootOptimizer admin={!!admin} />;
+    case "privacy": return <PrivacyCenter admin={!!admin} />;
+    case "services": return <ServicesManager admin={!!admin} />;
+    case "healthcheck": return <HealthCheck admin={!!admin} />;
+    case "updates": return <Updates admin={!!admin} />;
+    case "perftweaks": return <PerfTweaks admin={!!admin} />;
+    case "hwmonitor": return <HwMonitor />;
+    case "powerplan": return <PowerPlan admin={!!admin} />;
+    case "uninstaller": return <AppUninstaller admin={!!admin} />;
+    case "ctxmenu": return <CtxMenuCleaner admin={!!admin} />;
+    case "debloater": return <Debloater admin={!!admin} />;
+    case "drivers": return <DriverManager />;
+    case "gameboost": return <GameBooster admin={!!admin} />;
+    case "security": return <Security mode={mode} />;
+    case "benchmark": return <Benchmark />;
+    case "reports": return <Reports />;
+    case "autoopt": return <AutoOptimizer admin={!!admin} />;
+    case "restorepoints": return <RestorePointManager admin={!!admin} />;
+    case "softinstaller": return <SoftwareInstaller />;
+    case "pcconfig": return <PcConfigurator />;
+    default: return null;
+  }
+}
+
 function AppInner() {
   const { lang, setLang, t } = useLang();
   const nav = buildNav(t);
-  const [page, setPage] = useState("dashboard");
+  const [route, setRoute] = useState<Route>({ kind: "home" });
   const [admin, setAdmin] = useState<boolean | null>(null);
-  const [mode, setMode] = useState<Mode>("beginner");
+  const [mode, setModeState] = useState<Mode>(() => {
+    try { return (localStorage.getItem(MODE_KEY) as Mode) ?? "beginner"; } catch { return "beginner"; }
+  });
+  const [onboarded, setOnboarded] = useState(() => {
+    try { return localStorage.getItem(ONBOARDED_KEY) === "1"; } catch { return true; }
+  });
   const [query, setQuery] = useState("");
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [updateBanner, setUpdateBanner] = useState<{ version: string } | null>(null);
   const updateChecked = useRef(false);
+
+  const setMode = (next: Mode) => {
+    setModeState(next);
+    try { localStorage.setItem(MODE_KEY, next); } catch {}
+  };
+
+  const finishOnboarding = (chosen: Mode) => {
+    setMode(chosen);
+    setOnboarded(true);
+    try { localStorage.setItem(ONBOARDED_KEY, "1"); } catch {}
+  };
 
   useEffect(() => { api.isAdmin().then(setAdmin).catch(() => setAdmin(false)); }, []);
   useEffect(() => {
@@ -99,77 +184,161 @@ function AppInner() {
     return () => clearTimeout(timer);
   }, []);
 
-  const selected = useMemo(() => nav.flatMap((group) => group.items.map((item) => ({ ...item, group: group.group }))).find((item) => item.id === page), [nav, page]);
+  const allowedByMode = (item: NavItem) => mode === "expert" || !!item.basic;
+
+  // Category → visible tools for the current mode. Groups with nothing to show
+  // (all-advanced categories in Beginner mode) drop out of the launcher.
+  const visibleGroups = useMemo(
+    () => nav.map((g) => ({ ...g, items: g.items.filter(allowedByMode) })).filter((g) => g.items.length > 0),
+    [nav, mode]
+  );
+  const hiddenCount = mode === "beginner" ? nav.flatMap((g) => g.items).filter((i) => !i.basic).length : 0;
+
+  const findGroupOf = (toolId: string) => nav.find((g) => g.items.some((i) => i.id === toolId));
+  const findTool = (toolId: string) => nav.flatMap((g) => g.items).find((i) => i.id === toolId);
+
+  const openCategory = (id: string) => { setQuery(""); setRoute({ kind: "category", id }); };
+  const openTool = (id: string) => { setQuery(""); setRoute({ kind: "tool", id }); };
+  const goHome = () => { setQuery(""); setRoute({ kind: "home" }); };
+  const back = () => {
+    if (route.kind === "tool") { const g = findGroupOf(route.id); setRoute(g ? { kind: "category", id: g.id } : { kind: "home" }); }
+    else setRoute({ kind: "home" });
+  };
+
+  // Search results across every mode-allowed tool. Matches label + keywords.
   const normalizedQuery = query.trim().toLocaleLowerCase();
-  const visibleGroups = nav.map((group) => ({ ...group, items: group.items.filter((item) => !normalizedQuery || item.label.toLocaleLowerCase().includes(normalizedQuery)) })).filter((group) => group.items.length > 0);
-  const selectPage = (id: string) => { setPage(id); if (normalizedQuery) setQuery(""); };
+  const searchResults = normalizedQuery
+    ? nav.flatMap((g) => g.items.filter(allowedByMode).filter((i) =>
+        i.label.toLocaleLowerCase().includes(normalizedQuery) || (i.keywords ?? "").includes(normalizedQuery)
+      ).map((i) => ({ ...i, groupLabel: g.group })))
+    : [];
+
+  // Leaving Expert mode while sitting on an advanced tool/category would strand
+  // the user on a screen they can no longer reach.
+  useEffect(() => {
+    if (mode !== "beginner") return;
+    if (route.kind === "tool" && !findTool(route.id)?.basic) setRoute({ kind: "home" });
+    if (route.kind === "category" && !visibleGroups.some((g) => g.id === route.id)) setRoute({ kind: "home" });
+  }, [mode]);
+
+  if (!onboarded) return <Onboarding onDone={finishOnboarding} />;
+
+  const activeGroup = route.kind === "category" ? nav.find((g) => g.id === route.id) : undefined;
+  const activeTool = route.kind === "tool" ? findTool(route.id) : undefined;
+  const activeToolGroup = route.kind === "tool" ? findGroupOf(route.id) : undefined;
 
   return (
-    <div className="layout app-shell">
-      <aside className="sidebar" aria-label="Primary navigation">
-        <div className="brand-block">
-          <div className="brand-mark">AD</div>
-          <div><div className="logo">Hyper<span>Optimize</span></div><div className="brand-caption">Windows control center</div></div>
+    <div className="shell">
+      <header className="topbar">
+        <div className="topbar-left">
+          <button className="brand-home" onClick={goHome} title={t("navDashboard")}>
+            <span className="brand-mark">AD</span>
+            <span className="logo">Hyper<span>Optimize</span></span>
+          </button>
+          <nav className="crumbs" aria-label="Breadcrumb">
+            <button className={`crumb ${route.kind === "home" ? "current" : ""}`} onClick={goHome}>{t("navHome")}</button>
+            {route.kind === "category" && activeGroup && <><span className="crumb-sep">/</span><span className="crumb current">{activeGroup.group}</span></>}
+            {route.kind === "tool" && activeToolGroup && <>
+              <span className="crumb-sep">/</span>
+              <button className="crumb" onClick={() => openCategory(activeToolGroup.id)}>{activeToolGroup.group}</button>
+              <span className="crumb-sep">/</span><span className="crumb current">{activeTool?.label}</span>
+            </>}
+          </nav>
         </div>
 
-        <div className="nav-search-wrap">
+        <div className="topbar-search">
           <span aria-hidden="true">⌕</span>
-          <input className="nav-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search tools" aria-label="Search tools" />
-          {query && <button className="nav-search-clear" onClick={() => setQuery("")} aria-label="Clear search">×</button>}
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("navSearchTools")} aria-label={t("navSearchTools")} />
+          {query && <button className="topbar-search-clear" onClick={() => setQuery("")} aria-label="Clear search">×</button>}
         </div>
 
-        <nav className="nav-scroll">
-          {visibleGroups.map((group) => {
-            const isOpen = normalizedQuery || !collapsed[group.group];
-            return <section className="nav-group" key={group.group}>
-              <button className="nav-group-label" onClick={() => setCollapsed((current) => ({ ...current, [group.group]: !current[group.group] }))} aria-expanded={!!isOpen}>
-                <span>{group.group}</span><span className={`group-chevron ${isOpen ? "open" : ""}`}>⌄</span>
-              </button>
-              {isOpen && group.items.map((item) => <button key={item.id} className={`nav-item ${page === item.id ? "active" : ""}`} onClick={() => selectPage(item.id)} aria-current={page === item.id ? "page" : undefined}>
-                <span className="nav-icon" aria-hidden="true">{item.icon}</span><span>{item.label}</span>
-              </button>)}
-            </section>;
-          })}
-          {visibleGroups.length === 0 && <div className="nav-empty">No matching tools</div>}
-        </nav>
-
-        <div className="sidebar-footer">
-          <div className="sidebar-status"><span className={`status-dot ${admin ? "is-ready" : ""}`} />{admin === null ? t("navChecking") : admin ? t("adminBadge") : t("userBadge")}</div>
+        <div className="topbar-right">
           <div className="mode-toggle">
             <button className={mode === "beginner" ? "on" : ""} onClick={() => setMode("beginner")}>{t("beginner")}</button>
             <button className={mode === "expert" ? "on" : ""} onClick={() => setMode("expert")}>{t("expert")}</button>
           </div>
-          <div className="sidebar-bottom-row">
-            <select className="lang-select" value={lang} onChange={(event) => setLang(event.target.value as Lang)} aria-label="Language">
-              {Object.entries(LANG_NAMES).map(([code, name]) => <option key={code} value={code}>{name}</option>)}
-            </select>
-            <button className="social-btn" onClick={() => api.openPath("https://discord.gg/vFaKsVuxKP")} title="Discord">D</button>
-            <button className="social-btn x" onClick={() => api.openPath("https://x.com/zCrxticxl")} title="X">X</button>
-          </div>
+          <select className="lang-select" value={lang} onChange={(e) => setLang(e.target.value as Lang)} aria-label="Language">
+            {Object.entries(LANG_NAMES).map(([code, name]) => <option key={code} value={code}>{name}</option>)}
+          </select>
+          <span className="admin-chip" title={admin ? t("adminBadge") : t("userBadge")}><span className={`status-dot ${admin ? "is-ready" : ""}`} />{admin === null ? "…" : admin ? "Admin" : t("userBadge")}</span>
+          <button className="social-btn coffee" onClick={() => api.openPath("https://www.buymeacoffee.com/zCrxticxl")} title={t("supportTip")}>☕</button>
+          <button className="social-btn" onClick={() => api.openPath("https://discord.gg/vFaKsVuxKP")} title="Discord">D</button>
+          <button className="social-btn x" onClick={() => api.openPath("https://x.com/zCrxticxl")} title="X">X</button>
         </div>
-      </aside>
+      </header>
 
-      <main className="main">
-        <header className="app-topbar">
-          <div><div className="app-crumb">AD HYPEROPTIMIZE <span>/</span> {selected?.group}</div><div className="app-page-name">{selected?.label}</div></div>
-          <div className="topbar-actions"><span className="safe-pill"><span className="status-dot is-ready" />Revertible changes</span><span className={`mode-pill ${mode}`}>{mode === "beginner" ? t("beginner") : t("expert")}</span></div>
-        </header>
-        {updateBanner && <div className="update-banner"><div><b>↻ {t("navUpdateAvailable")}</b><span>v{updateBanner.version} {t("navUpdateReady")}</span></div><button className="btn small" onClick={() => { setPage("updates"); setUpdateBanner(null); }}>{t("navInstallUpdate")}</button><button className="icon-button" onClick={() => setUpdateBanner(null)} aria-label="Dismiss update">×</button></div>}
-        <div className="page-content">
-          {page === "dashboard" && <Dashboard mode={mode} go={setPage} />}
-          {page === "hardware" && <Hardware mode={mode} />}{page === "monitor" && <Monitor />}{page === "latency" && <Latency />}
-          {page === "processes" && <Processes />}{page === "startup" && <Startup admin={!!admin} />}{page === "schedtasks" && <ScheduledTasks admin={!!admin} />}
-          {page === "optimize" && <Optimize mode={mode} admin={!!admin} />}{page === "profiles" && <Profiles />}{page === "gameprofiles" && <GameProfiles />}
-          {page === "cleanup" && <Cleanup />}{page === "regclean" && <RegClean admin={!!admin} />}{page === "gputweaks" && <GpuTweaks admin={!!admin} />}
-          {page === "nvcontrol" && <NvidiaControlPanel />}{page === "diskanalyzer" && <DiskAnalyzer />}{page === "bootopt" && <BootOptimizer admin={!!admin} />}
-          {page === "privacy" && <PrivacyCenter admin={!!admin} />}{page === "services" && <ServicesManager admin={!!admin} />}{page === "healthcheck" && <HealthCheck admin={!!admin} />}
-          {page === "updates" && <Updates admin={!!admin} />}{page === "perftweaks" && <PerfTweaks admin={!!admin} />}{page === "hwmonitor" && <HwMonitor />}
-          {page === "powerplan" && <PowerPlan admin={!!admin} />}{page === "uninstaller" && <AppUninstaller admin={!!admin} />}{page === "ctxmenu" && <CtxMenuCleaner admin={!!admin} />}
-          {page === "debloater" && <Debloater admin={!!admin} />}{page === "drivers" && <DriverManager />}{page === "gameboost" && <GameBooster admin={!!admin} />}
-          {page === "security" && <Security mode={mode} />}{page === "benchmark" && <Benchmark />}{page === "reports" && <Reports />}
-          {page === "autoopt" && <AutoOptimizer admin={!!admin} />}{page === "restorepoints" && <RestorePointManager admin={!!admin} />}
-          {page === "softinstaller" && <SoftwareInstaller />}{page === "pcconfig" && <PcConfigurator />}
-        </div>
+      {updateBanner && <div className="update-banner"><div><b>↻ {t("navUpdateAvailable")}</b><span>v{updateBanner.version} {t("navUpdateReady")}</span></div><button className="btn small" onClick={() => { openTool("updates"); setUpdateBanner(null); }}>{t("navInstallUpdate")}</button><button className="icon-button" onClick={() => setUpdateBanner(null)} aria-label="Dismiss update">×</button></div>}
+
+      <main className="content">
+        {/* Search overrides whatever route we're on. */}
+        {normalizedQuery ? (
+          <>
+            <div className="view-head"><h1>{t("navSearchResults")}</h1><p>{searchResults.length} · “{query}”</p></div>
+            {searchResults.length === 0 ? <div className="nav-empty">{t("navNoMatch")}</div> : (
+              <div className="tool-grid">
+                {searchResults.map((item) => (
+                  <button key={item.id} className="tool-card" onClick={() => openTool(item.id)}>
+                    <span className="tool-icon" aria-hidden="true">{item.icon}</span>
+                    <b>{item.label}</b>
+                    <span className="tool-cat">{item.groupLabel}</span>
+                    {item.desc && <span className="tool-desc">{item.desc}</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+          </>
+        ) : route.kind === "home" ? (
+          <>
+            <div className="view-head hero">
+              <div>
+                <div className="eyebrow">{t("homeEyebrow")}</div>
+                <h1>{t("homeTitle")}</h1>
+                <p>{t("homeSub")}</p>
+              </div>
+              <button className="btn big" onClick={() => openTool("autoopt")}>⚡ {t("navAutoOpt")}</button>
+            </div>
+            <div className="category-grid">
+              {visibleGroups.map((g) => (
+                <button key={g.id} className={`category-card accent-${g.accent}`} onClick={() => openCategory(g.id)}>
+                  <span className="category-icon" aria-hidden="true">{g.icon}</span>
+                  <b>{g.group}</b>
+                  <span className="category-desc">{g.desc}</span>
+                  <span className="category-count">{g.items.length} {t("homeTools")} →</span>
+                </button>
+              ))}
+            </div>
+            {hiddenCount > 0 && (
+              <button className="nav-unlock wide" onClick={() => setMode("expert")}>
+                <span aria-hidden="true">＋</span>
+                <span>{hiddenCount} {t("navMoreInExpert")}</span>
+              </button>
+            )}
+          </>
+        ) : route.kind === "category" && activeGroup ? (
+          <>
+            <div className="view-head">
+              <button className="back-btn" onClick={back}>← {t("navHome")}</button>
+              <div className="view-head-title"><span className={`category-icon inline accent-${activeGroup.accent}`} aria-hidden="true">{activeGroup.icon}</span><div><h1>{activeGroup.group}</h1><p>{activeGroup.desc}</p></div></div>
+            </div>
+            <div className="tool-grid">
+              {activeGroup.items.filter(allowedByMode).map((item) => (
+                <button key={item.id} className="tool-card" onClick={() => openTool(item.id)}>
+                  <span className="tool-icon" aria-hidden="true">{item.icon}</span>
+                  <b>{item.label}</b>
+                  {item.desc && <span className="tool-desc">{item.desc}</span>}
+                </button>
+              ))}
+            </div>
+          </>
+        ) : route.kind === "tool" ? (
+          <>
+            <div className="tool-head">
+              <button className="back-btn" onClick={back}>← {activeToolGroup?.group ?? t("navHome")}</button>
+              <span className="safe-pill"><span className="status-dot is-ready" />{t("safeRevertible")}</span>
+            </div>
+            <div className="page-content">{renderTool(route.id, mode, admin, openTool)}</div>
+          </>
+        ) : null}
       </main>
     </div>
   );

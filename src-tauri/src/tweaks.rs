@@ -824,14 +824,29 @@ fn reg_delete(root: &str, path: &str, name: &str) -> Result<(), String> {
     key.delete_value(name).map_err(|e| e.to_string())
 }
 
+// Sentinel returned when a service isn't installed on this machine. Kept out of
+// band from real StartType values ("Automatic"/"Manual"/"Disabled"/…).
+const SERVICE_ABSENT: &str = "__ABSENT__";
+
 fn service_get_start(name: &str) -> Result<String, String> {
-    crate::ps::run(&format!("(Get-Service -Name '{name}' -ErrorAction Stop).StartType"))
-        .map(|s| s.trim().to_string())
+    // SilentlyContinue + explicit sentinel: a missing service must not blow up
+    // status detection or the apply's "capture previous state" step.
+    crate::ps::run(&format!(
+        "$s = Get-Service -Name '{name}' -ErrorAction SilentlyContinue; if ($s) {{ $s.StartType }} else {{ '{SERVICE_ABSENT}' }}"
+    ))
+    .map(|s| s.trim().to_string())
 }
 
 fn service_set_start(name: &str, mode: &str) -> Result<(), String> {
+    // Reverting to a previously-absent state is a no-op.
+    if mode == SERVICE_ABSENT {
+        return Ok(());
+    }
+    // If the service doesn't exist (e.g. the VS diagnostics hub collector on a
+    // non-developer machine), there's nothing to disable — treat as success
+    // instead of surfacing a scary "service not found" PowerShell error.
     crate::ps::run(&format!(
-        "Set-Service -Name '{name}' -StartupType {mode} -ErrorAction Stop; 'OK'"
+        "$s = Get-Service -Name '{name}' -ErrorAction SilentlyContinue; if (-not $s) {{ 'ABSENT' }} else {{ Set-Service -Name '{name}' -StartupType {mode} -ErrorAction Stop; 'OK' }}"
     ))
     .map(|_| ())
 }
@@ -921,7 +936,8 @@ fn detect_status(t: &Tweak) -> &'static str {
                 Action::Service { name, target } => {
                     checkable += 1;
                     if let Ok(cur) = service_get_start(name) {
-                        if cur.eq_ignore_ascii_case(target) {
+                        // Absent service = target already satisfied (it can't run).
+                        if cur.eq_ignore_ascii_case(target) || cur == SERVICE_ABSENT {
                             matching += 1;
                         }
                     }

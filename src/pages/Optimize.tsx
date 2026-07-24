@@ -87,34 +87,47 @@ export default function Optimize({ mode, admin }: { mode: Mode; admin: boolean }
             t = localizeTweak(t, lang);
             const hwRisk = profile?.tweakRisks?.[t.id];
             const needsAck = hwRisk?.severity === "danger" && riskAck !== t.id;
+            // "partial" = the tweak was applied but not every value reads back
+            // identical (common for GameConfigStore/DWM keys that only settle
+            // after a reboot). It must NOT present as un-applied, otherwise the
+            // primary Apply button looks permanently stuck. Offer a quiet
+            // Re-apply instead and keep Undo available.
+            const applyTrigger =
+              t.status === "partial"
+                ? { idle: "Re-apply", confirmLabel: "Confirm re-apply", cls: "btn small ghost", title: "Partially applied — some values only settle after a reboot, or one didn't take. Re-apply to retry." }
+                : (t.status === "not_applied" || t.status === "unknown")
+                ? { idle: "Apply…", confirmLabel: "Confirm apply", cls: "btn small", title: undefined as string | undefined }
+                : null;
+            const statusLabel = t.status === "partial" ? "partially applied" : t.status === "not_applied" ? "not applied" : t.status;
             return (
             <div className="tweak" key={t.id}>
               <div className="tweak-head">
                 <span className="tweak-name">{t.name}</span>
                 <Badge cls={`risk-${t.risk}`}>{t.risk} risk</Badge>
                 <RiskBadge id={t.id} />
-                <Badge cls={`st-${t.status}`}>{t.status.replace("_", " ")}</Badge>
+                <Badge cls={`st-${t.status}`}>{statusLabel}</Badge>
                 {t.requiresAdmin && <Badge cls="st-unknown">admin</Badge>}
                 <button className="btn small ghost" onClick={() => setOpen(open === t.id ? null : t.id)}>
                   {open === t.id ? "Hide" : "Details"}
                 </button>
-                {t.status !== "applied" && (
+                {applyTrigger && (
                   confirm === t.id ? (
                     needsAck ? (
                       <button className="btn small ghost" onClick={() => { setConfirm(null); setRiskAck(null); }}>Cancel</button>
                     ) : (
                       <>
-                        <button className="btn small danger" onClick={() => doApply(t)}>Confirm apply</button>
+                        <button className="btn small danger" onClick={() => doApply(t)}>{applyTrigger.confirmLabel}</button>
                         <button className="btn small ghost" onClick={() => { setConfirm(null); setRiskAck(null); }}>Cancel</button>
                       </>
                     )
                   ) : (
                     <button
-                      className="btn small"
+                      className={applyTrigger.cls}
                       disabled={t.requiresAdmin && !admin}
+                      title={applyTrigger.title}
                       onClick={() => { setOpen(t.id); setConfirm(t.id); }}
                     >
-                      Apply…
+                      {applyTrigger.idle}
                     </button>
                   )
                 )}
