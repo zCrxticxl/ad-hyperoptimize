@@ -19,9 +19,20 @@ No registry-cleaner snake oil. Only documented, measurable tweaks — journaled,
 ![Rust](https://img.shields.io/badge/Rust-backend-F74C00?style=flat-square&logo=rust&logoColor=white)
 ![React](https://img.shields.io/badge/React%2018-TypeScript-61DAFB?style=flat-square&logo=react&logoColor=black)
 
-<img src="assets/demo.gif" alt="AD HyperOptimize dashboard — health score, live metrics, journaled tweaks" width="90%"/>
+<img src="assets/screenshot-home.png" alt="AD HyperOptimize home: pick a category instead of a wall of tools" width="90%"/>
 
-<sup>UI preview — health scoring, 1s live metrics stream, journaled tweaks with one-click revert</sup>
+<sup>The v1.4 dashboard. Pick a category; every tool explains itself.</sup>
+
+<table>
+<tr>
+<td width="50%"><img src="assets/screenshot-dashboard.png" alt="System dashboard with health score, findings and hardware profile"/></td>
+<td width="50%"><img src="assets/screenshot-optimize.png" alt="Safe Optimization Engine with per-tweak risk, hardware check and one-click undo"/></td>
+</tr>
+<tr>
+<td width="50%"><img src="assets/screenshot-performance.png" alt="Performance category with its tools"/></td>
+<td width="50%"><sub>Health score and findings, the journaled tweak engine with per-tweak risk and undo, and category navigation. Every screenshot is the real app, not a mockup.</sub></td>
+</tr>
+</table>
 
 </div>
 
