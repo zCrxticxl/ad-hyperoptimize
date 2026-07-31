@@ -492,6 +492,12 @@ fn cmd_regclean_scan() -> Value { regclean::scan() }
 #[tauri::command(async)]
 fn cmd_regclean_clean(entries: Vec<Value>) -> Result<Value, String> { regclean::clean(entries) }
 
+#[tauri::command(async)]
+fn cmd_regclean_list_backups() -> Value { regclean::list_backups() }
+
+#[tauri::command(async)]
+fn cmd_regclean_restore(backup_path: String) -> Result<Value, String> { regclean::restore(backup_path) }
+
 // ---- disk organizer ----
 #[tauri::command(async)]
 fn cmd_disk_organize_preview(folder: String, recurse: bool) -> Value {
@@ -889,6 +895,8 @@ pub fn run() {
             // registry clean
             cmd_regclean_scan,
             cmd_regclean_clean,
+            cmd_regclean_list_backups,
+            cmd_regclean_restore,
             // boot
             cmd_boot_scan,
             cmd_boot_tweak_apply,

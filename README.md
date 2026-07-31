@@ -39,8 +39,8 @@ Because most Windows "optimizers" are placebo generators. AD HyperOptimize takes
 |---|---|
 | "Cleans" the registry | Only documented, measurable tweaks (MMCSS, Game DVR, power plans, telemetry policy…) |
 | Changes things silently | Per-tweak confirm with **what / why / impact / risk / reversibility** |
-| No way back | Write-ahead journal + `.reg` backups + restore points — **everything reverts** |
-| Phones home | **Zero telemetry.** Security page is read-only |
+| No way back | Write-ahead journal + `.reg` backups — tweaks undo to their prior state; some resets restore Windows defaults |
+| Phones home | **Zero telemetry.** Nothing is sent online |
 
 ## ✨ Features
 
@@ -48,7 +48,7 @@ Because most Windows "optimizers" are placebo generators. AD HyperOptimize takes
 - 📊 **Live Monitor** — 1-second real-time metrics stream (CPU, GPU, RAM, disk, temps) straight into the dashboard
 - 🎮 **Gaming tweaks** — MMCSS profile, Game DVR/Game Bar, power plans, latency-focused options. Built by someone who plays comp R6, not a checkbox farm
 - 🧹 **Cleanup** — whitelisted cache/temp roots only; locked files skipped, never forced
-- 🛡️ **Security audit** — Defender, firewall, unsigned drivers, autoruns, hosts file — read-only
+- 🛡️ **Security center** — audits Defender, firewall, unsigned drivers, autoruns and the hosts file, and offers **explicit, opt-in** controls to change them (e.g. toggle Defender realtime, edit hosts, disable tasks, remove drivers). Nothing changes without a click.
 - 🏁 **Benchmarks** — CPU / memory / disk with history
 - 📄 **Reports** — dark-mode HTML + JSON exports (print → PDF)
 - 🔰 **Beginner ⇄ Expert mode** — same engine, two levels of detail
@@ -58,14 +58,14 @@ Because most Windows "optimizers" are placebo generators. AD HyperOptimize takes
 Every tweak goes through the same pipeline:
 
 ```
-confirm → restore point (medium risk) → .reg backup → write-ahead journal → apply → verify
+confirm → (recommended: restore point) → .reg backup → write-ahead journal → apply → verify
                                                           └── failure? auto-rollback ──┘
 ```
 
 1. **Write-ahead journaling** — previous values are captured to `journal.json` *before* anything is mutated. Failed applies roll back automatically.
 2. **Registry backups** — every touched key exported via `reg.exe` first.
 3. **Restore points** — one click, surfaced before medium-risk tweaks.
-4. **Least privilege** — runs as standard user; asks for admin only where required. Tauri capabilities expose no FS/network surface to the webview.
+4. **Runs elevated** — most system tweaks need administrator rights, so the app requests elevation at launch (UAC). Tauri capabilities expose no FS/network surface to the webview.
 
 ## 📥 Get it
 
@@ -112,7 +112,7 @@ src-tauri/src/
 ├── tweaks.rs             # Declarative tweak catalog + apply/revert engine
 ├── safety.rs             # Restore points, .reg backups, write-ahead journal
 ├── cleanup.rs            # Whitelisted-roots cache/temp cleaner
-├── security.rs           # Defender/firewall/drivers/autoruns/hosts (read-only)
+├── security.rs           # Defender/firewall/drivers/autoruns/hosts — audit + opt-in controls
 ├── bench.rs              # CPU/memory/disk benchmarks + history
 ├── analysis.rs           # Rule-based findings engine + health score
 └── report.rs             # Dark HTML + JSON reports

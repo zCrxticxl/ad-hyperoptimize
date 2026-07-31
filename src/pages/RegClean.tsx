@@ -38,6 +38,9 @@ export default function RegClean({ admin }: { admin: boolean }) {
   const [cleaning, setCleaning] = useState(false);
   const [result, setResult] = useState<any | null>(null);
   const [err, setErr] = useState("");
+  const [backups, setBackups] = useState<any[] | null>(null);
+  const [restoring, setRestoring] = useState<string | null>(null);
+  const [restoreMsg, setRestoreMsg] = useState("");
 
   const doScan = () => {
     setScanning(true);
@@ -94,6 +97,27 @@ export default function RegClean({ admin }: { admin: boolean }) {
     }
   };
 
+  const toggleBackups = async () => {
+    if (backups) { setBackups(null); return; }
+    setRestoreMsg("");
+    try { setBackups(await api.regcleanListBackups()); }
+    catch (e: any) { setErr(String(e)); }
+  };
+
+  const doRestore = async (path: string) => {
+    setRestoring(path);
+    setRestoreMsg("");
+    try {
+      const r = await api.regcleanRestore(path);
+      setRestoreMsg(`✓ ${r.restored} restored${r.errors?.length ? ` · ${r.errors.length} errors` : ""}`);
+      await doScan();
+    } catch (e: any) {
+      setRestoreMsg(String(e));
+    } finally {
+      setRestoring(null);
+    }
+  };
+
   const allCats = data
     ? CAT_ORDER.filter((c) => (data.counts[c] ?? 0) > 0).concat(
         Object.keys(data.counts).filter((c) => !CAT_ORDER.includes(c))
@@ -105,13 +129,17 @@ export default function RegClean({ admin }: { admin: boolean }) {
       <div className="page-title">Registry Orphan Cleaner</div>
       <div className="page-sub">
         Scans five categories of dead entries: MUI cache of uninstalled apps, broken uninstall keys,
-        orphaned app paths, SharedDLL ghosts and dead shell extensions. Backup is written before every action.
+        orphaned app paths, SharedDLL ghosts and dead shell extensions. Before each deletion the affected
+        key is exported to a real .reg file — use “Restore…” to bring a previous cleanup back.
       </div>
 
       {/* Scan button + status */}
       <div style={{ display: "flex", gap: 10, marginBottom: 16, alignItems: "center", flexWrap: "wrap" }}>
         <button className="btn" onClick={doScan} disabled={scanning || cleaning}>
           {scanning ? <><Spinner /> {t("regScanning")}</> : t("regScan")}
+        </button>
+        <button className="btn ghost" onClick={toggleBackups} disabled={cleaning}>
+          ↩ {backups ? "Hide restore" : "Restore…"}
         </button>
         {data && (
           <span className="muted" style={{ fontSize: 13 }}>
@@ -120,6 +148,30 @@ export default function RegClean({ admin }: { admin: boolean }) {
         )}
         {err && <span style={{ color: "var(--red)", fontSize: 13 }}>{err}</span>}
       </div>
+
+      {/* Restore panel */}
+      {backups && (
+        <Card title="Restore a previous cleanup" style={{ marginBottom: 16 }}>
+          {restoreMsg && <div style={{ fontSize: 13, marginBottom: 8, color: restoreMsg.startsWith("✓") ? "var(--green)" : "var(--red)" }}>{restoreMsg}</div>}
+          {backups.length === 0 ? (
+            <div className="muted" style={{ fontSize: 13 }}>No backups yet — they are created automatically when you clean.</div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {backups.map((b) => (
+                <div key={b.path} className="row" style={{ gap: 10, alignItems: "center", padding: "6px 0", borderBottom: "1px solid var(--border)" }}>
+                  <span style={{ fontSize: 13, flex: 1 }}>
+                    {new Date(b.time).toLocaleString()} · <span className="muted">{b.count} entries</span>
+                  </span>
+                  <button className="btn ghost small" onClick={() => api.openPath(b.path)}>{t("open")}</button>
+                  <button className="btn small" disabled={restoring === b.path} onClick={() => doRestore(b.path)}>
+                    {restoring === b.path ? <><Spinner /> Restoring</> : "Restore"}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      )}
 
       {/* Result banner */}
       {result && (
