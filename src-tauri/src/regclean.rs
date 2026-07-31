@@ -1,6 +1,8 @@
 //! Registry Orphan Cleaner.
-//! Scans five categories of dead registry entries, backs them up to JSON,
-//! then deletes on user confirmation. All deletions are reversible via the backup.
+//! Scans five categories of dead registry entries. Before each deletion the
+//! affected key is exported to a real `.reg` file; `restore()` re-imports those
+//! files, so deletions are genuinely reversible. If the export fails, the entry
+//! is skipped rather than deleted.
 
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -316,24 +318,21 @@ pub fn clean(entries: Vec<Value>) -> Result<Value, String> {
     }
     #[cfg(windows)]
     {
-        // 1. Write backup
+        // 1. Prepare backup dir + a per-cleanup folder for the .reg exports.
+        let ts = chrono::Local::now().format("%Y%m%d_%H%M%S").to_string();
         let backup_dir = dirs::config_dir()
             .unwrap_or_else(|| std::path::PathBuf::from("."))
             .join("PCOptSuite")
             .join("regclean");
-        std::fs::create_dir_all(&backup_dir).map_err(|e| format!("backup dir: {e}"))?;
-        let ts = chrono::Local::now().format("%Y%m%d_%H%M%S");
+        let reg_dir = backup_dir.join(&ts);
+        std::fs::create_dir_all(&reg_dir).map_err(|e| format!("backup dir: {e}"))?;
         let backup_path = backup_dir.join(format!("backup_{ts}.json"));
-        let backup_json = json!({
-            "time": chrono::Local::now().to_rfc3339(),
-            "entries": entries,
-        });
-        std::fs::write(&backup_path, serde_json::to_string_pretty(&backup_json).unwrap())
-            .map_err(|e| format!("backup write: {e}"))?;
 
-        // 2. Delete
+        // 2. Delete — but ONLY after a real .reg export of the affected key
+        //    succeeded, so every deletion is genuinely restorable.
         let mut deleted: u32 = 0;
         let mut errors: Vec<String> = Vec::new();
+        let mut manifest: Vec<Value> = Vec::new();
 
         for entry in &entries {
             let root       = entry["root"].as_str().unwrap_or("HKCU");
@@ -348,6 +347,16 @@ pub fn clean(entries: Vec<Value>) -> Result<Value, String> {
                     .filter_map(|v| v.as_str().map(String::from))
                     .collect())
                 .unwrap_or_default();
+
+            // Export the affected key to a .reg file BEFORE deleting. If the
+            // export fails we skip the deletion entirely — better to leave an
+            // orphan than to delete something we can't put back.
+            let reg_file = reg_dir.join(format!("{}.reg", manifest.len()));
+            let full = format!("{root}\\{key_path}");
+            if let Err(e) = reg_export(&full, &reg_file) {
+                errors.push(format!("{display}: backup failed, skipped ({e})"));
+                continue;
+            }
 
             let result: Result<(), String> = if value_name.is_empty() {
                 // Delete entire subkey
@@ -380,14 +389,119 @@ pub fn clean(entries: Vec<Value>) -> Result<Value, String> {
             };
 
             match result {
-                Ok(_)  => deleted += 1,
+                Ok(_) => {
+                    deleted += 1;
+                    manifest.push(json!({
+                        "display": display,
+                        "root": root,
+                        "keyPath": key_path,
+                        "valueName": value_name,
+                        "regFile": reg_file.to_string_lossy().into_owned(),
+                    }));
+                }
                 Err(e) => errors.push(format!("{display}: {e}")),
             }
         }
+
+        // Write the restore manifest (points at the .reg exports).
+        let backup_json = json!({
+            "time": chrono::Local::now().to_rfc3339(),
+            "count": manifest.len(),
+            "items": manifest,
+        });
+        std::fs::write(&backup_path, serde_json::to_string_pretty(&backup_json).unwrap())
+            .map_err(|e| format!("backup write: {e}"))?;
 
         let backup_str = backup_path.to_string_lossy().into_owned();
         Ok(json!({ "deleted": deleted, "errors": errors, "backupPath": backup_str }))
     }
     #[cfg(not(windows))]
     Err("Windows only".into())
+}
+
+/// Run reg.exe with the given args, hiding the console window. Returns the
+/// combined output as an error string on non-zero exit.
+#[cfg(windows)]
+fn reg_exe(args: &[&str]) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let out = std::process::Command::new("reg.exe")
+        .args(args)
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map_err(|e| e.to_string())?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+    }
+}
+
+/// Export a registry key (with all its values/subkeys) to a .reg file.
+#[cfg(windows)]
+fn reg_export(full_key: &str, file: &std::path::Path) -> Result<(), String> {
+    let f = file.to_string_lossy().into_owned();
+    reg_exe(&["export", full_key, f.as_str(), "/y"])
+}
+
+/// Restore a previous cleanup from its backup manifest by re-importing every
+/// exported .reg file. Returns { restored, errors }.
+pub fn restore(backup_path: String) -> Result<Value, String> {
+    #[cfg(windows)]
+    {
+        let raw = std::fs::read_to_string(&backup_path)
+            .map_err(|e| format!("cannot read backup: {e}"))?;
+        let parsed: Value = serde_json::from_str(&raw)
+            .map_err(|e| format!("bad backup file: {e}"))?;
+        let items = parsed["items"].as_array().cloned().unwrap_or_default();
+        if items.is_empty() {
+            return Err("This backup has no restorable entries.".into());
+        }
+
+        let mut restored: u32 = 0;
+        let mut errors: Vec<String> = Vec::new();
+        for it in &items {
+            let display = it["display"].as_str().unwrap_or("?");
+            let reg_file = it["regFile"].as_str().unwrap_or("");
+            if reg_file.is_empty() || !std::path::Path::new(reg_file).exists() {
+                errors.push(format!("{display}: backup file missing"));
+                continue;
+            }
+            match reg_exe(&["import", reg_file]) {
+                Ok(_)  => restored += 1,
+                Err(e) => errors.push(format!("{display}: {e}")),
+            }
+        }
+        return Ok(json!({ "restored": restored, "errors": errors }));
+    }
+    #[allow(unreachable_code)]
+    Err("Windows only".into())
+}
+
+/// List available cleanup backups (newest first) for the restore UI.
+pub fn list_backups() -> Value {
+    let dir = dirs::config_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("PCOptSuite")
+        .join("regclean");
+    let mut out: Vec<Value> = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(&dir) {
+        for e in rd.flatten() {
+            let path = e.path();
+            let is_backup = path.extension().and_then(|x| x.to_str()) == Some("json")
+                && path.file_name().map(|n| n.to_string_lossy().starts_with("backup_")).unwrap_or(false);
+            if !is_backup { continue; }
+            if let Ok(raw) = std::fs::read_to_string(&path) {
+                if let Ok(v) = serde_json::from_str::<Value>(&raw) {
+                    out.push(json!({
+                        "path": path.to_string_lossy().into_owned(),
+                        "time": v["time"].as_str().unwrap_or(""),
+                        "count": v["count"].as_u64().unwrap_or(0),
+                    }));
+                }
+            }
+        }
+    }
+    out.sort_by(|a, b| b["time"].as_str().unwrap_or("").cmp(a["time"].as_str().unwrap_or("")));
+    json!(out)
 }

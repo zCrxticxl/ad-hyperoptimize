@@ -19,3 +19,27 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+
+  # The privileged Rust backend was never compiled in CI before — a broken
+  # command or a bad tweak definition would only surface at release time.
+  backend:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.19.0
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      # tauri-build reads the built frontend, so produce it first.
+      - run: npm ci
+      - run: npm run build
+      - name: cargo check (backend compiles)
+        run: cargo check --manifest-path src-tauri/Cargo.toml --locked
+      - name: cargo clippy (lints, non-blocking)
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml || echo "clippy reported warnings"
