@@ -41,5 +41,7 @@ jobs:
       - run: npm run build
       - name: cargo check (backend compiles)
         run: cargo check --manifest-path src-tauri/Cargo.toml --locked
-      - name: cargo clippy (lints, non-blocking)
+      - name: cargo test
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+      - name: cargo clippy (non-blocking)
         run: cargo clippy --manifest-path src-tauri/Cargo.toml || echo "clippy reported warnings"
