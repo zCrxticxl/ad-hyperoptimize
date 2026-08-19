@@ -129,19 +129,19 @@ function renderTool(page: string, mode: Mode, admin: boolean | null, go: (id: st
     case "monitor": return <Monitor />;
     case "latency": return <Latency />;
     case "processes": return <Processes />;
-    case "startup": return <Startup admin={!!admin} />;
-    case "schedtasks": return <ScheduledTasks admin={!!admin} />;
+    case "startup": return <Startup admin={!!admin} focusId={target} />;
+    case "schedtasks": return <ScheduledTasks admin={!!admin} focusId={target} />;
     case "optimize": return <Optimize mode={mode} admin={!!admin} focusId={target} onSwitchExpert={() => setMode("expert")} />;
     case "profiles": return <Profiles />;
     case "gameprofiles": return <GameProfiles />;
     case "cleanup": return <Cleanup />;
     case "regclean": return <RegClean admin={!!admin} />;
-    case "gputweaks": return <GpuTweaks admin={!!admin} />;
+    case "gputweaks": return <GpuTweaks admin={!!admin} focusId={target} />;
     case "nvcontrol": return <NvidiaControlPanel />;
     case "diskanalyzer": return <DiskAnalyzer />;
     case "bootopt": return <BootOptimizer admin={!!admin} />;
-    case "privacy": return <PrivacyCenter admin={!!admin} />;
-    case "services": return <ServicesManager admin={!!admin} />;
+    case "privacy": return <PrivacyCenter admin={!!admin} focusId={target} />;
+    case "services": return <ServicesManager admin={!!admin} focusId={target} />;
     case "healthcheck": return <HealthCheck admin={!!admin} />;
     case "updates": return <Updates admin={!!admin} />;
     case "perftweaks": return <PerfTweaks admin={!!admin} />;
@@ -149,7 +149,7 @@ function renderTool(page: string, mode: Mode, admin: boolean | null, go: (id: st
     case "powerplan": return <PowerPlan admin={!!admin} />;
     case "uninstaller": return <AppUninstaller admin={!!admin} />;
     case "ctxmenu": return <CtxMenuCleaner admin={!!admin} />;
-    case "debloater": return <Debloater admin={!!admin} />;
+    case "debloater": return <Debloater admin={!!admin} focusId={target} />;
     case "drivers": return <DriverManager />;
     case "gameboost": return <GameBooster admin={!!admin} />;
     case "security": return <Security mode={mode} />;
@@ -254,17 +254,22 @@ function AppInner() {
   const loadFeatures = async () => {
     if (featureLoaded.current) return;
     featureLoaded.current = true;
-    const acc: { tool: string; id: string; name: string; desc: string }[] = [];
+    const acc: { tool: string; id: string; name: string; desc: string; search: string }[] = [];
     const add = (tool: string, arr: any[] | undefined, nameK: string[], descK: string[], idK: string[]) => {
       (Array.isArray(arr) ? arr : []).forEach((it) => {
         if (!it || typeof it !== "object") return;
         const name = nameK.map((k) => it[k]).find((v) => typeof v === "string" && v);
         if (!name) return;
+        const nameVariants = nameK.map((k) => it[k]).filter((v) => typeof v === "string" && v);
+        const desc = descK.map((k) => it[k]).find((v) => typeof v === "string" && v) || "";
         acc.push({
           tool,
           id: idK.map((k) => it[k]).find((v) => typeof v === "string" && v) || "",
           name,
-          desc: descK.map((k) => it[k]).find((v) => typeof v === "string" && v) || "",
+          desc,
+          // Match against every name variant (e.g. both service name and
+          // display name) plus the description.
+          search: [...nameVariants, desc].join(" ").toLocaleLowerCase(),
         });
       });
     };
@@ -288,7 +293,7 @@ function AppInner() {
   // In Beginner mode only surface features from tools that are beginner-allowed.
   const featureResults = normalizedQuery && featureIndex.length
     ? featureIndex
-        .filter((f) => (f.name + " " + f.desc).toLocaleLowerCase().includes(normalizedQuery))
+        .filter((f) => f.search.includes(normalizedQuery))
         .filter((f) => mode === "expert" || !!findTool(f.tool)?.basic)
         .map((f) => ({ ...f, feature: true }))
     : [];

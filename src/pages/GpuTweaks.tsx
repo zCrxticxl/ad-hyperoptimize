@@ -5,6 +5,7 @@ import { useLang } from "../i18n";
 import { localizeTweak } from "../localize";
 import { HwWarnings, RiskBadge, RiskNotice } from "../components/HwWarnings";
 import { useHwProfile } from "../hooks/useHwProfile";
+import { useFeatureFocus } from "../hooks/useFeatureFocus";
 
 type GpuTweak = {
   id: string;
@@ -50,7 +51,7 @@ const STATUS_CLS: Record<string, string> = {
   unknown:     "st-unknown",
 };
 
-export default function GpuTweaks({ admin }: { admin: boolean }) {
+export default function GpuTweaks({ admin, focusId }: { admin: boolean; focusId?: string }) {
   const { t, lang } = useLang();
   const [data, setData]   = useState<ScanData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -58,6 +59,7 @@ export default function GpuTweaks({ admin }: { admin: boolean }) {
   const [log, setLog]     = useState<string[]>([]);
   const [open, setOpen]   = useState<string | null>(null);
   const [err, setErr]     = useState("");
+  useFeatureFocus(focusId, !!data);
   const [pendingApply, setPendingApply] = useState<string | null>(null);
   const profile = useHwProfile();
 
@@ -256,7 +258,7 @@ export default function GpuTweaks({ admin }: { admin: boolean }) {
                   const awaitingConfirm = requiresConfirm && pendingApply !== tw.id;
 
                   return (
-                    <div className="tweak" key={tw.id} style={{ opacity: blocked ? 0.5 : 1 }}>
+                    <div className="tweak" key={tw.id} data-focus-id={tw.id} style={{ opacity: blocked ? 0.5 : 1 }}>
                       <div className="tweak-head">
                         <span
                           className="tweak-name"

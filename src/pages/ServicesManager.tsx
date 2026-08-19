@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { Card, Spinner, Badge } from "../components/ui";
 import { useLang } from "../i18n";
+import { useFeatureFocus } from "../hooks/useFeatureFocus";
 
 type Service = {
   name: string; displayName: string; status: string;
@@ -13,7 +14,7 @@ const STATUS_CLS: Record<string, string> = {
 };
 const START_OPTIONS = ["Automatic", "AutomaticDelayedStart", "Manual", "Disabled"];
 
-export default function ServicesManager({ admin }: { admin: boolean }) {
+export default function ServicesManager({ admin, focusId }: { admin: boolean; focusId?: string }) {
   const { t } = useLang();
   const [services, setServices] = useState<Service[]>([]);
   const [loading, setLoading]   = useState(true);
@@ -22,6 +23,7 @@ export default function ServicesManager({ admin }: { admin: boolean }) {
   const [busy, setBusy]         = useState<string | null>(null);
   const [err, setErr]           = useState("");
   const [log, setLog]           = useState<string[]>([]);
+  useFeatureFocus(focusId, services.length > 0);
 
   const push = (m: string) =>
     setLog(l => [`[${new Date().toLocaleTimeString()}] ${m}`, ...l.slice(0, 99)]);
@@ -131,7 +133,7 @@ export default function ServicesManager({ admin }: { admin: boolean }) {
             const isBusy = busy === key + "_startup" || busy === key + "_ctrl";
             const running = svc.status === "Running";
             return (
-              <div className="svc-row" key={key}>
+              <div className="svc-row" key={key} data-focus-id={svc.name}>
                 <div className="svc-main">
                   <span className="svc-name">{svc.displayName}</span>
                   <span className="muted svc-sname">({svc.name})</span>

@@ -479,3 +479,10 @@ pre, code, .svc-desc { user-select: text; -webkit-user-select: text; }
   .tbl { display: block; overflow-x: auto; }
   .tool-head { flex-wrap: wrap; }
 }
+
+/* UI: deep-linked feature highlight (shared across tools) */
+.feature-focus { animation: feature-flash 2.2s ease; }
+@keyframes feature-flash {
+  0%, 60% { outline: 2px solid var(--accent); outline-offset: 2px; box-shadow: 0 0 0 3px rgba(109,141,255,.35); }
+  100% { outline: none; box-shadow: none; }
+}
