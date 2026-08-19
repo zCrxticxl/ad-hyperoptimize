@@ -134,46 +134,55 @@ $out | ConvertTo-Json -Depth 4 -Compress
 
 fn compute_profile(mut data: Value) -> Value {
     // ── read raw fields ──────────────────────────────────────────────────────
-    let cpu_name    = data["cpu"]["name"].as_str().unwrap_or("").to_lowercase();
-    let cpu_cores   = data["cpu"]["cores"].as_i64().unwrap_or(4);
-    let gpu_name    = data["gpu"]["name"].as_str().unwrap_or("").to_lowercase();
-    let gpu_vram    = data["gpu"]["vramMb"].as_i64().unwrap_or(0);
-    let ram_total   = data["ram"]["totalMb"].as_i64().unwrap_or(0);
-    let is_laptop   = data["isLaptop"].as_bool().unwrap_or(false);
-    let is_wifi     = data["isWifi"].as_bool().unwrap_or(false);
-    let has_hdd     = data["storage"]["hasHdd"].as_bool().unwrap_or(false);
-    let has_nvme    = data["storage"]["hasNvme"].as_bool().unwrap_or(false);
-    let has_ssd     = data["storage"]["hasSsd"].as_bool().unwrap_or(false);
+    let cpu_name = data["cpu"]["name"].as_str().unwrap_or("").to_lowercase();
+    let cpu_cores = data["cpu"]["cores"].as_i64().unwrap_or(4);
+    let gpu_name = data["gpu"]["name"].as_str().unwrap_or("").to_lowercase();
+    let gpu_vram = data["gpu"]["vramMb"].as_i64().unwrap_or(0);
+    let ram_total = data["ram"]["totalMb"].as_i64().unwrap_or(0);
+    let is_laptop = data["isLaptop"].as_bool().unwrap_or(false);
+    let is_wifi = data["isWifi"].as_bool().unwrap_or(false);
+    let has_hdd = data["storage"]["hasHdd"].as_bool().unwrap_or(false);
+    let has_nvme = data["storage"]["hasNvme"].as_bool().unwrap_or(false);
+    let has_ssd = data["storage"]["hasSsd"].as_bool().unwrap_or(false);
 
     // ── vendor flags ─────────────────────────────────────────────────────────
-    let is_nvidia   = gpu_name.contains("nvidia") || gpu_name.contains("geforce") ||
-                      gpu_name.contains("gtx") || gpu_name.contains("rtx") || gpu_name.contains("quadro");
-    let is_amd_gpu  = gpu_name.contains("amd") || gpu_name.contains("radeon");
-    let is_intel_gpu= gpu_name.contains("intel") && !gpu_name.contains("core");
-    let is_arc      = gpu_name.contains("arc");
-    let is_integrated = (is_intel_gpu && !is_arc) ||
-                        (gpu_name.contains("vega") && !gpu_name.contains("radeon rx vega")) ||
-                        gpu_vram < 512;
+    let is_nvidia = gpu_name.contains("nvidia")
+        || gpu_name.contains("geforce")
+        || gpu_name.contains("gtx")
+        || gpu_name.contains("rtx")
+        || gpu_name.contains("quadro");
+    let is_amd_gpu = gpu_name.contains("amd") || gpu_name.contains("radeon");
+    let is_intel_gpu = gpu_name.contains("intel") && !gpu_name.contains("core");
+    let is_arc = gpu_name.contains("arc");
+    let is_integrated = (is_intel_gpu && !is_arc)
+        || (gpu_name.contains("vega") && !gpu_name.contains("radeon rx vega"))
+        || gpu_vram < 512;
 
     // detect older architecture by name patterns
-    let is_older_nvidia = is_nvidia && (
-        gpu_name.contains("gtx 10") || gpu_name.contains("gtx 9") ||
-        gpu_name.contains("gtx 8")  || gpu_name.contains("gtx 7") ||
-        gpu_name.contains("gtx 6")  || gpu_name.contains("gtx 745") ||
-        gpu_name.contains("gtx 750")
-    );
-    let is_older_amd = is_amd_gpu && (
-        gpu_name.contains("rx 5") || gpu_name.contains("rx 4") ||
-        gpu_name.contains("r9 ")  || gpu_name.contains("r7 ") ||
-        gpu_name.contains("r5 ")
-    );
+    let is_older_nvidia = is_nvidia
+        && (gpu_name.contains("gtx 10")
+            || gpu_name.contains("gtx 9")
+            || gpu_name.contains("gtx 8")
+            || gpu_name.contains("gtx 7")
+            || gpu_name.contains("gtx 6")
+            || gpu_name.contains("gtx 745")
+            || gpu_name.contains("gtx 750"));
+    let is_older_amd = is_amd_gpu
+        && (gpu_name.contains("rx 5")
+            || gpu_name.contains("rx 4")
+            || gpu_name.contains("r9 ")
+            || gpu_name.contains("r7 ")
+            || gpu_name.contains("r5 "));
     let is_older_arch = is_older_nvidia || is_older_amd;
 
     // ── CPU tier ─────────────────────────────────────────────────────────────
     let cpu_tier = if cpu_cores <= 2
-        || cpu_name.contains("celeron") || cpu_name.contains("pentium")
-        || cpu_name.contains("atom")    || cpu_name.contains("n3")
-        || cpu_name.contains("n4")      || cpu_name.contains("n5")
+        || cpu_name.contains("celeron")
+        || cpu_name.contains("pentium")
+        || cpu_name.contains("atom")
+        || cpu_name.contains("n3")
+        || cpu_name.contains("n4")
+        || cpu_name.contains("n5")
     {
         "budget"
     } else if cpu_cores <= 6 {
@@ -186,8 +195,10 @@ fn compute_profile(mut data: Value) -> Value {
     let gpu_tier = if is_integrated {
         "integrated"
     } else if gpu_vram > 0 && gpu_vram < 2048
-        || gpu_name.contains("gt 710") || gpu_name.contains("gt 730")
-        || gpu_name.contains("gt 1030") || gpu_name.contains("gtx 750")
+        || gpu_name.contains("gt 710")
+        || gpu_name.contains("gt 730")
+        || gpu_name.contains("gt 1030")
+        || gpu_name.contains("gtx 750")
     {
         "budget"
     } else if gpu_vram < 8192 || is_older_nvidia || is_older_amd {
@@ -197,15 +208,24 @@ fn compute_profile(mut data: Value) -> Value {
     };
 
     // ── RAM tier ─────────────────────────────────────────────────────────────
-    let ram_tier = if ram_total > 0 && ram_total < 8192 { "low" }
-                   else if ram_total < 32768            { "ok"  }
-                   else                                 { "good" };
+    let ram_tier = if ram_total > 0 && ram_total < 8192 {
+        "low"
+    } else if ram_total < 32768 {
+        "ok"
+    } else {
+        "good"
+    };
 
     // ── Storage tier ─────────────────────────────────────────────────────────
-    let storage_tier = if has_nvme { "nvme" }
-                       else if has_ssd { "sata_ssd" }
-                       else if has_hdd { "hdd" }
-                       else { "unknown" };
+    let storage_tier = if has_nvme {
+        "nvme"
+    } else if has_ssd {
+        "sata_ssd"
+    } else if has_hdd {
+        "hdd"
+    } else {
+        "unknown"
+    };
 
     // ── Warnings ─────────────────────────────────────────────────────────────
     let mut warnings: Vec<Value> = Vec::new();
@@ -468,14 +488,14 @@ fn compute_profile(mut data: Value) -> Value {
         "This plan wasn't created by Windows or this app — its Advanced Power Settings (min processor state, Core Parking, Boost Mode) are unknown and may already be forcing max CPU clock 24/7. Combined with GPU clock-lock tweaks this can cause unexpected FPS regressions. Check Power Options → Change plan settings → Change advanced power settings before trusting it for gaming.");
 
     // ── attach computed fields ────────────────────────────────────────────────
-    data["cpu"]["tier"]        = json!(cpu_tier);
-    data["gpu"]["tier"]        = json!(gpu_tier);
-    data["gpu"]["isIntegrated"]= json!(is_integrated);
+    data["cpu"]["tier"] = json!(cpu_tier);
+    data["gpu"]["tier"] = json!(gpu_tier);
+    data["gpu"]["isIntegrated"] = json!(is_integrated);
     data["gpu"]["isOlderArch"] = json!(is_older_arch);
-    data["ram"]["tier"]        = json!(ram_tier);
-    data["storage"]["tier"]    = json!(storage_tier);
-    data["warnings"]           = json!(warnings);
-    data["tweakRisks"]         = Value::Object(tweak_risks);
+    data["ram"]["tier"] = json!(ram_tier);
+    data["storage"]["tier"] = json!(storage_tier);
+    data["warnings"] = json!(warnings);
+    data["tweakRisks"] = Value::Object(tweak_risks);
 
     data
 }

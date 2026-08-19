@@ -33,26 +33,50 @@ struct Finding {
     params: Value,
 }
 
-fn f(severity: u8, code: &'static str, title: &str, detail: String, rec: &str, tweaks: Vec<&'static str>, params: Value) -> Finding {
-    Finding { severity, code, title: title.into(), detail, recommendation: rec.into(), tweak_ids: tweaks, params }
+fn f(
+    severity: u8,
+    code: &'static str,
+    title: &str,
+    detail: String,
+    rec: &str,
+    tweaks: Vec<&'static str>,
+    params: Value,
+) -> Finding {
+    Finding {
+        severity,
+        code,
+        title: title.into(),
+        detail,
+        recommendation: rec.into(),
+        tweak_ids: tweaks,
+        params,
+    }
 }
 
 pub fn analyze(scan: &Value, security: &Value, cleanup: &Value) -> Value {
     let mut findings: Vec<Finding> = Vec::new();
 
-    // RAM pressure
-    if let (Some(total), Some(free)) = (
-        scan["os"]["TotalVisibleMemorySize"].as_u64(),
-        scan["os"]["FreePhysicalMemory"].as_u64(),
-    ) {
-        let used_pct = 100.0 - (free as f64 / total as f64 * 100.0);
-        if used_pct > 85.0 {
-            let total_gb = total as f64 / 1_048_576.0;
-            findings.push(f(4, "high_mem_pressure", "High memory pressure",
-                format!("{used_pct:.0}% of {total_gb:.1} GB RAM in use at scan time. Sustained >85% causes paging and stutter."),
-                "Review top memory processes on the Monitor page; consider disabling UWP background apps.",
-                vec!["background_apps_off"],
-                json!({ "pct": (used_pct).round(), "totalGb": (total_gb * 10.0).round() / 10.0 })));
+    // RAM pressure — use *available* memory (Win32_PerfFormattedData_PerfOS_
+    // Memory.AvailableBytes, which includes reclaimable standby cache) instead
+    // of FreePhysicalMemory: Windows aggressively caches, so "free" sits near
+    // zero on healthy systems and used >85% was a permanent false positive.
+    if let Some(total) = scan["os"]["TotalVisibleMemorySize"].as_u64() {
+        // AvailableBytes (Win32_PerfFormattedData_PerfOS_Memory) is in bytes;
+        // FreePhysicalMemory (fallback) is in KB — normalize both to KB.
+        let avail_kb = scan["os"]["AvailableBytes"]
+            .as_u64()
+            .map(|b| b as f64 / 1024.0)
+            .or_else(|| scan["os"]["FreePhysicalMemory"].as_u64().map(|k| k as f64));
+        if let Some(avail_kb) = avail_kb {
+            let used_pct = 100.0 - (avail_kb / total as f64 * 100.0);
+            if used_pct > 85.0 {
+                let total_gb = total as f64 / 1_048_576.0;
+                findings.push(f(4, "high_mem_pressure", "High memory pressure",
+                    format!("{used_pct:.0}% of {total_gb:.1} GB RAM in use at scan time. Sustained >85% causes paging and stutter."),
+                    "Review top memory processes on the Monitor page; consider disabling UWP background apps.",
+                    vec!["background_apps_off"],
+                    json!({ "pct": (used_pct).round(), "totalGb": (total_gb * 10.0).round() / 10.0 })));
+            }
         }
     }
 
@@ -85,18 +109,27 @@ pub fn analyze(scan: &Value, security: &Value, cleanup: &Value) -> Value {
         }
     }
 
-    // SMART health
+    // SMART health — only concrete Warning/Unhealthy states are flagged;
+    // "Unknown" is the normal value on machines/controllers without SMART
+    // exposure (virtual disks, some NVMe) and was a permanent false positive.
     if let Some(disks) = scan["disks"].as_array() {
         for d in disks {
             if let Some(h) = d["HealthStatus"].as_str() {
-                if h != "Healthy" {
-                    let name = d["FriendlyName"].as_str().unwrap_or("?");
-                    findings.push(f(5, "disk_health_warning", "Disk health warning",
-                        format!("'{name}' reports HealthStatus={h}. Back up data NOW."),
-                        "Back up immediately and check SMART details; plan replacement.",
-                        vec![],
-                        json!({ "name": name, "health": h })));
-                }
+                let (sev, code, title) = match h {
+                    "Unhealthy" => (5, "disk_health_warning", "Disk health warning"),
+                    "Warning" => (3, "disk_health_warning", "Disk health warning"),
+                    _ => continue,
+                };
+                let name = d["FriendlyName"].as_str().unwrap_or("?");
+                findings.push(f(
+                    sev,
+                    code,
+                    title,
+                    format!("'{name}' reports HealthStatus={h}. Back up data NOW."),
+                    "Back up immediately and check SMART details; plan replacement.",
+                    vec![],
+                    json!({ "name": name, "health": h }),
+                ));
             }
         }
     }
@@ -115,31 +148,47 @@ pub fn analyze(scan: &Value, security: &Value, cleanup: &Value) -> Value {
     // Device manager problems
     if let Some(devs) = scan["drivers_problem"].as_array() {
         if !devs.is_empty() {
-            findings.push(f(3, "driver_problems", "Devices with driver problems",
-                format!("{} device(s) report ConfigManager error codes (missing/broken drivers).", devs.len()),
+            findings.push(f(
+                3,
+                "driver_problems",
+                "Devices with driver problems",
+                format!(
+                    "{} device(s) report ConfigManager error codes (missing/broken drivers).",
+                    devs.len()
+                ),
                 "Open Device Manager and update or reinstall the flagged drivers.",
                 vec![],
-                json!({ "count": devs.len() })));
+                json!({ "count": devs.len() }),
+            ));
         }
     }
 
     // Defender / firewall off
     if security["defender"]["RealTimeProtectionEnabled"].as_bool() == Some(false) {
-        findings.push(f(5, "defender_off", "Real-time antivirus protection is OFF",
-            "Microsoft Defender real-time protection is disabled and no equivalent appears active.".into(),
+        findings.push(f(
+            5,
+            "defender_off",
+            "Real-time antivirus protection is OFF",
+            "Microsoft Defender real-time protection is disabled and no equivalent appears active."
+                .into(),
             "Re-enable real-time protection unless a third-party AV is intentionally handling it.",
             vec![],
-            json!({})));
+            json!({}),
+        ));
     }
     if let Some(profiles) = security["firewall"].as_array() {
         for p in profiles {
             if p["Enabled"].as_bool() == Some(false) || p["Enabled"].as_i64() == Some(0) {
                 let name = p["Name"].as_str().unwrap_or("?");
-                findings.push(f(4, "firewall_disabled", "Firewall profile disabled",
+                findings.push(f(
+                    4,
+                    "firewall_disabled",
+                    "Firewall profile disabled",
                     format!("Firewall profile '{name}' is disabled."),
                     "Re-enable the firewall profile unless intentionally managed elsewhere.",
                     vec![],
-                    json!({ "name": name })));
+                    json!({ "name": name }),
+                ));
             }
         }
     }
@@ -169,11 +218,18 @@ pub fn analyze(scan: &Value, security: &Value, cleanup: &Value) -> Value {
     // Processes running from Temp
     if let Some(arr) = security["suspicious_processes"].as_array() {
         if !arr.is_empty() {
-            findings.push(f(4, "temp_processes", "Processes executing from Temp directories",
-                format!("{} process(es) run from a Temp folder — unusual for legitimate software.", arr.len()),
+            findings.push(f(
+                4,
+                "temp_processes",
+                "Processes executing from Temp directories",
+                format!(
+                    "{} process(es) run from a Temp folder — unusual for legitimate software.",
+                    arr.len()
+                ),
                 "Investigate these on the Security page; scan with Defender if unrecognized.",
                 vec![],
-                json!({ "count": arr.len() })));
+                json!({ "count": arr.len() }),
+            ));
         }
     }
 
@@ -193,11 +249,15 @@ pub fn analyze(scan: &Value, security: &Value, cleanup: &Value) -> Value {
         let total: u64 = cats.iter().filter_map(|c| c["bytes"].as_u64()).sum();
         if total > 2_000_000_000 {
             let gb = total as f64 / 1e9;
-            findings.push(f(2, "reclaimable_space", "Significant reclaimable disk space",
+            findings.push(f(
+                2,
+                "reclaimable_space",
+                "Significant reclaimable disk space",
                 format!("{gb:.1} GB of caches/temp files can be safely removed."),
                 "Run the Cleanup page (review categories first).",
                 vec![],
-                json!({ "gb": (gb * 10.0).round() / 10.0 })));
+                json!({ "gb": (gb * 10.0).round() / 10.0 }),
+            ));
         }
     }
 
@@ -231,7 +291,10 @@ pub fn analyze(scan: &Value, security: &Value, cleanup: &Value) -> Value {
     // Non-power-plan (not High Performance or Ultimate)
     if let Some(plan) = scan["power_plan"].as_str() {
         let plan_lower = plan.to_lowercase();
-        if !plan_lower.contains("high performance") && !plan_lower.contains("ultimate") && !plan_lower.contains("h\u{00f6}chstleistung") {
+        if !plan_lower.contains("high performance")
+            && !plan_lower.contains("ultimate")
+            && !plan_lower.contains("h\u{00f6}chstleistung")
+        {
             let plan_trimmed = plan.trim();
             findings.push(f(2, "suboptimal_power_plan", "Suboptimal power plan active",
                 format!("Active power plan: '{plan_trimmed}'. Balanced/Power Saver plans throttle CPU frequency and increase latency."),
@@ -276,7 +339,8 @@ pub fn analyze(scan: &Value, security: &Value, cleanup: &Value) -> Value {
 
     // RAM speed low (DDR4 < 2666)
     {
-        let speeds: Vec<u64> = wmi_arr(&scan["ram_modules"]).into_iter()
+        let speeds: Vec<u64> = wmi_arr(&scan["ram_modules"])
+            .into_iter()
             .filter_map(|m| m["ConfiguredClockSpeed"].as_u64())
             .filter(|&s| s > 0)
             .collect();
@@ -313,10 +377,17 @@ pub fn analyze(scan: &Value, security: &Value, cleanup: &Value) -> Value {
         }
     }
 
-    // Thermal zone high (WMI returns tenths of Kelvin)
+    // Thermal zone high (WMI returns tenths of Kelvin). The ACPI sentinel
+    // 0xFFFFFFFF (≈42 749 000 000 °C) is returned on machines without a
+    // working sensor — such zones and other physically impossible readings
+    // are skipped, never reported as "critical temperature".
     {
         for zone in wmi_arr(&scan["thermal"]) {
             if let Some(temp_raw) = zone["CurrentTemperature"].as_u64() {
+                // Valid range: -50 °C to 150 °C → 2230…4230 tenths of Kelvin.
+                if temp_raw == 0 || temp_raw > 50000 {
+                    continue;
+                }
                 let celsius = (temp_raw / 10).saturating_sub(273);
                 if celsius > 90 {
                     findings.push(f(4, "critical_temp", "Critical CPU/system temperature detected",
@@ -360,10 +431,19 @@ pub fn analyze(scan: &Value, security: &Value, cleanup: &Value) -> Value {
         }
     }
 
-    findings.sort_by(|a, b| b.severity.cmp(&a.severity));
-    let health: i64 = 100 - findings.iter().map(|x| match x.severity {
-        5 => 25i64, 4 => 15, 3 => 8, 2 => 3, _ => 1
-    }).sum::<i64>().min(95);
+    findings.sort_by_key(|f| std::cmp::Reverse(f.severity));
+    let health: i64 = 100
+        - findings
+            .iter()
+            .map(|x| match x.severity {
+                5 => 25i64,
+                4 => 15,
+                3 => 8,
+                2 => 3,
+                _ => 1,
+            })
+            .sum::<i64>()
+            .min(95);
 
     // English fallback summary — used by report.rs (no i18n there) and as a
     // safety net if the frontend ever fails to localize. The live Dashboard

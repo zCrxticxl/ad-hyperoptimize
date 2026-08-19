@@ -11,6 +11,9 @@ $out = @{}
 try {
     $zones = Get-WmiObject MSAcpi_ThermalZoneTemperature -Namespace "root/wmi" -ErrorAction Stop
     $out['cpuZones'] = @($zones | ForEach-Object {
+        # 0xFFFFFFFF / 0 = no working sensor on this machine — skip, don't
+        # render an absurd temperature on the Monitor page.
+        if ($_.CurrentTemperature -eq 0 -or $_.CurrentTemperature -gt 50000) { return }
         [PSCustomObject]@{
             name  = $_.InstanceName -replace 'ACPI\\ThermalZone\\','' -replace '_\d+$',''
             tempC = [math]::Round($_.CurrentTemperature / 10.0 - 273.15, 1)
@@ -52,6 +55,8 @@ try {
     $cimT = Get-CimInstance -Namespace "root/wmi" -ClassName "MSAcpi_ThermalZoneTemperature" -ErrorAction Stop
     if ($cimT -and $out['cpuZones'].Count -eq 0) {
         $out['cpuZones'] = @($cimT | ForEach-Object {
+            # Same sentinel guard as the WMI path: 0 / 0xFFFFFFFF means no sensor.
+            if ($_.CurrentTemperature -eq 0 -or $_.CurrentTemperature -gt 50000) { return }
             [PSCustomObject]@{ name='CPU'; tempC=[math]::Round($_.CurrentTemperature/10.0-273.15,1) }
         })
     }
@@ -67,13 +72,12 @@ pub fn smart() -> Value {
 $disks = @()
 try {
     $physical = Get-PhysicalDisk -ErrorAction Stop
-    $reliability = $physical | Get-StorageReliabilityCounter -ErrorAction SilentlyContinue
     foreach ($d in $physical) {
-        $rc = $reliability | Where-Object { $_.PSComputerName -eq $d.PSComputerName -or $true } |
-            Select-Object -First 1  # best effort match
-        $rc2 = ($physical | Where-Object { $_.UniqueId -eq $d.UniqueId } |
-            Get-StorageReliabilityCounter -ErrorAction SilentlyContinue)
-        if ($rc2) { $rc = $rc2 }
+        # Match the reliability counter to the SAME disk by UniqueId — the old
+        # `-or $true` workaround attached the first disk's counter to every disk.
+        $rc = $physical | Where-Object { $_.UniqueId -eq $d.UniqueId } |
+            Get-StorageReliabilityCounter -ErrorAction SilentlyContinue |
+            Select-Object -First 1
         $health = switch ($d.HealthStatus) {
             'Healthy'  { 'good' }
             'Warning'  { 'warning' }

@@ -16,9 +16,91 @@ use winreg::RegKey;
 
 #[derive(Clone, Serialize)]
 pub enum Action {
-    RegSet { root: &'static str, path: &'static str, name: &'static str, value: RegVal },
-    Service { name: &'static str, target: &'static str },
-    Cmd { apply: &'static str, revert: &'static str },
+    RegSet {
+        root: &'static str,
+        path: &'static str,
+        name: &'static str,
+        value: RegVal,
+    },
+    Service {
+        name: &'static str,
+        target: &'static str,
+    },
+    Cmd {
+        apply: &'static str,
+        revert: &'static str,
+        /// When set, the *pre-apply* state is captured and the revert command
+        /// is built from it at apply time (exact undo instead of a hardcoded
+        /// default). Falls back to `revert` when the capture fails.
+        show: Option<ShowCapture>,
+    },
+}
+
+/// How a `Cmd` action captures its pre-apply state to build an exact revert.
+#[derive(Clone, Serialize)]
+pub enum ShowCapture {
+    /// `powercfg /getactivescheme` — revert reactivates the captured scheme.
+    PowerScheme,
+    /// `Get-NetTCPSetting AutoTuningLevelLocal` — revert maps the enum value
+    /// (English on every locale) back to the netsh token.
+    TcpAutotuning,
+    /// Registry `HibernateEnabled` — revert restores hibernation exactly.
+    HibernateState,
+}
+
+/// Extract the active power scheme GUID from `powercfg /getactivescheme`
+/// output. The header text is localized; the GUID itself is not.
+#[cfg(any(windows, test))]
+fn parse_power_scheme(out: &str) -> Option<String> {
+    out.split_whitespace()
+        .find(|t| crate::ps::is_guid(t))
+        .map(|g| format!("powercfg /setactive {g}"))
+}
+
+/// Map `Get-NetTCPSetting` AutoTuningLevelLocal enum output (English on every
+/// locale) to the corresponding netsh token.
+#[cfg(any(windows, test))]
+fn parse_tcp_autotuning(out: &str) -> Option<String> {
+    let v = out.trim().to_ascii_lowercase();
+    match v.as_str() {
+        "disabled" | "highlyrestricted" | "restricted" | "normal" | "experimental" => {
+            Some(format!("netsh int tcp set global autotuninglevel={v}"))
+        }
+        _ => None,
+    }
+}
+
+/// Run a capture and build the exact revert command for it.
+#[cfg(windows)]
+fn capture_revert(cap: &ShowCapture) -> Option<String> {
+    match cap {
+        ShowCapture::PowerScheme => {
+            let out = run_cmdline("powercfg /getactivescheme").ok()?;
+            parse_power_scheme(out.as_str())
+        }
+        ShowCapture::TcpAutotuning => {
+            // Get-NetTCPSetting is a PowerShell cmdlet, not an executable —
+            // it must run through ps::run (run_cmdline would try to spawn it
+            // directly and fail).
+            let out = crate::ps::run(
+                "Get-NetTCPSetting -SettingName Internet | Select-Object -ExpandProperty AutoTuningLevelLocal",
+            )
+            .ok()?;
+            parse_tcp_autotuning(out.as_str())
+        }
+        ShowCapture::HibernateState => {
+            let prev = reg_read(
+                "HKLM",
+                "SYSTEM\\CurrentControlSet\\Control\\Power",
+                "HibernateEnabled",
+            )?;
+            match prev {
+                RegVal::Dword(1) => Some("powercfg /h on".into()),
+                RegVal::Dword(0) => Some("powercfg /h off".into()),
+                _ => None,
+            }
+        }
+    }
 }
 
 #[derive(Clone, Serialize)]
@@ -50,6 +132,7 @@ pub fn catalog() -> Vec<Tweak> {
             actions: vec![Action::Cmd {
                 apply: "powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c",
                 revert: "powercfg /setactive 381b4222-f694-41f0-9685-ff5bb260df2e",
+                show: Some(ShowCapture::PowerScheme),
             }],
         },
         Tweak {
@@ -155,7 +238,11 @@ pub fn catalog() -> Vec<Tweak> {
             risk: "Low",
             requires_admin: true,
             reversible: true,
-            actions: vec![Action::Cmd { apply: "powercfg /h off", revert: "powercfg /h on" }],
+            actions: vec![Action::Cmd {
+                apply: "powercfg /h off",
+                revert: "powercfg /h on",
+                show: Some(ShowCapture::HibernateState),
+            }],
         },
         Tweak {
             id: "menu_delay_fast",
@@ -437,8 +524,9 @@ pub fn catalog() -> Vec<Tweak> {
                 Action::Cmd {
                     apply: "powercfg /setacvalueindex scheme_current 2a737441-1930-4402-8d77-b2bebba308a3 48e6b7a6-50f5-4782-a5d4-53bb8f07e226 0",
                     revert: "powercfg /setacvalueindex scheme_current 2a737441-1930-4402-8d77-b2bebba308a3 48e6b7a6-50f5-4782-a5d4-53bb8f07e226 1",
+                    show: None,
                 },
-                Action::Cmd { apply: "powercfg /setactive scheme_current", revert: "powercfg /setactive scheme_current" },
+                Action::Cmd { apply: "powercfg /setactive scheme_current", revert: "powercfg /setactive scheme_current", show: None },
             ],
         },
         Tweak {
@@ -479,8 +567,9 @@ pub fn catalog() -> Vec<Tweak> {
                 Action::Cmd {
                     apply: "powercfg /setacvalueindex scheme_current 54533251-82be-4824-96c1-47b60b740d00 0cc5b647-c1df-4637-891a-dec35c318583 100",
                     revert: "powercfg /setacvalueindex scheme_current 54533251-82be-4824-96c1-47b60b740d00 0cc5b647-c1df-4637-891a-dec35c318583 0",
+                    show: None,
                 },
-                Action::Cmd { apply: "powercfg /setactive scheme_current", revert: "powercfg /setactive scheme_current" },
+                Action::Cmd { apply: "powercfg /setactive scheme_current", revert: "powercfg /setactive scheme_current", show: None },
             ],
         },
         Tweak {
@@ -493,9 +582,11 @@ pub fn catalog() -> Vec<Tweak> {
             risk: "Low",
             requires_admin: true,
             reversible: true,
-            actions: vec![Action::Cmd {
-                apply: "fsutil behavior set disablelastaccess 1",
-                revert: "fsutil behavior set disablelastaccess 0",
+            actions: vec![Action::RegSet {
+                root: "HKLM",
+                path: "SYSTEM\\CurrentControlSet\\Control\\FileSystem",
+                name: "NtfsDisableLastAccessUpdate",
+                value: RegVal::Dword(1),
             }],
         },
         Tweak {
@@ -508,9 +599,11 @@ pub fn catalog() -> Vec<Tweak> {
             risk: "Low",
             requires_admin: true,
             reversible: true,
-            actions: vec![Action::Cmd {
-                apply: "fsutil behavior set disable8dot3 1",
-                revert: "fsutil behavior set disable8dot3 0",
+            actions: vec![Action::RegSet {
+                root: "HKLM",
+                path: "SYSTEM\\CurrentControlSet\\Control\\FileSystem",
+                name: "NtfsDisable8dot3NameCreation",
+                value: RegVal::Dword(1),
             }],
         },
         Tweak {
@@ -705,6 +798,7 @@ pub fn catalog() -> Vec<Tweak> {
                 Action::Cmd {
                     apply: r"powershell -NoProfile -WindowStyle Hidden -Command Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces\*' | ForEach-Object { Set-ItemProperty -Path $_.PSPath -Name TcpAckFrequency -Value 1 -Type DWord -Force -EA SilentlyContinue; Set-ItemProperty -Path $_.PSPath -Name TCPNoDelay -Value 1 -Type DWord -Force -EA SilentlyContinue }",
                     revert: r"powershell -NoProfile -WindowStyle Hidden -Command Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces\*' | ForEach-Object { Remove-ItemProperty -Path $_.PSPath -Name TcpAckFrequency -EA SilentlyContinue; Remove-ItemProperty -Path $_.PSPath -Name TCPNoDelay -EA SilentlyContinue }",
+                    show: None,
                 },
             ],
         },
@@ -764,6 +858,7 @@ pub fn catalog() -> Vec<Tweak> {
                 Action::Cmd {
                     apply:  "netsh int tcp set global autotuninglevel=normal",
                     revert: "netsh int tcp set global autotuninglevel=normal",
+                    show: Some(ShowCapture::TcpAutotuning),
                 },
             ],
         },
@@ -780,7 +875,8 @@ pub fn catalog() -> Vec<Tweak> {
             actions: vec![
                 Action::Cmd {
                     apply:  "netsh int tcp set global rss=enabled",
-                    revert: "netsh int tcp set global rss=enabled",
+                    revert: "netsh int tcp set global rss=default",
+                    show: None,
                 },
             ],
         },
@@ -791,7 +887,11 @@ pub fn catalog() -> Vec<Tweak> {
 
 #[cfg(windows)]
 fn hive(root: &str) -> RegKey {
-    RegKey::predef(if root == "HKLM" { HKEY_LOCAL_MACHINE } else { HKEY_CURRENT_USER })
+    RegKey::predef(if root == "HKLM" {
+        HKEY_LOCAL_MACHINE
+    } else {
+        HKEY_CURRENT_USER
+    })
 }
 
 #[cfg(windows)]
@@ -808,7 +908,9 @@ fn reg_read(root: &str, path: &str, name: &str) -> Option<RegVal> {
 
 #[cfg(windows)]
 fn reg_write(root: &str, path: &str, name: &str, val: &RegVal) -> Result<(), String> {
-    let (key, _) = hive(root).create_subkey(path).map_err(|e| format!("open {root}\\{path}: {e}"))?;
+    let (key, _) = hive(root)
+        .create_subkey(path)
+        .map_err(|e| format!("open {root}\\{path}: {e}"))?;
     match val {
         RegVal::Dword(d) => key.set_value(name, d),
         RegVal::Str(s) => key.set_value(name, s),
@@ -852,12 +954,27 @@ fn service_set_start(name: &str, mode: &str) -> Result<(), String> {
 }
 
 fn run_cmdline(line: &str) -> Result<(), String> {
+    // PowerShell wrapper lines (`powershell … -Command <expr>` from ps_expr
+    // and the TCP tweak one-liners) pass the expression as ONE -Command
+    // argument via ps::run, so `$`, quotes and multi-space segments stay
+    // literal instead of being whitespace-split and re-joined by powershell.
+    if line
+        .split_whitespace()
+        .next()
+        .is_some_and(|t| t.eq_ignore_ascii_case("powershell"))
+    {
+        if let Some(pos) = line.find(" -Command ") {
+            let script = &line[pos + " -Command ".len()..];
+            return crate::ps::run(script).map(|_| ());
+        }
+    }
     let mut parts = line.split_whitespace();
     let exe = parts.next().ok_or("empty command")?;
     let args: Vec<&str> = parts.collect();
     crate::ps::exec(exe, &args).map(|_| ())
 }
 
+#[cfg(windows)]
 fn vals_eq(a: &RegVal, b: &RegVal) -> bool {
     matches!((a, b), (RegVal::Dword(x), RegVal::Dword(y)) if x == y)
         || matches!((a, b), (RegVal::Str(x), RegVal::Str(y)) if x == y)
@@ -869,18 +986,22 @@ fn vals_eq(a: &RegVal, b: &RegVal) -> bool {
 // catalog. Used by the force-revert path when no journal entry is available.
 fn service_default(name: &str) -> &'static str {
     match name {
-        "DiagTrack"                                => "Automatic",
-        "SysMain"                                  => "Automatic",
-        "MapsBroker"                               => "Automatic",
-        "TrkWks"                                   => "Automatic",
-        "WSearch"                                  => "Automatic",
+        "DiagTrack" => "Automatic",
+        "SysMain" => "Automatic",
+        "MapsBroker" => "Automatic",
+        "TrkWks" => "Automatic",
+        "WSearch" => "Automatic",
         // These are Manual by default — our tweak sets them to Disabled.
-        "XblAuthManager" | "XblGameSave"
-        | "XboxNetApiSvc" | "RemoteRegistry"
-        | "lfsvc" | "Fax" | "wisvc"
+        "XblAuthManager"
+        | "XblGameSave"
+        | "XboxNetApiSvc"
+        | "RemoteRegistry"
+        | "lfsvc"
+        | "Fax"
+        | "wisvc"
         | "diagnosticshub.standardcollector.service"
-        | "WMPNetworkSvc"                          => "Manual",
-        _                                          => "Manual", // safe fallback
+        | "WMPNetworkSvc" => "Manual",
+        _ => "Manual", // safe fallback
     }
 }
 
@@ -918,6 +1039,7 @@ pub fn list_with_status() -> Value {
     json!(out)
 }
 
+#[cfg_attr(not(windows), allow(unused_variables))]
 fn detect_status(t: &Tweak) -> &'static str {
     #[cfg(windows)]
     {
@@ -925,7 +1047,12 @@ fn detect_status(t: &Tweak) -> &'static str {
         let mut matching = 0;
         for a in &t.actions {
             match a {
-                Action::RegSet { root, path, name, value } => {
+                Action::RegSet {
+                    root,
+                    path,
+                    name,
+                    value,
+                } => {
                     checkable += 1;
                     if let Some(cur) = reg_read(root, path, name) {
                         if vals_eq(&cur, value) {
@@ -987,7 +1114,12 @@ pub fn apply(tweak_id: &str) -> Result<Value, String> {
     for a in &t.actions {
         match a {
             #[cfg(windows)]
-            Action::RegSet { root, path, name, value } => items.push(ChangeItem::Registry {
+            Action::RegSet {
+                root,
+                path,
+                name,
+                value,
+            } => items.push(ChangeItem::Registry {
                 root: root.to_string(),
                 path: path.to_string(),
                 name: name.to_string(),
@@ -1001,10 +1133,23 @@ pub fn apply(tweak_id: &str) -> Result<Value, String> {
                 prev: service_get_start(name)?,
                 new: target.to_string(),
             }),
-            Action::Cmd { apply, revert } => items.push(ChangeItem::Command {
-                applied: apply.to_string(),
-                revert: revert.to_string(),
-            }),
+            Action::Cmd {
+                apply,
+                revert,
+                show,
+            } => {
+                let revert_actual = match show {
+                    #[cfg(windows)]
+                    Some(cap) => capture_revert(cap).unwrap_or_else(|| revert.to_string()),
+                    #[cfg(not(windows))]
+                    Some(_) => revert.to_string(),
+                    None => revert.to_string(),
+                };
+                items.push(ChangeItem::Command {
+                    applied: apply.to_string(),
+                    revert: revert_actual,
+                });
+            }
         }
     }
 
@@ -1020,7 +1165,9 @@ pub fn apply(tweak_id: &str) -> Result<Value, String> {
         backup_files: backups,
     })?;
 
-    // 4. Apply. On failure, roll back what we already changed.
+    // 4. Apply. On failure, roll back what we already changed and mark the
+    // write-ahead entry reverted, so the UI never offers an undo for a tweak
+    // that was never applied.
     let mut done: Vec<&ChangeItem> = Vec::new();
     for item in &items {
         let res = apply_item(item);
@@ -1028,6 +1175,12 @@ pub fn apply(tweak_id: &str) -> Result<Value, String> {
             for d in done.iter().rev() {
                 let _ = revert_item(d);
             }
+            let _ = safety::with_journal(|j| {
+                if let Some(en) = j.iter_mut().find(|en| en.id == entry_id) {
+                    en.reverted = true;
+                }
+                Ok(())
+            });
             return Err(format!("apply failed ({e}); changes rolled back"));
         }
         done.push(item);
@@ -1039,7 +1192,13 @@ pub fn apply(tweak_id: &str) -> Result<Value, String> {
 pub(crate) fn apply_item(item: &ChangeItem) -> Result<(), String> {
     match item {
         #[cfg(windows)]
-        ChangeItem::Registry { root, path, name, new, .. } => reg_write(root, path, name, new),
+        ChangeItem::Registry {
+            root,
+            path,
+            name,
+            new,
+            ..
+        } => reg_write(root, path, name, new),
         #[cfg(not(windows))]
         ChangeItem::Registry { .. } => Err("Windows only".into()),
         ChangeItem::ServiceStartup { service, new, .. } => service_set_start(service, new),
@@ -1050,7 +1209,13 @@ pub(crate) fn apply_item(item: &ChangeItem) -> Result<(), String> {
 pub(crate) fn revert_item(item: &ChangeItem) -> Result<(), String> {
     match item {
         #[cfg(windows)]
-        ChangeItem::Registry { root, path, name, prev, .. } => match prev {
+        ChangeItem::Registry {
+            root,
+            path,
+            name,
+            prev,
+            ..
+        } => match prev {
             Some(v) => reg_write(root, path, name, v),
             None => reg_delete(root, path, name).or(Ok(())), // value didn't exist before
         },
@@ -1072,26 +1237,30 @@ pub(crate) fn revert_item(item: &ChangeItem) -> Result<(), String> {
 /// the user to apply-then-undo.
 pub fn revert(tweak_id: &str) -> Result<Value, String> {
     // ── 1. Journal path (precise: uses saved previous values + reg backups) ──
-    let mut journal = safety::load_journal();
-    if let Some(entry) = journal
-        .iter_mut()
-        .rev()
-        .find(|e| e.tweak_id == tweak_id && !e.reverted)
-    {
+    // Find, execute and mark atomically: a concurrent revert of the same
+    // entry sees it as already-reverted and does nothing.
+    if let Some(id) = safety::with_journal(|journal| {
+        let entry = match journal
+            .iter_mut()
+            .rev()
+            .find(|e| e.tweak_id == tweak_id && !e.reverted)
+        {
+            Some(e) => e,
+            None => return Ok(None),
+        };
         let mut errs = Vec::new();
         for item in entry.items.iter().rev() {
             if let Err(e) = revert_item(item) {
                 errs.push(e);
             }
         }
-        return if errs.is_empty() {
-            entry.reverted = true;
-            let id = entry.id.clone();
-            safety::save_journal(&journal)?;
-            Ok(json!({ "entryId": id, "status": "reverted" }))
-        } else {
-            Err(format!("partial revert, errors: {}", errs.join("; ")))
-        };
+        if !errs.is_empty() {
+            return Err(format!("partial revert, errors: {}", errs.join("; ")));
+        }
+        entry.reverted = true;
+        Ok(Some(entry.id.clone()))
+    })? {
+        return Ok(json!({ "entryId": id, "status": "reverted" }));
     }
 
     // ── 2. Force-revert path (no journal — synthesize from catalog + live state) ──
@@ -1111,7 +1280,9 @@ pub fn revert(tweak_id: &str) -> Result<Value, String> {
         let mut errs = Vec::new();
         for a in t.actions.iter().rev() {
             if let Action::Cmd { revert, .. } = a {
-                if let Err(e) = run_cmdline(revert) { errs.push(e); }
+                if let Err(e) = run_cmdline(revert) {
+                    errs.push(e);
+                }
             }
         }
         return if errs.is_empty() {
@@ -1126,7 +1297,9 @@ pub fn revert(tweak_id: &str) -> Result<Value, String> {
     for a in t.actions.iter().rev() {
         let res: Result<(), String> = match a {
             #[cfg(windows)]
-            Action::RegSet { root, path, name, .. } => {
+            Action::RegSet {
+                root, path, name, ..
+            } => {
                 // Delete the value we wrote. For all our catalog tweaks the
                 // value either didn't exist before (deletion → absent = default)
                 // or was at the Windows built-in default which also wins when
@@ -1135,12 +1308,12 @@ pub fn revert(tweak_id: &str) -> Result<Value, String> {
             }
             #[cfg(not(windows))]
             Action::RegSet { .. } => Ok(()),
-            Action::Service { name, .. } => {
-                service_set_start(name, service_default(name))
-            }
+            Action::Service { name, .. } => service_set_start(name, service_default(name)),
             Action::Cmd { revert, .. } => run_cmdline(revert),
         };
-        if let Err(e) = res { errs.push(e); }
+        if let Err(e) = res {
+            errs.push(e);
+        }
     }
 
     if errs.is_empty() {
@@ -1157,30 +1330,78 @@ pub fn revert(tweak_id: &str) -> Result<Value, String> {
 /// (Quick Boost on two different games at once) each get an independent,
 /// unambiguous undo handle.
 pub fn revert_entry(entry_id: &str) -> Result<Value, String> {
-    let mut journal = safety::load_journal();
-    let entry = journal
-        .iter_mut()
-        .find(|e| e.id == entry_id)
-        .ok_or("unknown restore token")?;
-    if entry.reverted {
-        return Err("already reverted".into());
-    }
-    let mut errs = Vec::new();
-    for item in entry.items.iter().rev() {
-        if let Err(e) = revert_item(item) {
-            errs.push(e);
+    let id = safety::with_journal(|journal| {
+        let entry = journal
+            .iter_mut()
+            .find(|e| e.id == entry_id)
+            .ok_or("unknown restore token")?;
+        if entry.reverted {
+            return Err("already reverted".into());
         }
-    }
-    if errs.is_empty() {
+        let mut errs = Vec::new();
+        for item in entry.items.iter().rev() {
+            if let Err(e) = revert_item(item) {
+                errs.push(e);
+            }
+        }
+        if !errs.is_empty() {
+            return Err(format!("partial revert, errors: {}", errs.join("; ")));
+        }
         entry.reverted = true;
-        let id = entry.id.clone();
-        safety::save_journal(&journal)?;
-        Ok(json!({ "entryId": id, "status": "reverted" }))
-    } else {
-        Err(format!("partial revert, errors: {}", errs.join("; ")))
-    }
+        Ok(entry.id.clone())
+    })?;
+    Ok(json!({ "entryId": id, "status": "reverted" }))
 }
 
 pub fn history() -> Value {
     serde_json::to_value(safety::load_journal()).unwrap_or(Value::Null)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn power_scheme_guid_is_extracted_locale_independent() {
+        // English
+        let out = "Power Scheme GUID: 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c  (High performance)";
+        assert_eq!(
+            parse_power_scheme(out),
+            Some("powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c".into())
+        );
+        // German locale — header differs, GUID is the only reliable token
+        let de = "Energieschema-GUID: 381b4222-f694-41f0-9685-ff5bb260df2e (Ausbalanciert)";
+        assert_eq!(
+            parse_power_scheme(de),
+            Some("powercfg /setactive 381b4222-f694-41f0-9685-ff5bb260df2e".into())
+        );
+    }
+
+    #[test]
+    fn power_scheme_guid_rejects_malformed_output() {
+        assert_eq!(parse_power_scheme("No scheme here"), None);
+        assert_eq!(parse_power_scheme(""), None);
+        assert_eq!(
+            parse_power_scheme("GUID: 8c5e7fda-zzbf-4a96-9a85-a6e23a8c635c"),
+            None
+        );
+    }
+
+    #[test]
+    fn tcp_autotuning_values_map_to_netsh_tokens() {
+        for (out, expect) in [
+            ("Normal", "normal"),
+            ("Disabled", "disabled"),
+            ("HighlyRestricted", "highlyrestricted"),
+            ("Restricted", "restricted"),
+            ("Experimental", "experimental"),
+        ] {
+            assert_eq!(
+                parse_tcp_autotuning(out),
+                Some(format!("netsh int tcp set global autotuninglevel={expect}"))
+            );
+        }
+        assert_eq!(parse_tcp_autotuning("SomethingElse"), None);
+        assert_eq!(parse_tcp_autotuning(""), None);
+    }
 }

@@ -4,8 +4,6 @@
 use crate::ps;
 use serde_json::{json, Value};
 
-#[cfg(windows)]
-
 /// Run a single health check and return full output + parsed result.
 pub fn run(kind: String) -> Result<Value, String> {
     if !ps::is_admin() {
@@ -14,10 +12,27 @@ pub fn run(kind: String) -> Result<Value, String> {
 
     let (label, args): (&str, Vec<&str>) = match kind.as_str() {
         "sfc" => ("SFC /scannow", vec!["sfc", "/scannow"]),
-        "dism_check"   => ("DISM CheckHealth",   vec!["DISM", "/Online", "/Cleanup-Image", "/CheckHealth"]),
-        "dism_scan"    => ("DISM ScanHealth",    vec!["DISM", "/Online", "/Cleanup-Image", "/ScanHealth"]),
-        "dism_restore" => ("DISM RestoreHealth", vec!["DISM", "/Online", "/Cleanup-Image", "/RestoreHealth"]),
-        "dism_component" => ("DISM ComponentCleanup", vec!["DISM", "/Online", "/Cleanup-Image", "/StartComponentCleanup"]),
+        "dism_check" => (
+            "DISM CheckHealth",
+            vec!["DISM", "/Online", "/Cleanup-Image", "/CheckHealth"],
+        ),
+        "dism_scan" => (
+            "DISM ScanHealth",
+            vec!["DISM", "/Online", "/Cleanup-Image", "/ScanHealth"],
+        ),
+        "dism_restore" => (
+            "DISM RestoreHealth",
+            vec!["DISM", "/Online", "/Cleanup-Image", "/RestoreHealth"],
+        ),
+        "dism_component" => (
+            "DISM ComponentCleanup",
+            vec![
+                "DISM",
+                "/Online",
+                "/Cleanup-Image",
+                "/StartComponentCleanup",
+            ],
+        ),
         _ => return Err(format!("Unknown check kind: {kind}")),
     };
 
@@ -39,7 +54,10 @@ if ($summary) { $summary } else { "SFC abgeschlossen (Exit: $($job.ExitCode)). L
         format!("& {} 2>&1 | Out-String", args.join(" "))
     };
 
-    let output = ps::run(&script).map_err(|e| e)?;
+    // SFC /scannow and DISM checks/repairs legitimately take minutes — the
+    // short 30s command timeout would kill them mid-operation, so use the
+    // long (20 min) timeout here.
+    let output = ps::run_long(&script)?;
     let clean: String = output
         .lines()
         .map(|l| l.rsplit('\r').next().unwrap_or("").to_string())
@@ -61,7 +79,9 @@ fn parse_result(kind: &str, output: &str) -> &'static str {
     let lo = output.to_lowercase();
     match kind {
         "sfc" => {
-            if lo.contains("no integrity violations") || lo.contains("did not find any integrity violations") {
+            if lo.contains("no integrity violations")
+                || lo.contains("did not find any integrity violations")
+            {
                 "clean"
             } else if lo.contains("found corrupt files and successfully repaired") {
                 "repaired"
@@ -74,7 +94,9 @@ fn parse_result(kind: &str, output: &str) -> &'static str {
         "dism_check" | "dism_scan" => {
             if lo.contains("no component store corruption detected") {
                 "clean"
-            } else if lo.contains("component store is repairable") || lo.contains("corruption was detected") {
+            } else if lo.contains("component store is repairable")
+                || lo.contains("corruption was detected")
+            {
                 "corrupt"
             } else if lo.contains("the operation completed successfully") {
                 "clean"
@@ -83,7 +105,9 @@ fn parse_result(kind: &str, output: &str) -> &'static str {
             }
         }
         "dism_restore" => {
-            if lo.contains("the restore operation completed successfully") || lo.contains("the operation completed successfully") {
+            if lo.contains("the restore operation completed successfully")
+                || lo.contains("the operation completed successfully")
+            {
                 "repaired"
             } else if lo.contains("the source files could not be found") {
                 "error"
@@ -91,9 +115,7 @@ fn parse_result(kind: &str, output: &str) -> &'static str {
                 "unknown"
             }
         }
-        "dism_component" => {
-            if lo.contains("the operation completed successfully") { "clean" } else { "unknown" }
-        }
+        "dism_component" if lo.contains("the operation completed successfully") => "clean",
         _ => "unknown",
     }
 }

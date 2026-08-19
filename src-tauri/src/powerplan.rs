@@ -22,18 +22,23 @@ $plans = $lines | Where-Object { $_ -match 'GUID:\s+([\w-]+)\s+\((.+?)\)' } | Fo
 if (-not $plans) { '[]' } else { @($plans) | ConvertTo-Json -Compress }
 "#;
 
-    let has_ultimate = match ps::run_json(script) {
-        Ok(Value::Array(ref arr)) => arr.iter().any(|p| {
-            p["guid"].as_str().unwrap_or("").contains(&ULTIMATE_GUID[..8])
-        }),
-        _ => false,
-    };
-
     let plans = match ps::run_json(script) {
         Ok(v @ Value::Array(_)) => v,
         Ok(v @ Value::Object(_)) => Value::Array(vec![v]),
         _ => Value::Array(vec![]),
     };
+
+    let has_ultimate = plans
+        .as_array()
+        .map(|arr| {
+            arr.iter().any(|p| {
+                p["guid"]
+                    .as_str()
+                    .unwrap_or("")
+                    .contains(&ULTIMATE_GUID[..8])
+            })
+        })
+        .unwrap_or(false);
 
     json!({
         "plans": plans,
@@ -42,13 +47,24 @@ if (-not $plans) { '[]' } else { @($plans) | ConvertTo-Json -Compress }
     })
 }
 
+/// Canonical 36-char GUID shape: 8-4-4-4-12 hex digits with dashes.
+fn is_guid(s: &str) -> bool {
+    let b = s.as_bytes();
+    b.len() == 36
+        && b[8] == b'-'
+        && b[13] == b'-'
+        && b[18] == b'-'
+        && b[23] == b'-'
+        && b.iter()
+            .enumerate()
+            .all(|(i, c)| matches!(i, 8 | 13 | 18 | 23) || c.is_ascii_hexdigit())
+}
+
 pub fn set_active(guid: String) -> Result<String, String> {
-    // Validate GUID format (basic)
-    if !guid.chars().all(|c| c.is_ascii_hexdigit() || c == '-') || guid.len() < 32 {
+    if !is_guid(&guid) {
         return Err(format!("Invalid GUID: {guid}"));
     }
-    let out = ps::exec("powercfg.exe", &["/setactive", &guid])
-        .map_err(|e| e)?;
+    let out = ps::exec("powercfg.exe", &["/setactive", &guid])?;
     let _ = out; // powercfg outputs nothing on success
     Ok(format!("Power plan {guid} activated"))
 }
@@ -65,9 +81,7 @@ if ($existing) {{
 }}
 "#
     );
-    ps::run(&script)
-        .map(|s| s.trim().to_string())
-        .map_err(|e| e)
+    ps::run(&script).map(|s| s.trim().to_string())
 }
 
 pub fn delete_plan(guid: String) -> Result<String, String> {
@@ -82,52 +96,53 @@ pub fn delete_plan(guid: String) -> Result<String, String> {
     if builtin.contains(&g.as_str()) {
         return Err("Cannot delete a built-in power plan.".into());
     }
-    ps::exec("powercfg.exe", &["/delete", &guid])
-        .map(|_| format!("Plan {guid} deleted"))
-        .map_err(|e| e)
+    ps::exec("powercfg.exe", &["/delete", &guid]).map(|_| format!("Plan {guid} deleted"))
 }
 
 pub fn create_custom(name: String, base_guid: String) -> Result<String, String> {
-    if name.is_empty() { return Err("Plan name cannot be empty".into()); }
-    // Duplicate the base plan then rename it
-    let safe_name = name.replace('"', "\\\"");
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("Plan name cannot be empty".into());
+    }
+    if name.len() > 128 {
+        return Err("Plan name too long (max 128 chars)".into());
+    }
+    // The name is embedded in a double-quoted PS string: reject every char
+    // that could terminate or escape the quote (`"`, `$`, backtick, `'`).
+    if !ps::is_safe_ident(name) {
+        return Err("Plan name contains unsupported characters".into());
+    }
+    if !is_guid(&base_guid) {
+        return Err(format!("Invalid base plan GUID: {base_guid}"));
+    }
     let script = format!(
         r#"
 $out = powercfg /duplicatescheme {base_guid} 2>&1
 if ($out -match 'GUID:\s+([\w-]+)') {{
     $newGuid = $Matches[1].Trim()
-    powercfg /changename $newGuid "{safe_name}" 2>$null
+    powercfg /changename $newGuid "{name}" 2>$null
     "Created: $newGuid"
 }} else {{
     throw "Failed to duplicate scheme: $out"
 }}
 "#
     );
-    ps::run(&script)
-        .map(|s| s.trim().to_string())
-        .map_err(|e| e)
+    ps::run(&script).map(|s| s.trim().to_string())
 }
 
-#[allow(dead_code)]
-pub fn get_plan_details(guid: String) -> Value {
-    // Get individual plan settings via powercfg /query
-    let script = format!(
-        r#"
-$q = powercfg /query {guid} 2>$null
-$settings = @()
-$current = $null
-$q | ForEach-Object {{
-    if ($_ -match 'Power Setting GUID:\s+([\w-]+)\s+\((.+?)\)') {{
-        $current = [PSCustomObject]@{{ guid=$Matches[1]; name=$Matches[2]; ac=$null; dc=$null }}
-    }} elseif ($current -and $_ -match 'Current AC Power Setting Index: (0x[\w]+)') {{
-        $current.ac = [Convert]::ToInt64($Matches[1], 16)
-    }} elseif ($current -and $_ -match 'Current DC Power Setting Index: (0x[\w]+)') {{
-        $current.dc = [Convert]::ToInt64($Matches[1], 16)
-        $settings += $current; $current = $null
-    }}
-}}
-[PSCustomObject]@{{ guid='{guid}'; settings=@($settings) }} | ConvertTo-Json -Depth 3 -Compress
-"#
-    );
-    ps::run_json(&script).unwrap_or_else(|e| json!({ "error": e }))
+#[cfg(test)]
+mod tests {
+    use super::is_guid;
+
+    #[test]
+    fn guid_validation() {
+        assert!(is_guid("381b4222-f694-41f0-9685-ff5bb260df2e"));
+        assert!(is_guid("E9A42B02-D5DF-448D-AA00-03F14749EB61"));
+        assert!(!is_guid(""));
+        assert!(!is_guid("381b4222-f694-41f0-9685"));
+        assert!(!is_guid("381b4222f69441f09685ff5bb260df2e"));
+        assert!(!is_guid("381b4222-f694-41f0-9685-ff5bb260df2e; calc"));
+        assert!(!is_guid("381b4222_f694_41f0_9685_ff5bb260df2e"));
+        assert!(!is_guid("g81b4222-f694-41f0-9685-ff5bb260df2e"));
+    }
 }

@@ -15,7 +15,13 @@ pub fn full_scan() -> Value {
     json!({
         "timestamp": chrono::Local::now().to_rfc3339(),
         "os": section(
-            "Get-CimInstance Win32_OperatingSystem | Select-Object Caption,Version,BuildNumber,OSArchitecture,InstallDate,LastBootUpTime,TotalVisibleMemorySize,FreePhysicalMemory"
+            "$os = Get-CimInstance Win32_OperatingSystem; \
+             $perf = Get-CimInstance Win32_PerfFormattedData_PerfOS_Memory; \
+             [PSCustomObject]@{ \
+               Caption=$os.Caption; Version=$os.Version; BuildNumber=$os.BuildNumber; \
+               OSArchitecture=$os.OSArchitecture; InstallDate=$os.InstallDate; \
+               LastBootUpTime=$os.LastBootUpTime; TotalVisibleMemorySize=$os.TotalVisibleMemorySize; \
+               FreePhysicalMemory=$os.FreePhysicalMemory; AvailableBytes=$perf.AvailableBytes }"
         ),
         "cpu": section(
             "Get-CimInstance Win32_Processor | Select-Object Name,NumberOfCores,NumberOfLogicalProcessors,MaxClockSpeed,CurrentClockSpeed,L2CacheSize,L3CacheSize,LoadPercentage,VirtualizationFirmwareEnabled"
@@ -99,7 +105,7 @@ pub fn event_log_summary() -> Value {
 /// DISM/SFC component health (read-only checks; repairs are user-triggered).
 pub fn component_health() -> Value {
     json!({
-        "dism_check": match ps::exec("DISM.exe", &["/Online", "/Cleanup-Image", "/CheckHealth"]) {
+        "dism_check": match ps::exec_long("DISM.exe", &["/Online", "/Cleanup-Image", "/CheckHealth"]) {
             Ok(s) => json!(s.trim()),
             Err(e) => json!({ "error": e.trim() }),
         },

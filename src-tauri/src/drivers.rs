@@ -9,10 +9,14 @@ use serde_json::{json, Value};
 fn is_inbox(manufacturer: &str, device_name: &str) -> bool {
     let m = manufacturer.to_lowercase();
     let n = device_name.to_lowercase();
-    m == "microsoft" || m.starts_with("(standard ") ||
-    n.contains("audio endpoint") || n.contains("system firmware") ||
-    n.contains("composite bus") || n.contains("microsoft basic") ||
-    n.contains("remote desktop") || n.contains("volume manager")
+    m == "microsoft"
+        || m.starts_with("(standard ")
+        || n.contains("audio endpoint")
+        || n.contains("system firmware")
+        || n.contains("composite bus")
+        || n.contains("microsoft basic")
+        || n.contains("remote desktop")
+        || n.contains("volume manager")
 }
 
 struct DriverInfo {
@@ -48,14 +52,14 @@ fn driver_info(device_class: &str, manufacturer: &str) -> DriverInfo {
             };
         }
     }
-    if cls.contains("audio") || cls.contains("sound") || cls.contains("media") {
-        if mfr.contains("realtek") {
-            return DriverInfo {
+    if (cls.contains("audio") || cls.contains("sound") || cls.contains("media"))
+        && mfr.contains("realtek")
+    {
+        return DriverInfo {
                 winget_id: Some("Realtek.RealtekHighDefinitionAudioDriver"),
                 vendor_url: "https://www.realtek.com/en/component/zoo/category/pc-audio-codecs-high-definition-audio-codecs-software",
                 label: "Realtek Audio Driver",
             };
-        }
     }
     if cls.contains("net") || cls.contains("bluetooth") {
         if mfr.contains("intel") {
@@ -125,20 +129,25 @@ $drivers | ConvertTo-Json -Compress -Depth 3
     };
 
     // Enrich with winget ID + vendor URL + inbox flag in Rust (no PS overhead)
-    let enriched: Vec<Value> = raw.into_iter().map(|mut d| {
-        let cls = d["DeviceClass"].as_str().unwrap_or("").to_string();
-        let mfr = d["Manufacturer"].as_str().unwrap_or("").to_string();
-        let name = d["DeviceName"].as_str().unwrap_or("").to_string();
-        let inbox = is_inbox(&mfr, &name);
-        let info = driver_info(&cls, &mfr);
-        d["wingetId"]   = json!(info.winget_id);
-        d["vendorUrl"]  = json!(info.vendor_url);
-        d["vendorLabel"]= json!(info.label);
-        d["inbox"]      = json!(inbox);
-        // inbox drivers shouldn't be flagged as "old"
-        if inbox { d["old"] = json!(false); }
-        d
-    }).collect();
+    let enriched: Vec<Value> = raw
+        .into_iter()
+        .map(|mut d| {
+            let cls = d["DeviceClass"].as_str().unwrap_or("").to_string();
+            let mfr = d["Manufacturer"].as_str().unwrap_or("").to_string();
+            let name = d["DeviceName"].as_str().unwrap_or("").to_string();
+            let inbox = is_inbox(&mfr, &name);
+            let info = driver_info(&cls, &mfr);
+            d["wingetId"] = json!(info.winget_id);
+            d["vendorUrl"] = json!(info.vendor_url);
+            d["vendorLabel"] = json!(info.label);
+            d["inbox"] = json!(inbox);
+            // inbox drivers shouldn't be flagged as "old"
+            if inbox {
+                d["old"] = json!(false);
+            }
+            d
+        })
+        .collect();
 
     json!({ "drivers": enriched })
 }
@@ -174,7 +183,7 @@ if ($out -match 'No applicable update') {{
 }}
 "#
     );
-    match ps::run_json(&script) {
+    match ps::run_json_long(&script) {
         Ok(v) => v,
         Err(e) => json!({ "available": false, "error": e }),
     }
@@ -192,47 +201,78 @@ pub fn install_via_winget(package_id: String) -> Result<String, String> {
     if !allowed.contains(&package_id.as_str()) {
         return Err(format!("Package ID not whitelisted: {package_id}"));
     }
-    // Try upgrade first, fall back to install
+    // Try upgrade first, fall back to install. Every branch reports the real
+    // winget exit code so failures are never presented as success.
     let script = format!(
         r#"
 $upg = winget upgrade --id '{package_id}' --source winget --accept-package-agreements --accept-source-agreements 2>&1
+$upgCode = $LASTEXITCODE
 if ($upg -match 'No applicable update|already installed') {{
     $inst = winget install --id '{package_id}' --source winget --accept-package-agreements --accept-source-agreements 2>&1
-    ($inst -join "`n").Trim()
+    $instCode = $LASTEXITCODE
+    "EXIT:$instCode`n" + ($inst -join "`n")
 }} else {{
-    ($upg -join "`n").Trim()
+    "EXIT:$upgCode`n" + ($upg -join "`n")
 }}
 "#
     );
-    ps::run(&script).map(|s| s.trim().to_string())
+    ps::run_long(&script)
+        .map(|s| {
+            let out = s.trim();
+            // winget "success" exit codes (documented in winget's
+            // APPINSTALLER_CLI_ERROR_* constants):
+            //   0             = done
+            //   -1978335212   = 0x8A150014 — already installed / no update available
+            //   -1978335189   = 0x8A15002B — package not found on this source
+            // Any other code (including 0x8A15000B-class update-blocked states)
+            // is reported as an error — honest over optimistic.
+            let exit_ok = out
+                .lines()
+                .next()
+                .map(|l| matches!(l, "EXIT:0" | "EXIT:-1978335212" | "EXIT:-1978335189"))
+                .unwrap_or(false);
+            if exit_ok {
+                Ok(out
+                    .lines()
+                    .skip(1)
+                    .collect::<Vec<_>>()
+                    .join("\n")
+                    .trim()
+                    .to_string())
+            } else {
+                Err(out.to_string())
+            }
+        })
+        .and_then(|r| r)
 }
 
 /// Open vendor download page in default browser.
 pub fn open_vendor_url(url: String) -> Result<String, String> {
-    // Whitelist URL prefixes
+    // Whitelist URL prefixes + reject PS quote characters (the url is
+    // embedded in a single-quoted Start-Process argument).
     let trusted = [
-        "https://www.nvidia.com/", "https://www.amd.com/",
-        "https://www.intel.com/", "https://www.realtek.com/",
-        "https://www.mediatek.com/", "https://www.catalog.update.microsoft.com/",
+        "https://www.nvidia.com/",
+        "https://www.amd.com/",
+        "https://www.intel.com/",
+        "https://www.realtek.com/",
+        "https://www.mediatek.com/",
+        "https://www.catalog.update.microsoft.com/",
     ];
-    if !trusted.iter().any(|p| url.starts_with(p)) {
+    if !trusted.iter().any(|p| url.starts_with(p)) || !ps::is_safe_ident(&url) {
         return Err("URL not trusted".into());
     }
     ps::run(&format!("Start-Process '{url}'")).map(|_| format!("Opened {url}"))
 }
 
 /// Update driver directly via Windows Device Manager (devcon-style via PnPUtil).
-pub fn update_via_pnputil(device_name: String) -> Result<String, String> {
-    if device_name.contains('\'') || device_name.contains('"') {
-        return Err("Invalid device name".into());
-    }
+pub fn update_via_pnputil() -> Result<String, String> {
     // pnputil /scan-devices forces WU to search for updated drivers for all devices
     let script = r#"
 $r = pnputil /scan-devices 2>&1
 if ($LASTEXITCODE -eq 0) { "Driver scan via Windows Update triggered. Open Windows Update to install." }
 else { "Error: " + ($r -join ' ') }
 "#;
-    ps::run(script).map(|s| s.trim().to_string())
+    ps::run_long(script).map(|s| s.trim().to_string())
 }
 
 pub fn open_device_manager() -> Result<String, String> {
@@ -240,5 +280,6 @@ pub fn open_device_manager() -> Result<String, String> {
 }
 
 pub fn open_windows_update() -> Result<String, String> {
-    ps::run("Start-Process 'ms-settings:windowsupdate-action'").map(|_| "Opened Windows Update".into())
+    ps::run("Start-Process 'ms-settings:windowsupdate-action'")
+        .map(|_| "Opened Windows Update".into())
 }

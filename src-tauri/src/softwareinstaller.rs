@@ -52,51 +52,80 @@ pub fn catalog() -> Value {
 
 // ── check installed ───────────────────────────────────────────────────────────
 
+/// All known winget ids from the catalog, in catalog order.
+fn catalog_ids() -> Vec<String> {
+    catalog()
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|a| a["wingetId"].as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 pub fn check_installed() -> Value {
-    // Returns map of wingetId -> bool
-    let script = r#"
-$result = @{}
-try {
+    // Build the catalog list from the Rust catalog so both sides can never drift.
+    let list = catalog_ids()
+        .iter()
+        .map(|i| format!("'{i}'"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let script = format!(
+        r#"
+$result = @{{}}
+try {{
     $installed = winget list --accept-source-agreements 2>$null
-    $catalog = @(
-        'Valve.Steam','Discord.Discord','Nvidia.GeForceExperience',
-        'AdvancedMicroDevices.AMDSoftware.Adrenalin','Intel.ArcControl',
-        'ElectronicArts.EADesktop','Blizzard.BattleNet','EpicGames.EpicGamesLauncher',
-        'GOG.Galaxy','Microsoft.GamingApp','Ubisoft.Connect',
-        'TeamSpeakSystems.TeamSpeakClient','Mumble.Mumble',
-        'Google.Chrome','Mozilla.Firefox','Brave.Brave',
-        '7zip.7zip','VideoLAN.VLC','OBSProject.OBSStudio','ShareX.ShareX',
-        'Notepad++.Notepad++','voidtools.Everything','RARLab.WinRAR',
-        'Guru3D.MSIAfterburner','REALiX.HWiNFO','CPUID.CPU-Z',
-        'TechPowerUp.GPU-Z','CrystalDewWorld.CrystalDiskMark',
-        'Geeks3D.FurMark','Piriform.Speccy'
-    )
-    foreach ($id in $catalog) {
+    $catalog = @({list})
+    foreach ($id in $catalog) {{
         $result[$id] = ($installed | Select-String ([regex]::Escape($id))) -ne $null
-    }
-} catch {}
+    }}
+}} catch {{}}
 $result | ConvertTo-Json -Compress
-"#;
-    crate::ps::run_json(script).unwrap_or_else(|_| json!({}))
+"#
+    );
+    crate::ps::run_json_long(&script).unwrap_or_else(|_| json!({}))
 }
 
 // ── install ───────────────────────────────────────────────────────────────────
 
 pub fn install_apps(winget_ids: Vec<String>, app: AppHandle) {
     std::thread::spawn(move || {
+        let known: std::collections::HashSet<String> = catalog_ids().into_iter().collect();
+        let mut seen = std::collections::HashSet::new();
         for id in &winget_ids {
-            let _ = app.emit("sw-install-progress", json!({
-                "wingetId": id,
-                "status":   "installing",
-                "message":  format!("Installing {}…", id),
-            }));
+            // The renderer must only ever send ids that exist in the catalog;
+            // anything else is rejected before it can reach PowerShell.
+            if !known.contains(id) {
+                let _ = app.emit(
+                    "sw-install-progress",
+                    json!({
+                        "wingetId": id,
+                        "status":   "error",
+                        "message":  format!("Unknown winget id: {id}"),
+                    }),
+                );
+                continue;
+            }
+            if !seen.insert(id.clone()) {
+                continue; // duplicate selection → install once
+            }
+
+            let _ = app.emit(
+                "sw-install-progress",
+                json!({
+                    "wingetId": id,
+                    "status":   "installing",
+                    "message":  format!("Installing {}…", id),
+                }),
+            );
 
             let script = format!(
                 r#"$o = winget install --id "{}" --exact --silent --accept-package-agreements --accept-source-agreements 2>&1 | Out-String; "EXIT:$($LASTEXITCODE)"; $o"#,
                 id
             );
 
-            match crate::ps::run(&script) {
+            match crate::ps::run_long(&script) {
                 Ok(out) => {
                     // Use exit code as primary indicator — language-agnostic
                     // -1978335212 = already installed, -1978335189 = no applicable upgrade
@@ -108,32 +137,56 @@ pub fn install_apps(winget_ids: Vec<String>, app: AppHandle) {
                         || out.contains("Successfully installed")
                         || out.contains("already installed")
                         || out.contains("No applicable upgrade found");
-                    let msg = out.lines()
-                        .filter(|l| !l.starts_with("EXIT:") && !l.trim().is_empty())
-                        .last()
+                    let msg = out
+                        .lines()
+                        .rfind(|l| !l.starts_with("EXIT:") && !l.trim().is_empty())
                         .unwrap_or("")
                         .trim()
                         .to_string();
-                    let _ = app.emit("sw-install-progress", json!({
-                        "wingetId": id,
-                        "status":   if success { "done" } else { "error" },
-                        "message":  msg,
-                    }));
+                    let _ = app.emit(
+                        "sw-install-progress",
+                        json!({
+                            "wingetId": id,
+                            "status":   if success { "done" } else { "error" },
+                            "message":  msg,
+                        }),
+                    );
                 }
                 Err(e) => {
-                    let _ = app.emit("sw-install-progress", json!({
-                        "wingetId": id,
-                        "status":   "error",
-                        "message":  e,
-                    }));
+                    let _ = app.emit(
+                        "sw-install-progress",
+                        json!({
+                            "wingetId": id,
+                            "status":   "error",
+                            "message":  e,
+                        }),
+                    );
                 }
             }
         }
 
-        let _ = app.emit("sw-install-progress", json!({
-            "wingetId": "__done__",
-            "status":   "all_done",
-            "message":  format!("Finished installing {} app(s)", winget_ids.len()),
-        }));
+        let _ = app.emit(
+            "sw-install-progress",
+            json!({
+                "wingetId": "__done__",
+                "status":   "all_done",
+                "message":  format!("Finished installing {} app(s)", seen.len()),
+            }),
+        );
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ps::is_safe_ident;
+
+    #[test]
+    fn every_catalog_id_is_safe_to_embed() {
+        let ids = catalog_ids();
+        assert!(!ids.is_empty());
+        for id in ids {
+            assert!(is_safe_ident(&id), "unsafe winget id in catalog: {id}");
+        }
+    }
 }

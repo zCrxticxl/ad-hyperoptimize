@@ -5,33 +5,105 @@
 //! is skipped rather than deleted.
 
 use serde_json::{json, Value};
+
+#[cfg(windows)]
 use sha2::{Digest, Sha256};
+#[cfg(windows)]
 use std::collections::HashMap;
 
 #[cfg(windows)]
-use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_ALL_ACCESS, KEY_READ, KEY_SET_VALUE};
+use winreg::enums::{
+    HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_ALL_ACCESS, KEY_READ, KEY_SET_VALUE,
+};
 #[cfg(windows)]
 use winreg::RegKey;
 
 // ── stable ID from key components ──────────────────────────────────────────
+#[cfg(windows)]
 fn make_id(parts: &[&str]) -> String {
     let mut h = Sha256::new();
-    for p in parts { h.update(p.as_bytes()); }
-    h.finalize().iter().take(8).map(|b| format!("{b:02x}")).collect()
+    for p in parts {
+        h.update(p.as_bytes());
+    }
+    h.finalize()
+        .iter()
+        .take(8)
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+/// Registry key paths are built by the scanners only; reject anything a
+/// compromised renderer could smuggle in (traversal, empty parts). Quotes
+/// are fine here: the path reaches winreg/reg.exe as an argument, never a
+/// shell, and MuiCache value names are full exe paths that may contain `'`.
+fn is_valid_key_path(p: &str) -> bool {
+    if p.is_empty() || p.len() > 1024 {
+        return false;
+    }
+    if p.starts_with('\\') || p.ends_with('\\') {
+        return false;
+    }
+    p.split('\\')
+        .all(|c| !c.is_empty() && c != "." && c != "..")
+}
+
+fn is_valid_root(root: &str) -> bool {
+    root == "HKLM" || root == "HKCU"
+}
+
+/// Structural check for a single scan entry — runs on every platform so the
+/// same validation guards the Windows deletion path and stays unit-testable.
+fn entry_is_valid(entry: &Value) -> Result<(), String> {
+    let root = entry["root"].as_str().unwrap_or("");
+    let key_path = entry["keyPath"].as_str().unwrap_or("");
+    if !is_valid_root(root) {
+        return Err("invalid root".into());
+    }
+    if !is_valid_key_path(key_path) {
+        return Err("invalid key path".into());
+    }
+    let bad_value = entry["relatedValues"]
+        .as_array()
+        .map(|arr| {
+            arr.iter().any(|v| {
+                let s = v.as_str().unwrap_or("");
+                s.is_empty() || s.len() > 1024 || s.chars().any(char::is_control)
+            })
+        })
+        .unwrap_or(false);
+    if bad_value {
+        return Err("invalid related value".into());
+    }
+    Ok(())
 }
 
 // ── environment variable expansion ─────────────────────────────────────────
 #[cfg(windows)]
 fn expand_env(s: &str) -> String {
     let pairs: &[(&str, fn() -> String)] = &[
-        ("%SYSTEMROOT%",          || std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".into())),
-        ("%WINDIR%",              || std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".into())),
-        ("%PROGRAMFILES%",        || std::env::var("ProgramFiles").unwrap_or_else(|_| "C:\\Program Files".into())),
-        ("%PROGRAMFILES(X86)%",   || std::env::var("ProgramFiles(x86)").unwrap_or_else(|_| "C:\\Program Files (x86)".into())),
-        ("%COMMONPROGRAMFILES%",  || std::env::var("CommonProgramFiles").unwrap_or_else(|_| "C:\\Program Files\\Common Files".into())),
-        ("%APPDATA%",             || std::env::var("APPDATA").unwrap_or_default()),
-        ("%LOCALAPPDATA%",        || std::env::var("LOCALAPPDATA").unwrap_or_default()),
-        ("%SYSTEMDRIVE%",         || std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into())),
+        ("%SYSTEMROOT%", || {
+            std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".into())
+        }),
+        ("%WINDIR%", || {
+            std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".into())
+        }),
+        ("%PROGRAMFILES%", || {
+            std::env::var("ProgramFiles").unwrap_or_else(|_| "C:\\Program Files".into())
+        }),
+        ("%PROGRAMFILES(X86)%", || {
+            std::env::var("ProgramFiles(x86)").unwrap_or_else(|_| "C:\\Program Files (x86)".into())
+        }),
+        ("%COMMONPROGRAMFILES%", || {
+            std::env::var("CommonProgramFiles")
+                .unwrap_or_else(|_| "C:\\Program Files\\Common Files".into())
+        }),
+        ("%APPDATA%", || std::env::var("APPDATA").unwrap_or_default()),
+        ("%LOCALAPPDATA%", || {
+            std::env::var("LOCALAPPDATA").unwrap_or_default()
+        }),
+        ("%SYSTEMDRIVE%", || {
+            std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into())
+        }),
     ];
     let mut result = s.to_string();
     for (var, f) in pairs {
@@ -52,13 +124,17 @@ fn expand_env(s: &str) -> String {
 fn extract_exe_path(cmd: &str) -> Option<String> {
     let s = expand_env(cmd.trim());
     let s = s.trim();
-    if s.is_empty() { return None; }
+    if s.is_empty() {
+        return None;
+    }
 
     // Quoted: "C:\path\app.exe" ...
     if s.starts_with('"') {
         if let Some(end) = s[1..].find('"') {
             let p = s[1..end + 1].to_string();
-            if !p.is_empty() { return Some(p); }
+            if !p.is_empty() {
+                return Some(p);
+            }
         }
     }
 
@@ -75,7 +151,9 @@ fn extract_exe_path(cmd: &str) -> Option<String> {
 
     // First token if it looks like a path
     let first = s.split_whitespace().next().unwrap_or(s);
-    if first.contains('\\') { return Some(first.to_string()); }
+    if first.contains('\\') {
+        return Some(first.to_string());
+    }
 
     None
 }
@@ -87,7 +165,11 @@ fn exists(p: &str) -> bool {
 
 #[cfg(windows)]
 fn hive(root: &str) -> RegKey {
-    RegKey::predef(if root == "HKLM" { HKEY_LOCAL_MACHINE } else { HKEY_CURRENT_USER })
+    RegKey::predef(if root == "HKLM" {
+        HKEY_LOCAL_MACHINE
+    } else {
+        HKEY_CURRENT_USER
+    })
 }
 
 // ── Category scanners ───────────────────────────────────────────────────────
@@ -98,7 +180,9 @@ fn hive(root: &str) -> RegKey {
 fn scan_mui_cache(out: &mut Vec<Value>) {
     const PATH: &str =
         "Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\MuiCache";
-    let Ok(key) = hive("HKCU").open_subkey_with_flags(PATH, KEY_READ) else { return };
+    let Ok(key) = hive("HKCU").open_subkey_with_flags(PATH, KEY_READ) else {
+        return;
+    };
 
     // exe_path → list of value names
     let mut groups: Vec<(String, Vec<String>)> = Vec::new();
@@ -112,8 +196,12 @@ fn scan_mui_cache(out: &mut Vec<Value>) {
         } else {
             continue; // not an exe entry
         };
-        if !base.contains('\\') { continue; }
-        if exists(&base) { continue; }
+        if !base.contains('\\') {
+            continue;
+        }
+        if exists(&base) {
+            continue;
+        }
 
         if let Some(&idx) = seen.get(&base.to_lowercase()) {
             groups[idx].1.push(name);
@@ -125,7 +213,8 @@ fn scan_mui_cache(out: &mut Vec<Value>) {
 
     for (base, values) in groups {
         let fname = std::path::Path::new(&base)
-            .file_name().map(|n| n.to_string_lossy().into_owned())
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| base.clone());
         out.push(json!({
             "id":           make_id(&["mui", "HKCU", PATH, &base]),
@@ -144,15 +233,23 @@ fn scan_mui_cache(out: &mut Vec<Value>) {
 /// Uninstall entries where InstallLocation points to a non-existent directory.
 #[cfg(windows)]
 fn scan_uninstall(root: &'static str, subpath: &str, out: &mut Vec<Value>) {
-    let Ok(base) = hive(root).open_subkey_with_flags(subpath, KEY_READ) else { return };
+    let Ok(base) = hive(root).open_subkey_with_flags(subpath, KEY_READ) else {
+        return;
+    };
     for r in base.enum_keys() {
         let Ok(sub_name) = r else { continue };
-        let Ok(sub) = base.open_subkey_with_flags(&sub_name, KEY_READ) else { continue };
+        let Ok(sub) = base.open_subkey_with_flags(&sub_name, KEY_READ) else {
+            continue;
+        };
         let display: String = sub.get_value("DisplayName").unwrap_or_default();
-        if display.is_empty() { continue; }
+        if display.is_empty() {
+            continue;
+        }
         let loc: String = sub.get_value("InstallLocation").unwrap_or_default();
         let loc = expand_env(loc.trim().trim_matches('"'));
-        if loc.is_empty() || exists(&loc) { continue; }
+        if loc.is_empty() || exists(&loc) {
+            continue;
+        }
         let key_path = format!("{subpath}\\{sub_name}");
         out.push(json!({
             "id":           make_id(&["uninst", root, &key_path]),
@@ -172,13 +269,19 @@ fn scan_uninstall(root: &'static str, subpath: &str, out: &mut Vec<Value>) {
 #[cfg(windows)]
 fn scan_app_paths(out: &mut Vec<Value>) {
     const PATH: &str = "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths";
-    let Ok(base) = hive("HKLM").open_subkey_with_flags(PATH, KEY_READ) else { return };
+    let Ok(base) = hive("HKLM").open_subkey_with_flags(PATH, KEY_READ) else {
+        return;
+    };
     for r in base.enum_keys() {
         let Ok(name) = r else { continue };
-        let Ok(sub) = base.open_subkey_with_flags(&name, KEY_READ) else { continue };
+        let Ok(sub) = base.open_subkey_with_flags(&name, KEY_READ) else {
+            continue;
+        };
         let default: String = sub.get_value("").unwrap_or_default();
         let expanded = expand_env(default.trim().trim_matches('"'));
-        if expanded.is_empty() || exists(&expanded) { continue; }
+        if expanded.is_empty() || exists(&expanded) {
+            continue;
+        }
         let key_path = format!("{PATH}\\{name}");
         out.push(json!({
             "id":           make_id(&["apppath", "HKLM", &key_path]),
@@ -198,14 +301,21 @@ fn scan_app_paths(out: &mut Vec<Value>) {
 #[cfg(windows)]
 fn scan_shared_dlls(out: &mut Vec<Value>) {
     const PATH: &str = "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\SharedDLLs";
-    let Ok(key) = hive("HKLM").open_subkey_with_flags(PATH, KEY_READ) else { return };
+    let Ok(key) = hive("HKLM").open_subkey_with_flags(PATH, KEY_READ) else {
+        return;
+    };
     for r in key.enum_values() {
         let Ok((name, _)) = r else { continue };
-        if name.is_empty() { continue; }
+        if name.is_empty() {
+            continue;
+        }
         let expanded = expand_env(&name);
-        if !expanded.contains('\\') || exists(&expanded) { continue; }
+        if !expanded.contains('\\') || exists(&expanded) {
+            continue;
+        }
         let fname = std::path::Path::new(&expanded)
-            .file_name().map(|n| n.to_string_lossy().into_owned())
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| expanded.clone());
         out.push(json!({
             "id":           make_id(&["sharedll", "HKLM", PATH, &name]),
@@ -227,19 +337,29 @@ fn scan_shell_extensions(out: &mut Vec<Value>) {
     const APPROVED: &str =
         "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Shell Extensions\\Approved";
     const CLSID_BASE: &str = "SOFTWARE\\Classes\\CLSID";
-    let Ok(approved) = hive("HKLM").open_subkey_with_flags(APPROVED, KEY_READ) else { return };
-    let Ok(clsid_root) = hive("HKLM").open_subkey_with_flags(CLSID_BASE, KEY_READ) else { return };
+    let Ok(approved) = hive("HKLM").open_subkey_with_flags(APPROVED, KEY_READ) else {
+        return;
+    };
+    let Ok(clsid_root) = hive("HKLM").open_subkey_with_flags(CLSID_BASE, KEY_READ) else {
+        return;
+    };
 
     for r in approved.enum_values() {
         let Ok((clsid, _)) = r else { continue };
         let desc: String = approved.get_value(&clsid).unwrap_or_else(|_| clsid.clone());
-        let Ok(server) = clsid_root.open_subkey_with_flags(
-            &format!("{clsid}\\InprocServer32"), KEY_READ,
-        ) else { continue };
+        let Ok(server) =
+            clsid_root.open_subkey_with_flags(&format!("{clsid}\\InprocServer32"), KEY_READ)
+        else {
+            continue;
+        };
         let dll: String = server.get_value("").unwrap_or_default();
-        if dll.is_empty() { continue; }
+        if dll.is_empty() {
+            continue;
+        }
         let expanded = expand_env(dll.trim().trim_matches('"'));
-        if expanded.is_empty() || exists(&expanded) { continue; }
+        if expanded.is_empty() || exists(&expanded) {
+            continue;
+        }
         out.push(json!({
             "id":           make_id(&["shellext", "HKLM", APPROVED, &clsid]),
             "category":     "Shell Extensions",
@@ -257,12 +377,18 @@ fn scan_shell_extensions(out: &mut Vec<Value>) {
 /// Run key entries pointing to non-existent executables.
 #[cfg(windows)]
 fn scan_run_keys(root: &'static str, path: &str, out: &mut Vec<Value>) {
-    let Ok(key) = hive(root).open_subkey_with_flags(path, KEY_READ) else { return };
+    let Ok(key) = hive(root).open_subkey_with_flags(path, KEY_READ) else {
+        return;
+    };
     for r in key.enum_values() {
         let Ok((name, _)) = r else { continue };
         let cmd: String = key.get_value(&name).unwrap_or_default();
-        let Some(exe) = extract_exe_path(&cmd) else { continue };
-        if exists(&exe) { continue; }
+        let Some(exe) = extract_exe_path(&cmd) else {
+            continue;
+        };
+        if exists(&exe) {
+            continue;
+        }
         out.push(json!({
             "id":           make_id(&["run", root, path, &name]),
             "category":     "Autostart",
@@ -284,14 +410,34 @@ pub fn scan() -> Value {
     {
         let mut orphans: Vec<Value> = Vec::new();
         scan_mui_cache(&mut orphans);
-        scan_uninstall("HKLM", "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall", &mut orphans);
-        scan_uninstall("HKLM", "SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall", &mut orphans);
-        scan_uninstall("HKCU", "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall", &mut orphans);
+        scan_uninstall(
+            "HKLM",
+            "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall",
+            &mut orphans,
+        );
+        scan_uninstall(
+            "HKLM",
+            "SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall",
+            &mut orphans,
+        );
+        scan_uninstall(
+            "HKCU",
+            "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall",
+            &mut orphans,
+        );
         scan_app_paths(&mut orphans);
         scan_shared_dlls(&mut orphans);
         scan_shell_extensions(&mut orphans);
-        scan_run_keys("HKCU", "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run", &mut orphans);
-        scan_run_keys("HKLM", "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run", &mut orphans);
+        scan_run_keys(
+            "HKCU",
+            "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run",
+            &mut orphans,
+        );
+        scan_run_keys(
+            "HKLM",
+            "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run",
+            &mut orphans,
+        );
 
         let mut counts: HashMap<&str, u32> = HashMap::new();
         for o in &orphans {
@@ -316,6 +462,23 @@ pub fn clean(entries: Vec<Value>) -> Result<Value, String> {
     if entries.is_empty() {
         return Err("Keine Einträge ausgewählt.".into());
     }
+
+    // Validate every entry up front, before anything is exported or deleted.
+    // Entries the scanners could never have produced are rejected with an
+    // error instead of being acted on.
+    let mut errors: Vec<String> = Vec::new();
+    let mut valid: Vec<&Value> = Vec::new();
+    for entry in &entries {
+        let display = entry["displayName"].as_str().unwrap_or("?");
+        match entry_is_valid(entry) {
+            Ok(()) => valid.push(entry),
+            Err(m) => errors.push(format!("{display}: {m}")),
+        }
+    }
+    if valid.is_empty() {
+        return Ok(json!({ "deleted": 0, "errors": errors, "backupPath": "" }));
+    }
+
     #[cfg(windows)]
     {
         // 1. Prepare backup dir + a per-cleanup folder for the .reg exports.
@@ -331,21 +494,22 @@ pub fn clean(entries: Vec<Value>) -> Result<Value, String> {
         // 2. Delete — but ONLY after a real .reg export of the affected key
         //    succeeded, so every deletion is genuinely restorable.
         let mut deleted: u32 = 0;
-        let mut errors: Vec<String> = Vec::new();
         let mut manifest: Vec<Value> = Vec::new();
 
-        for entry in &entries {
-            let root       = entry["root"].as_str().unwrap_or("HKCU");
-            let key_path   = entry["keyPath"].as_str().unwrap_or("");
+        for entry in &valid {
+            let root = entry["root"].as_str().unwrap_or("");
+            let key_path = entry["keyPath"].as_str().unwrap_or("");
             let value_name = entry["valueName"].as_str().unwrap_or("");
-            let display    = entry["displayName"].as_str().unwrap_or("?");
+            let display = entry["displayName"].as_str().unwrap_or("?");
 
             // Related values (e.g. multiple MUI cache entries for same exe)
             let related: Vec<String> = entry["relatedValues"]
                 .as_array()
-                .map(|arr| arr.iter()
-                    .filter_map(|v| v.as_str().map(String::from))
-                    .collect())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
                 .unwrap_or_default();
 
             // Export the affected key to a .reg file BEFORE deleting. If the
@@ -362,7 +526,7 @@ pub fn clean(entries: Vec<Value>) -> Result<Value, String> {
                 // Delete entire subkey
                 if let Some(sep) = key_path.rfind('\\') {
                     let parent = &key_path[..sep];
-                    let child  = &key_path[sep + 1..];
+                    let child = &key_path[sep + 1..];
                     hive(root)
                         .open_subkey_with_flags(parent, KEY_ALL_ACCESS)
                         .and_then(|k| k.delete_subkey_all(child))
@@ -409,14 +573,20 @@ pub fn clean(entries: Vec<Value>) -> Result<Value, String> {
             "count": manifest.len(),
             "items": manifest,
         });
-        std::fs::write(&backup_path, serde_json::to_string_pretty(&backup_json).unwrap())
-            .map_err(|e| format!("backup write: {e}"))?;
+        std::fs::write(
+            &backup_path,
+            serde_json::to_string_pretty(&backup_json).unwrap(),
+        )
+        .map_err(|e| format!("backup write: {e}"))?;
 
         let backup_str = backup_path.to_string_lossy().into_owned();
         Ok(json!({ "deleted": deleted, "errors": errors, "backupPath": backup_str }))
     }
     #[cfg(not(windows))]
-    Err("Windows only".into())
+    {
+        let _ = valid;
+        Err("Windows only".into())
+    }
 }
 
 /// Run reg.exe with the given args, hiding the console window. Returns the
@@ -446,13 +616,29 @@ fn reg_export(full_key: &str, file: &std::path::Path) -> Result<(), String> {
 
 /// Restore a previous cleanup from its backup manifest by re-importing every
 /// exported .reg file. Returns { restored, errors }.
+///
+/// Only manifests inside the app's own `PCOptSuite/regclean` folder are
+/// accepted, and every referenced `.reg` file must live there too — otherwise
+/// this command would be an arbitrary registry-import primitive.
 pub fn restore(backup_path: String) -> Result<Value, String> {
     #[cfg(windows)]
     {
-        let raw = std::fs::read_to_string(&backup_path)
+        let backup_dir = dirs::config_dir()
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+            .join("PCOptSuite")
+            .join("regclean");
+        let dir_canon = std::fs::canonicalize(&backup_dir)
+            .map_err(|e| format!("backup folder missing: {e}"))?;
+        let backup_canon =
+            std::fs::canonicalize(&backup_path).map_err(|e| format!("cannot read backup: {e}"))?;
+        if !backup_canon.starts_with(&dir_canon) {
+            return Err("backup manifest must live in the app backup folder.".into());
+        }
+
+        let raw = std::fs::read_to_string(&backup_canon)
             .map_err(|e| format!("cannot read backup: {e}"))?;
-        let parsed: Value = serde_json::from_str(&raw)
-            .map_err(|e| format!("bad backup file: {e}"))?;
+        let parsed: Value =
+            serde_json::from_str(&raw).map_err(|e| format!("bad backup file: {e}"))?;
         let items = parsed["items"].as_array().cloned().unwrap_or_default();
         if items.is_empty() {
             return Err("This backup has no restorable entries.".into());
@@ -463,19 +649,26 @@ pub fn restore(backup_path: String) -> Result<Value, String> {
         for it in &items {
             let display = it["display"].as_str().unwrap_or("?");
             let reg_file = it["regFile"].as_str().unwrap_or("");
-            if reg_file.is_empty() || !std::path::Path::new(reg_file).exists() {
+            let Ok(reg_canon) = std::fs::canonicalize(reg_file) else {
                 errors.push(format!("{display}: backup file missing"));
                 continue;
+            };
+            if !reg_canon.starts_with(&dir_canon) {
+                errors.push(format!("{display}: backup file outside app folder"));
+                continue;
             }
-            match reg_exe(&["import", reg_file]) {
-                Ok(_)  => restored += 1,
+            match reg_exe(&["import", reg_canon.to_string_lossy().as_ref()]) {
+                Ok(_) => restored += 1,
                 Err(e) => errors.push(format!("{display}: {e}")),
             }
         }
         return Ok(json!({ "restored": restored, "errors": errors }));
     }
-    #[allow(unreachable_code)]
-    Err("Windows only".into())
+    #[cfg(not(windows))]
+    {
+        let _ = backup_path;
+        Err("Windows only".into())
+    }
 }
 
 /// List available cleanup backups (newest first) for the restore UI.
@@ -489,8 +682,13 @@ pub fn list_backups() -> Value {
         for e in rd.flatten() {
             let path = e.path();
             let is_backup = path.extension().and_then(|x| x.to_str()) == Some("json")
-                && path.file_name().map(|n| n.to_string_lossy().starts_with("backup_")).unwrap_or(false);
-            if !is_backup { continue; }
+                && path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().starts_with("backup_"))
+                    .unwrap_or(false);
+            if !is_backup {
+                continue;
+            }
             if let Ok(raw) = std::fs::read_to_string(&path) {
                 if let Ok(v) = serde_json::from_str::<Value>(&raw) {
                     out.push(json!({
@@ -502,6 +700,50 @@ pub fn list_backups() -> Value {
             }
         }
     }
-    out.sort_by(|a, b| b["time"].as_str().unwrap_or("").cmp(a["time"].as_str().unwrap_or("")));
+    out.sort_by(|a, b| {
+        b["time"]
+            .as_str()
+            .unwrap_or("")
+            .cmp(a["time"].as_str().unwrap_or(""))
+    });
     json!(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_valid_key_path, is_valid_root};
+
+    #[test]
+    fn key_path_validation() {
+        for p in [
+            "Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\MuiCache",
+            "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{A2B3C4D5}",
+            "SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Run",
+            "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\My App.exe",
+            "SOFTWARE\\Classes\\O'Brien Corp\\App",
+        ] {
+            assert!(is_valid_key_path(p), "should be valid: {p}");
+        }
+        for p in [
+            "",
+            "\\SOFTWARE\\X",
+            "SOFTWARE\\X\\",
+            "SOFTWARE\\..\\X",
+            "SOFTWARE\\.\\X",
+            "SOFTWARE\\\\X",
+            "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run\\..\\..\\RunOnce",
+        ] {
+            assert!(!is_valid_key_path(p), "should be invalid: {p}");
+        }
+    }
+
+    #[test]
+    fn root_validation() {
+        assert!(is_valid_root("HKLM"));
+        assert!(is_valid_root("HKCU"));
+        assert!(!is_valid_root(""));
+        assert!(!is_valid_root("HKCR"));
+        assert!(!is_valid_root("HKU"));
+        assert!(!is_valid_root("HKLM\\SOFTWARE"));
+    }
 }

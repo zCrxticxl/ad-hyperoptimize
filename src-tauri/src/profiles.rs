@@ -86,10 +86,11 @@ pub fn list() -> Value {
                 .tweaks
                 .iter()
                 .map(|id| {
-                    let (name, st, undo) = status
-                        .get(*id)
-                        .cloned()
-                        .unwrap_or(("?".into(), "unknown".into(), false));
+                    let (name, st, undo) =
+                        status
+                            .get(*id)
+                            .cloned()
+                            .unwrap_or(("?".into(), "unknown".into(), false));
                     json!({ "id": id, "name": name, "status": st, "undoable": undo })
                 })
                 .collect();
@@ -118,7 +119,11 @@ pub fn apply(profile_id: &str, with_bench: bool) -> Result<Value, String> {
     let restore_msg = safety::create_restore_point(&format!("AD HyperOptimize Profil: {}", p.name))
         .unwrap_or_else(|e| format!("Restore Point übersprungen: {e}"));
 
-    let before = if with_bench { Some(bench_suite()) } else { None };
+    let before = if with_bench {
+        Some(bench_suite())
+    } else {
+        None
+    };
 
     let status = tweak_status_map();
     let mut applied = Vec::new();
@@ -134,7 +139,11 @@ pub fn apply(profile_id: &str, with_bench: bool) -> Result<Value, String> {
         }
     }
 
-    let after = if with_bench { Some(bench_suite()) } else { None };
+    let after = if with_bench {
+        Some(bench_suite())
+    } else {
+        None
+    };
 
     Ok(json!({
         "profile": p.id,

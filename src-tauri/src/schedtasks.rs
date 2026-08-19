@@ -139,7 +139,10 @@ $tasks | ConvertTo-Json -Compress -Depth 2
         })
         .collect();
 
-    let bloat_count = tasks.iter().filter(|t| t["isBloat"].as_bool().unwrap_or(false)).count();
+    let bloat_count = tasks
+        .iter()
+        .filter(|t| t["isBloat"].as_bool().unwrap_or(false))
+        .count();
     json!({ "tasks": tasks, "bloatCount": bloat_count })
 }
 
@@ -147,12 +150,18 @@ pub fn toggle(path: String, name: String, enable: bool) -> Result<Value, String>
     if !crate::ps::is_admin() {
         return Err("Scheduled Tasks ändern benötigt Adminrechte.".into());
     }
-    let action = if enable { "Enable-ScheduledTask" } else { "Disable-ScheduledTask" };
-    // Escape quotes in path/name
-    let safe_path = path.replace('"', "'");
-    let safe_name = name.replace('"', "'");
+    // Path/name are embedded in single-quoted PS strings and come from the
+    // renderer — reject anything that could terminate the quotes.
+    if !crate::ps::is_safe_ident(&path) || !crate::ps::is_safe_ident(&name) {
+        return Err("Invalid task path or name".into());
+    }
+    let action = if enable {
+        "Enable-ScheduledTask"
+    } else {
+        "Disable-ScheduledTask"
+    };
     let script = format!(
-        r#"{action} -TaskPath "{safe_path}" -TaskName "{safe_name}" -ErrorAction Stop | Out-Null; "OK""#
+        r#"{action} -TaskPath '{path}' -TaskName '{name}' -ErrorAction Stop | Out-Null; "OK""#
     );
     crate::ps::run(&script)
         .map(|_| json!({ "name": name, "path": path, "enabled": enable }))

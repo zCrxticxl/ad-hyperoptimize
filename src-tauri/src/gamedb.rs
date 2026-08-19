@@ -5,33 +5,33 @@ use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Game {
-    pub id:          &'static str,
-    pub name:        &'static str,
-    pub processes:   &'static [&'static str], // lowercase exe names
-    pub genre:       &'static str,
+    pub id: &'static str,
+    pub name: &'static str,
+    pub processes: &'static [&'static str], // lowercase exe names
+    pub genre: &'static str,
     pub competitive: bool,
-    pub presets:     Presets,
-    pub tips:        &'static [&'static str],
+    pub presets: Presets,
+    pub tips: &'static [&'static str],
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Presets {
     pub performance: Preset,
-    pub balanced:    Preset,
-    pub quality:     Preset,
+    pub balanced: Preset,
+    pub quality: Preset,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Preset {
-    pub power_plan:  &'static str, // "ultimate" | "high_performance" | "balanced"
+    pub power_plan: &'static str, // "ultimate" | "high_performance" | "balanced"
     pub description: &'static str,
-    pub settings:    &'static [S],
+    pub settings: &'static [S],
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct S {
-    pub cat:   &'static str,
-    pub name:  &'static str,
+    pub cat: &'static str,
+    pub name: &'static str,
     pub value: &'static str,
 }
 
@@ -1145,7 +1145,11 @@ Game {
 #[allow(dead_code)]
 pub fn find_by_process(exe: &str) -> Option<&'static Game> {
     let lower = exe.to_lowercase();
-    GAMES.iter().find(|g| g.processes.iter().any(|p| *p == lower))
+    GAMES
+        .iter()
+        .find(|g| g.processes.iter().any(|p| *p == lower))
 }
 
-pub fn get_all() -> &'static [Game] { GAMES }
+pub fn get_all() -> &'static [Game] {
+    GAMES
+}

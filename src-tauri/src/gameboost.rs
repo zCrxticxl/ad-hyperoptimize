@@ -9,13 +9,34 @@ use serde_json::{json, Value};
 
 // Processes considered safe to suspend/kill during gaming
 const KILL_CANDIDATES: &[&str] = &[
-    "Discord", "Spotify", "OneDrive", "GoogleDriveFS", "Dropbox",
-    "Teams", "slack", "zoom", "skype", "lync",
-    "chrome", "msedge", "firefox", "brave", "opera",
-    "AdobeUpdater", "AdobeIPCBroker", "Creative Cloud",
-    "EpicGamesLauncher", "GalaxyClient", "upc",
-    "SearchApp", "SearchHost", "Widgets", "WidgetService",
-    "PhoneExperienceHost", "YourPhone", "WinStore.App",
+    "Discord",
+    "Spotify",
+    "OneDrive",
+    "GoogleDriveFS",
+    "Dropbox",
+    "Teams",
+    "slack",
+    "zoom",
+    "skype",
+    "lync",
+    "chrome",
+    "msedge",
+    "firefox",
+    "brave",
+    "opera",
+    "AdobeUpdater",
+    "AdobeIPCBroker",
+    "Creative Cloud",
+    "EpicGamesLauncher",
+    "GalaxyClient",
+    "upc",
+    "SearchApp",
+    "SearchHost",
+    "Widgets",
+    "WidgetService",
+    "PhoneExperienceHost",
+    "YourPhone",
+    "WinStore.App",
     "MicrosoftEdgeUpdate",
 ];
 
@@ -80,8 +101,14 @@ $p.PriorityClass = [System.Diagnostics.ProcessPriorityClass]::High
 }
 
 pub fn kill_background(pids: Vec<u32>) -> Result<String, String> {
-    if pids.is_empty() { return Ok("Nothing to kill".into()); }
-    let pid_list = pids.iter().map(|p| p.to_string()).collect::<Vec<_>>().join(",");
+    if pids.is_empty() {
+        return Ok("Nothing to kill".into());
+    }
+    let pid_list = pids
+        .iter()
+        .map(|p| p.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
     let script = format!(
         r#"
 $killed = 0
@@ -98,6 +125,16 @@ $killed = 0
 }
 
 pub fn boost_start(pid: u32) -> Result<String, String> {
+    // Capture the pre-boost state so boost_stop can restore it exactly
+    // instead of forcing the hardcoded Balanced plan (H9).
+    let prev_plan = get_active_plan_guid().unwrap_or_else(|| PLAN_BALANCED.to_string());
+    let prev_toast = ps::run(
+        "(Get-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Notifications\\Settings' -Name NOC_GLOBAL_SETTING_TOASTS_ENABLED -ErrorAction SilentlyContinue).NOC_GLOBAL_SETTING_TOASTS_ENABLED",
+    )
+    .ok()
+    .map(|s| s.trim().to_string())
+    .filter(|s| !s.is_empty());
+
     let script = format!(
         r#"
 $errors = @()
@@ -132,20 +169,85 @@ if ($errors) {{ "Boosted with warnings: " + ($errors -join '; ') }}
 else {{ "Game boost active for PID {pid}" }}
 "#
     );
+    save_boost_state(&prev_plan, prev_toast.as_deref())?;
     ps::run(&script).map(|s| s.trim().to_string())
 }
 
+/// Persist the pre-boost state for exact restore in boost_stop.
+fn save_boost_state(prev_plan: &str, prev_toast: Option<&str>) -> Result<(), String> {
+    let dir = crate::safety::app_data_dir().join("gameboost");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let v = json!({ "prevPlan": prev_plan, "prevToast": prev_toast });
+    std::fs::write(
+        dir.join("boost-state.json"),
+        serde_json::to_string(&v).unwrap_or_default(),
+    )
+    .map_err(|e| format!("saving boost state failed: {e}"))
+}
+
+/// Read (without consuming) the pre-boost state; `None` when no state was
+/// saved (boost_stop without a matching boost_start).
+fn read_boost_state() -> Option<(String, Option<String>)> {
+    let path = crate::safety::app_data_dir()
+        .join("gameboost")
+        .join("boost-state.json");
+    let raw = std::fs::read_to_string(&path).ok()?;
+    let v: Value = serde_json::from_str(&raw).ok()?;
+    let plan = v["prevPlan"].as_str()?.to_string();
+    let toast = v["prevToast"].as_str().map(str::to_string);
+    Some((plan, toast))
+}
+
+fn remove_boost_state() {
+    let path = crate::safety::app_data_dir()
+        .join("gameboost")
+        .join("boost-state.json");
+    let _ = std::fs::remove_file(&path);
+}
+
 pub fn boost_stop() -> Result<String, String> {
-    let script = r#"
-# Restore Balanced power plan
-powercfg /setactive 381b4222-f694-41f0-9685-ff5bb260df2e | Out-Null
+    let (prev_plan, prev_toast) =
+        read_boost_state().unwrap_or_else(|| (PLAN_BALANCED.to_string(), None));
 
-# Re-enable notifications
-Remove-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Notifications\Settings' NOC_GLOBAL_SETTING_TOASTS_ENABLED -EA SilentlyContinue
+    // The plan guid is embedded in a PowerShell script — only ever a real
+    // GUID (or the hardcoded Balanced fallback). A corrupted state file must
+    // not be able to inject script, so anything else degrades to Balanced.
+    let prev_plan = if crate::ps::is_guid(&prev_plan) {
+        prev_plan
+    } else {
+        PLAN_BALANCED.to_string()
+    };
 
-"Game boost stopped — settings restored"
-"#;
-    ps::run(script).map(|s| s.trim().to_string())
+    // Restoring a value we previously changed must succeed; a failure is
+    // reported honestly instead of printing "settings restored" anyway.
+    // A captured DWORD value is a plain number — anything else is rejected so
+    // a tampered registry value can never inject script; we fall back to
+    // ensuring the property is absent.
+    let toast_restore = match prev_toast.as_deref() {
+        Some(v) if !v.is_empty() && v.chars().all(|c| c.is_ascii_digit()) => format!(
+            "Set-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Notifications\\Settings' NOC_GLOBAL_SETTING_TOASTS_ENABLED {v} -Type DWord -EA Stop"
+        ),
+        _ => "Remove-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Notifications\\Settings' NOC_GLOBAL_SETTING_TOASTS_ENABLED -EA SilentlyContinue".to_string(),
+    };
+
+    let script = format!(
+        r#"
+$errs = @()
+powercfg /setactive {prev_plan} 2>&1 | Out-Null
+if ($LASTEXITCODE -ne 0) {{ $errs += 'power plan restore failed (exit ' + $LASTEXITCODE + ')' }}
+try {{ {toast_restore} }} catch {{ $errs += ('toast restore failed: ' + $_.Exception.Message) }}
+if ($errs.Count) {{ Write-Error ('Game boost stopped, but: ' + ($errs -join '; ')) }} else {{ 'Game boost stopped — settings restored' }}
+"#
+    );
+    match ps::run(&script) {
+        // State is only consumed once the exact restore succeeded, so a retry
+        // after a failure still restores the captured values (never defaults).
+        Ok(s) => {
+            remove_boost_state();
+            Ok(s.trim().to_string())
+        }
+        Err(e) => Err(e),
+    }
 }
 
 pub fn set_gpu_max_perf(enable: bool) -> Result<String, String> {
@@ -171,9 +273,23 @@ Set-ItemProperty $path HwSchMode {val} -Type DWord -EA SilentlyContinue
 
 const HAGS_PATH: &str = "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\GraphicsDrivers";
 
+/// Wrap a PowerShell expression so it runs as an executable command line —
+/// `tweaks::apply_item` executes Command items via run_cmdline. run_cmdline
+/// detects the `powershell … -Command <expr>` form and runs `<expr>` as a
+/// single `-Command` argument (via ps::run), so `$`/quotes/spacing inside
+/// stay literal script text.
+fn ps_expr(expr: String) -> String {
+    format!("powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command {expr}")
+}
+
 /// Resolve a process name (with or without ".exe") to a live PID.
 fn find_pid_by_name(name: &str) -> Result<u32, String> {
     let base = name.trim_end_matches(".exe").trim_end_matches(".EXE");
+    // Embedded in a single-quoted PS string — reject anything that could
+    // terminate the quote (process names are plain file names in practice).
+    if !crate::ps::is_safe_ident(base) {
+        return Err(format!("invalid process name '{name}'"));
+    }
     let out = ps::run(&format!(
         "(Get-Process -Name '{base}' -ErrorAction Stop | Select-Object -First 1 -ExpandProperty Id)"
     ))?;
@@ -188,7 +304,7 @@ fn find_pid_by_name(name: &str) -> Result<u32, String> {
 /// topology APIs, and it's a no-op-equivalent (full mask) on symmetric CPUs
 /// with <=2 cores.
 fn perf_core_mask(core_count: usize) -> u64 {
-    let half = (core_count / 2).max(1).min(63);
+    let half = (core_count / 2).clamp(1, 63);
     (1u64 << half) - 1
 }
 
@@ -199,8 +315,14 @@ fn perf_core_mask(core_count: usize) -> u64 {
 fn kill_known_overlays() -> Vec<String> {
     let procs = list_background_procs();
     let arr = procs["procs"].as_array().cloned().unwrap_or_default();
-    let pids: Vec<u32> = arr.iter().filter_map(|p| p["Id"].as_u64().map(|x| x as u32)).collect();
-    let names: Vec<String> = arr.iter().filter_map(|p| p["Name"].as_str().map(str::to_string)).collect();
+    let pids: Vec<u32> = arr
+        .iter()
+        .filter_map(|p| p["Id"].as_u64().map(|x| x as u32))
+        .collect();
+    let names: Vec<String> = arr
+        .iter()
+        .filter_map(|p| p["Name"].as_str().map(str::to_string))
+        .collect();
     if !pids.is_empty() {
         let _ = kill_background(pids);
     }
@@ -244,43 +366,55 @@ pub fn quick_boost_start(process_name: String) -> Result<Value, String> {
     let mask = perf_core_mask(core_count);
 
     // ---- build reversible items (write-ahead, nothing applied yet) ----
-    let items = vec![
+    // Command items are executed via tweaks::apply_item → run_cmdline, which
+    // spawns the first whitespace token as an executable. PowerShell
+    // expressions must therefore be wrapped in a powershell.exe invocation
+    // (the expression is one -Command argument, so quotes/$ stay literal).
+    //
+    // The HAGS item writes to HKLM — only ever plan it when elevated, so an
+    // unelevated Quick Boost doesn't journal a change it cannot make. All
+    // items use -EA Stop: a step that cannot actually be performed fails the
+    // boost with rollback instead of silently recording "applied".
+    let mut items = vec![
         ChangeItem::Command {
-            applied: format!("(Get-Process -Id {pid} -ErrorAction Stop).PriorityClass = 'High'"),
-            revert: format!(
+            applied: ps_expr(format!("(Get-Process -Id {pid} -ErrorAction Stop).PriorityClass = 'High'")),
+            revert: ps_expr(format!(
                 "Get-Process -Id {pid} -ErrorAction SilentlyContinue | ForEach-Object {{ $_.PriorityClass = '{prev_priority}' }}"
-            ),
+            )),
         },
         ChangeItem::Command {
-            applied: format!("(Get-Process -Id {pid} -ErrorAction Stop).ProcessorAffinity = [IntPtr]{mask}"),
-            revert: match prev_affinity {
-                Some(m) => format!(
-                    "Get-Process -Id {pid} -ErrorAction SilentlyContinue | ForEach-Object {{ $_.ProcessorAffinity = [IntPtr]{m} }}"
-                ),
-                None => format!(
-                    "Get-Process -Id {pid} -ErrorAction SilentlyContinue | ForEach-Object {{ $_.ProcessorAffinity = [IntPtr]-1 }}"
-                ),
-            },
+            applied: ps_expr(format!("(Get-Process -Id {pid} -ErrorAction Stop).ProcessorAffinity = [IntPtr]{mask}")),
+            revert: ps_expr(format!(
+                "Get-Process -Id {pid} -ErrorAction SilentlyContinue | ForEach-Object {{ $_.ProcessorAffinity = [IntPtr]{m} }}",
+                m = prev_affinity.map_or(-1i64, |v| v as i64),
+            )),
         },
         ChangeItem::Command {
             applied: format!("powercfg /setactive {PLAN_HIGH_PERFORMANCE}"),
             revert: format!("powercfg /setactive {prev_plan}"),
         },
-        ChangeItem::Command {
-            applied: format!(
-                "Set-ItemProperty -Path '{HAGS_PATH}' -Name HwSchMode -Value 2 -Type DWord -EA SilentlyContinue"
-            ),
-            revert: match &prev_hags {
-                Some(v) => format!(
-                    "Set-ItemProperty -Path '{HAGS_PATH}' -Name HwSchMode -Value {v} -Type DWord -EA SilentlyContinue"
-                ),
-                None => format!("Remove-ItemProperty -Path '{HAGS_PATH}' -Name HwSchMode -EA SilentlyContinue"),
-            },
-        },
     ];
+    if crate::ps::is_admin() {
+        items.push(ChangeItem::Command {
+            applied: ps_expr(format!(
+                "Set-ItemProperty -Path '{HAGS_PATH}' -Name HwSchMode -Value 2 -Type DWord -EA Stop"
+            )),
+            revert: match &prev_hags {
+                Some(v) => ps_expr(format!(
+                    "Set-ItemProperty -Path '{HAGS_PATH}' -Name HwSchMode -Value {v} -Type DWord -EA Stop"
+                )),
+                None => ps_expr(format!(
+                    "Remove-ItemProperty -Path '{HAGS_PATH}' -Name HwSchMode -EA Stop"
+                )),
+            },
+        });
+    }
 
     // ---- write-ahead journal entry; its id is the restore token ----
-    let entry_id = format!("quickBoost-{pid}-{}", chrono::Local::now().format("%Y%m%d%H%M%S"));
+    let entry_id = format!(
+        "quickBoost-{pid}-{}",
+        chrono::Local::now().format("%Y%m%d%H%M%S")
+    );
     safety::append_entry(JournalEntry {
         id: entry_id.clone(),
         tweak_id: "quickBoost".into(),
@@ -292,12 +426,20 @@ pub fn quick_boost_start(process_name: String) -> Result<Value, String> {
     })?;
 
     // ---- apply; roll back whatever already succeeded if one step fails ----
+    // The write-ahead entry is marked reverted so the UI never offers an undo
+    // for a boost that failed and was rolled back (mirrors tweaks::apply).
     let mut done: Vec<&ChangeItem> = Vec::new();
     for item in &items {
         if let Err(e) = tweaks::apply_item(item) {
             for d in done.iter().rev() {
                 let _ = tweaks::revert_item(d);
             }
+            let _ = safety::with_journal(|j| {
+                if let Some(en) = j.iter_mut().find(|en| en.id == entry_id) {
+                    en.reverted = true;
+                }
+                Ok(())
+            });
             return Err(format!("Quick Boost failed ({e}); changes rolled back"));
         }
         done.push(item);

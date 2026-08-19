@@ -15,14 +15,54 @@ struct Category {
 }
 
 const CATS: &[Category] = &[
-    Category { id: "win_temp", name: "Windows Temp", note: "C:\\Windows\\Temp — safe to clear; in-use files are skipped automatically.", min_age_hours: 24 },
-    Category { id: "user_temp", name: "User Temp", note: "%TEMP% — safe to clear; in-use files are skipped automatically.", min_age_hours: 24 },
-    Category { id: "wu_cache", name: "Windows Update download cache", note: "SoftwareDistribution\\Download — already-installed update payloads.", min_age_hours: 72 },
-    Category { id: "dx_shader", name: "DirectX shader cache", note: "Rebuilt on demand; first game launches recompile shaders (brief stutter once).", min_age_hours: 0 },
-    Category { id: "thumb_cache", name: "Thumbnail cache", note: "Explorer rebuilds thumbnails as folders are opened.", min_age_hours: 0 },
-    Category { id: "crash_dumps", name: "Crash dumps (WER)", note: "Old crash reports. Keep if you're actively debugging a problem.", min_age_hours: 0 },
-    Category { id: "chrome_cache", name: "Chrome HTTP cache", note: "Close Chrome first. Pages reload slower once.", min_age_hours: 0 },
-    Category { id: "edge_cache", name: "Edge HTTP cache", note: "Close Edge first. Pages reload slower once.", min_age_hours: 0 },
+    Category {
+        id: "win_temp",
+        name: "Windows Temp",
+        note: "C:\\Windows\\Temp — safe to clear; in-use files are skipped automatically.",
+        min_age_hours: 24,
+    },
+    Category {
+        id: "user_temp",
+        name: "User Temp",
+        note: "%TEMP% — safe to clear; in-use files are skipped automatically.",
+        min_age_hours: 24,
+    },
+    Category {
+        id: "wu_cache",
+        name: "Windows Update download cache",
+        note: "SoftwareDistribution\\Download — already-installed update payloads.",
+        min_age_hours: 72,
+    },
+    Category {
+        id: "dx_shader",
+        name: "DirectX shader cache",
+        note: "Rebuilt on demand; first game launches recompile shaders (brief stutter once).",
+        min_age_hours: 0,
+    },
+    Category {
+        id: "thumb_cache",
+        name: "Thumbnail cache",
+        note: "Explorer rebuilds thumbnails as folders are opened.",
+        min_age_hours: 0,
+    },
+    Category {
+        id: "crash_dumps",
+        name: "Crash dumps (WER)",
+        note: "Old crash reports. Keep if you're actively debugging a problem.",
+        min_age_hours: 0,
+    },
+    Category {
+        id: "chrome_cache",
+        name: "Chrome HTTP cache",
+        note: "Close Chrome first. Pages reload slower once.",
+        min_age_hours: 0,
+    },
+    Category {
+        id: "edge_cache",
+        name: "Edge HTTP cache",
+        note: "Close Edge first. Pages reload slower once.",
+        min_age_hours: 0,
+    },
 ];
 
 fn cat_paths(id: &str) -> Vec<PathBuf> {
@@ -31,10 +71,19 @@ fn cat_paths(id: &str) -> Vec<PathBuf> {
     match id {
         "win_temp" => vec![PathBuf::from(format!("{windir}\\Temp"))],
         "user_temp" => vec![std::env::temp_dir()],
-        "wu_cache" => vec![PathBuf::from(format!("{windir}\\SoftwareDistribution\\Download"))],
-        "dx_shader" => vec![local.join("D3DSCache"), local.join("NVIDIA\\DXCache"), local.join("AMD\\DxCache")],
+        "wu_cache" => vec![PathBuf::from(format!(
+            "{windir}\\SoftwareDistribution\\Download"
+        ))],
+        "dx_shader" => vec![
+            local.join("D3DSCache"),
+            local.join("NVIDIA\\DXCache"),
+            local.join("AMD\\DxCache"),
+        ],
         "thumb_cache" => vec![local.join("Microsoft\\Windows\\Explorer")],
-        "crash_dumps" => vec![local.join("CrashDumps"), PathBuf::from("C:\\ProgramData\\Microsoft\\Windows\\WER\\ReportQueue")],
+        "crash_dumps" => vec![
+            local.join("CrashDumps"),
+            PathBuf::from("C:\\ProgramData\\Microsoft\\Windows\\WER\\ReportQueue"),
+        ],
         "chrome_cache" => vec![local.join("Google\\Chrome\\User Data\\Default\\Cache")],
         "edge_cache" => vec![local.join("Microsoft\\Edge\\User Data\\Default\\Cache")],
         _ => vec![],
@@ -96,7 +145,9 @@ pub fn clean(category_ids: Vec<String>) -> Value {
     let mut deleted = 0usize;
     let mut skipped = 0usize;
     for id in &category_ids {
-        let Some(c) = CATS.iter().find(|c| c.id == id) else { continue };
+        let Some(c) = CATS.iter().find(|c| c.id == id) else {
+            continue;
+        };
         for (path, size) in collect(c.id, c.min_age_hours) {
             match fs::remove_file(&path) {
                 Ok(_) => {
