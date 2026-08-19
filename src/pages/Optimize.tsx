@@ -25,11 +25,11 @@ export default function Optimize({ mode, admin, focusId, onSwitchExpert }: { mod
   // Deep-link from the Dashboard: expand + scroll to the relevant tweak once.
   useEffect(() => {
     if (!focusId || focusHandled.current || !tweaks) return;
-    if (!tweaks.some((t) => t.id === focusId)) return;
+    if (!tweaks.some((tw) => tw.id === focusId)) return;
     focusHandled.current = true;
     // Beginner mode filters out non-Low tweaks — surface an honest hint instead
     // of a silent no-op when the linked tweak is not visible here.
-    if (mode === "beginner" && !tweaks.some((t) => t.id === focusId && t.risk === "Low")) {
+    if (mode === "beginner" && !tweaks.some((tw) => tw.id === focusId && tw.risk === "Low")) {
       setFocusHidden(true);
       return;
     }
@@ -50,34 +50,34 @@ export default function Optimize({ mode, admin, focusId, onSwitchExpert }: { mod
 
   const push = (m: string) => setLog((l) => [...l.slice(-200), `[${new Date().toLocaleTimeString()}] ${m}`]);
 
-  const visible = (tweaks ?? []).filter((t) => mode === "expert" || t.risk === "Low");
-  const cats = [...new Set(visible.map((t) => t.category))];
+  const visible = (tweaks ?? []).filter((tw) => mode === "expert" || tw.risk === "Low");
+  const cats = [...new Set(visible.map((tw) => tw.category))];
 
-  const doApply = async (t: any) => {
-    push(interp(t("optApplyingLog"), { name: t.name }));
+  const doApply = async (tw: any) => {
+    push(interp(t("optApplyingLog"), { name: tw.name }));
     try {
-      await api.applyTweak(t.id);
-      push(interp(t("optAppliedLog"), { name: t.name }));
+      await api.applyTweak(tw.id);
+      push(interp(t("optAppliedLog"), { name: tw.name }));
     } catch (e: any) {
-      push(interp(t("optErrLog"), { name: t.name, err: String(e) }));
+      push(interp(t("optErrLog"), { name: tw.name, err: String(e) }));
     }
     setConfirm(null);
     setRiskAck(null);
     refresh();
   };
 
-  const doRevert = async (t: any) => {
-    const label = t.undoable ? t("optRevertingLog") : t("optForceResetLog");
-    push(interp(label, { name: t.name }));
+  const doRevert = async (tw: any) => {
+    const label = tw.undoable ? t("optRevertingLog") : t("optForceResetLog");
+    push(interp(label, { name: tw.name }));
     try {
-      const res = await api.revertTweak(t.id);
+      const res = await api.revertTweak(tw.id);
       if ((res as any)?.journaled === false) {
-        push(interp(t("optForceResetDone"), { name: t.name }));
+        push(interp(t("optForceResetDone"), { name: tw.name }));
       } else {
-        push(interp(t("optRevertedDone"), { name: t.name }));
+        push(interp(t("optRevertedDone"), { name: tw.name }));
       }
     } catch (e: any) {
-      push(interp(t("optErrLog"), { name: t.name, err: String(e) }));
+      push(interp(t("optErrLog"), { name: tw.name, err: String(e) }));
     }
     refresh();
   };
@@ -124,78 +124,78 @@ export default function Optimize({ mode, admin, focusId, onSwitchExpert }: { mod
       {cats.map((cat) => (
         <div key={cat} className="mt">
           <h2 style={{ color: "var(--muted)", textTransform: "uppercase", fontSize: 12, letterSpacing: ".5px", marginBottom: 8 }}>{cat}</h2>
-          {visible.filter((t) => t.category === cat).map((t) => {
-            t = localizeTweak(t, lang);
-            const hwRisk = profile?.tweakRisks?.[t.id];
-            const needsAck = hwRisk?.severity === "danger" && riskAck !== t.id;
+          {visible.filter((tw) => tw.category === cat).map((tw) => {
+            tw = localizeTweak(tw, lang);
+            const hwRisk = profile?.tweakRisks?.[tw.id];
+            const needsAck = hwRisk?.severity === "danger" && riskAck !== tw.id;
             // "partial" = the tweak was applied but not every value reads back
             // identical (common for GameConfigStore/DWM keys that only settle
             // after a reboot). It must NOT present as un-applied, otherwise the
             // primary Apply button looks permanently stuck. Offer a quiet
             // Re-apply instead and keep Undo available.
             const applyTrigger =
-              t.status === "partial"
+              tw.status === "partial"
                 ? { idle: t("optReapply"), confirmLabel: t("optConfirmReapply"), cls: "btn small ghost", title: t("optPartialTooltip") }
-                : (t.status === "not_applied" || t.status === "unknown")
+                : (tw.status === "not_applied" || tw.status === "unknown")
                 ? { idle: t("optApply"), confirmLabel: t("optConfirmApply"), cls: "btn small", title: undefined as string | undefined }
                 : null;
             return (
-            <div className="tweak" key={t.id} data-tweak-id={t.id}>
+            <div className="tweak" key={tw.id} data-tweak-id={tw.id}>
               <div className="tweak-head">
-                <span className="tweak-name">{t.name}</span>
-                <Badge cls={`risk-${t.risk}`}>{t.risk === "Low" ? t("riskLow") : t.risk === "Medium" ? t("riskMedium") : t("riskHigh")}</Badge>
-                <RiskBadge id={t.id} />
-                <Badge cls={`st-${t.status}`}>{statusLabel(t.status)}</Badge>
-                {t.requiresAdmin && <Badge cls="st-unknown">{t("optAdmin")}</Badge>}
-                <button className="btn small ghost" aria-expanded={open === t.id} onClick={() => setOpen(open === t.id ? null : t.id)}>
-                  {open === t.id ? t("optHide") : t("optDetails")}
+                <span className="tweak-name">{tw.name}</span>
+                <Badge cls={`risk-${tw.risk}`}>{tw.risk === "Low" ? t("riskLow") : tw.risk === "Medium" ? t("riskMedium") : t("riskHigh")}</Badge>
+                <RiskBadge id={tw.id} />
+                <Badge cls={`st-${tw.status}`}>{statusLabel(tw.status)}</Badge>
+                {tw.requiresAdmin && <Badge cls="st-unknown">{t("optAdmin")}</Badge>}
+                <button className="btn small ghost" aria-expanded={open === tw.id} onClick={() => setOpen(open === tw.id ? null : tw.id)}>
+                  {open === tw.id ? t("optHide") : t("optDetails")}
                 </button>
                 {applyTrigger && (
-                  confirm === t.id ? (
+                  confirm === tw.id ? (
                     needsAck ? (
                       <button className="btn small ghost" onClick={() => { setConfirm(null); setRiskAck(null); }}>{t("cancel")}</button>
                     ) : (
                       <>
-                        <button className="btn small danger" onClick={() => doApply(t)}>{applyTrigger.confirmLabel}</button>
+                        <button className="btn small danger" onClick={() => doApply(tw)}>{applyTrigger.confirmLabel}</button>
                         <button className="btn small ghost" onClick={() => { setConfirm(null); setRiskAck(null); }}>{t("cancel")}</button>
                       </>
                     )
                   ) : (
                     <button
                       className={applyTrigger.cls}
-                      disabled={t.requiresAdmin && !admin}
+                      disabled={tw.requiresAdmin && !admin}
                       title={applyTrigger.title}
-                      onClick={() => { setOpen(t.id); setConfirm(t.id); }}
+                      onClick={() => { setOpen(tw.id); setConfirm(tw.id); }}
                     >
                       {applyTrigger.idle}
                     </button>
                   )
                 )}
-                {t.canUndo && (
+                {tw.canUndo && (
                   <button
                     className="btn small ghost"
-                    title={t.undoable ? t("optUndoTooltip") : t("optResetTooltip")}
-                    onClick={() => doRevert(t)}
+                    title={tw.undoable ? t("optUndoTooltip") : t("optResetTooltip")}
+                    onClick={() => doRevert(tw)}
                   >
-                    {t.undoable ? t("optUndo") : t("optReset")}
+                    {tw.undoable ? t("optUndo") : t("optReset")}
                   </button>
                 )}
               </div>
-              <div className="tweak-desc">{t.description}</div>
-              {open === t.id && (
+              <div className="tweak-desc">{tw.description}</div>
+              {open === tw.id && (
                 <div className="tweak-detail">
-                  <b>{t("optWhy")}</b> {t.rationale}<br />
-                  <b>{t("optImpact")}</b> {t.impact}<br />
-                  <b>{t("optRiskLabel")}</b> {t.risk} · <b>{t("optReversibleLabel")}</b> {t.reversible ? t("optReversibleYes") : t("optReversibleNo")}<br />
-                  <RiskNotice id={t.id} />
-                  {confirm === t.id && needsAck && (
+                  <b>{t("optWhy")}</b> {tw.rationale}<br />
+                  <b>{t("optImpact")}</b> {tw.impact}<br />
+                  <b>{t("optRiskLabel")}</b> {tw.risk} · <b>{t("optReversibleLabel")}</b> {tw.reversible ? t("optReversibleYes") : t("optReversibleNo")}<br />
+                  <RiskNotice id={tw.id} />
+                  {confirm === tw.id && needsAck && (
                     <div style={{ marginTop: 8 }}>
-                      <button className="btn small danger" onClick={() => setRiskAck(t.id)}>
+                      <button className="btn small danger" onClick={() => setRiskAck(tw.id)}>
                         {t("optRiskAck")}
                       </button>
                     </div>
                   )}
-                  {confirm === t.id && !needsAck && (
+                  {confirm === tw.id && !needsAck && (
                     <span style={{ color: "var(--yellow)" }}>
                       {t("optConfirmHint")}
                     </span>
