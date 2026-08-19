@@ -179,6 +179,8 @@ function AppInner() {
   const [recents, setRecents] = useState<string[]>(() => {
     try { return JSON.parse(localStorage.getItem(RECENTS_KEY) || "[]"); } catch { return []; }
   });
+  const [featureIndex, setFeatureIndex] = useState<any[]>([]);
+  const featureLoaded = useRef(false);
   const [updateBanner, setUpdateBanner] = useState<{ version: string } | null>(null);
   const [modeNotice, setModeNotice] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -240,8 +242,52 @@ function AppInner() {
   const searchResults = normalizedQuery
     ? nav.flatMap((g) => g.items.filter(allowedByMode).filter((i) =>
         i.label.toLocaleLowerCase().includes(normalizedQuery) || (i.keywords ?? "").includes(normalizedQuery)
-      ).map((i) => ({ ...i, groupLabel: g.group })))
+      ).map((i) => ({ ...i, groupLabel: g.group, feature: false })))
     : [];
+
+  // Lazy-load a searchable index of every toggleable feature across tools
+  // (Optimize tweaks, GPU, Privacy, Debloater, services, startup, scheduled
+  // tasks) so a search like "HAGS" can deep-link straight to the feature.
+  const loadFeatures = async () => {
+    if (featureLoaded.current) return;
+    featureLoaded.current = true;
+    const acc: { tool: string; id: string; name: string; desc: string }[] = [];
+    const add = (tool: string, arr: any[] | undefined, nameK: string[], descK: string[], idK: string[]) => {
+      (Array.isArray(arr) ? arr : []).forEach((it) => {
+        if (!it || typeof it !== "object") return;
+        const name = nameK.map((k) => it[k]).find((v) => typeof v === "string" && v);
+        if (!name) return;
+        acc.push({
+          tool,
+          id: idK.map((k) => it[k]).find((v) => typeof v === "string" && v) || "",
+          name,
+          desc: descK.map((k) => it[k]).find((v) => typeof v === "string" && v) || "",
+        });
+      });
+    };
+    const call = async (fn: () => Promise<any>, h: (v: any) => void) => { try { h(await fn()); } catch {} };
+    await Promise.all([
+      call(api.listTweaks, (v) => add("optimize", v, ["name"], ["description", "rationale"], ["id"])),
+      call(api.gpuScan, (v) => add("gputweaks", v?.tweaks, ["name"], ["description"], ["id"])),
+      call(api.privacyScan, (v) => add("privacy", v?.tweaks, ["name"], ["description"], ["id"])),
+      call(api.debloaterTweaksList, (v) => add("debloater", v?.tweaks, ["name"], ["desc", "description"], ["id"])),
+      call(api.servicesList, (v) => add("services", v?.services, ["displayName", "name"], ["description"], ["name"])),
+      call(api.startupList, (v) => add("startup", v?.items, ["name"], [""], ["name"])),
+      call(api.schedTasksList, (v) => add("schedtasks", v?.tasks, ["name", "TaskName"], ["reason", "description"], ["name"])),
+    ]);
+    setFeatureIndex(acc);
+  };
+  useEffect(() => {
+    if (normalizedQuery) loadFeatures();
+  }, [normalizedQuery]);
+
+  // Feature hits (deep-linkable). Each becomes a distinct result card.
+  const featureResults = normalizedQuery && featureIndex.length
+    ? featureIndex
+        .filter((f) => (f.name + " " + f.desc).toLocaleLowerCase().includes(normalizedQuery))
+        .map((f) => ({ ...f, feature: true }))
+    : [];
+  const allResults = [...searchResults, ...featureResults];
 
   // Leaving Expert mode while sitting on an advanced tool/category would strand
   // the user on a screen they can no longer reach — bounce home WITH a notice
@@ -333,16 +379,30 @@ function AppInner() {
         {/* Search overrides whatever route we're on. */}
         {normalizedQuery ? (
           <>
-            <div className="view-head"><h1>{t("navSearchResults")}</h1><p>{searchResults.length} · “{query}”</p></div>
-            {searchResults.length === 0 ? <div className="nav-empty">{t("navNoMatch")}</div> : (
+            <div className="view-head"><h1>{t("navSearchResults")}</h1><p>{allResults.length} · “{query}”</p></div>
+            {allResults.length === 0 ? <div className="nav-empty">{t("navNoMatch")}</div> : (
               <div className="tool-grid">
-                {searchResults.map((item) => (
-                  <button key={item.id} className="tool-card" onClick={() => openTool(item.id)}>
-                    <span className="tool-icon" aria-hidden="true">{item.icon}</span>
-                    <b>{item.label}</b>
-                    <span className="tool-cat">{item.groupLabel}</span>
-                    {item.desc && <span className="tool-desc">{item.desc}</span>}
-                  </button>
+                {allResults.map((item, idx) => (
+                  item.feature ? (
+                    <button
+                      key={`feat-${item.tool}-${item.id || idx}`}
+                      className="tool-card"
+                      onClick={() => openTool(item.tool, item.id || undefined)}
+                      title={item.desc}
+                    >
+                      <span className="tool-icon" aria-hidden="true">⚙️</span>
+                      <b>{item.name}</b>
+                      <span className="tool-cat">→ {findTool(item.tool)?.label ?? item.tool}</span>
+                      {item.desc && <span className="tool-desc">{item.desc}</span>}
+                    </button>
+                  ) : (
+                    <button key={item.id} className="tool-card" onClick={() => openTool(item.id)}>
+                      <span className="tool-icon" aria-hidden="true">{item.icon}</span>
+                      <b>{item.label}</b>
+                      <span className="tool-cat">{item.groupLabel}</span>
+                      {item.desc && <span className="tool-desc">{item.desc}</span>}
+                    </button>
+                  )
                 ))}
               </div>
             )}
