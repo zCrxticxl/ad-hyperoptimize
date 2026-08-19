@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { Card, Badge, Spinner, ActionBtn } from "../components/ui";
 import { RiskBadge, RiskNotice } from "../components/HwWarnings";
@@ -7,7 +7,8 @@ import { useLang } from "../i18n";
 import { localizeTweak } from "../localize";
 import type { Mode } from "../App";
 
-export default function Optimize({ mode, admin }: { mode: Mode; admin: boolean }) {
+export default function Optimize({ mode, admin, focusId, onSwitchExpert }: { mode: Mode; admin: boolean; focusId?: string; onSwitchExpert?: () => void }) {
+  const { t, lang } = useLang();
   const [tweaks, setTweaks] = useState<any[] | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [log, setLog] = useState<string[]>([]);
@@ -15,10 +16,37 @@ export default function Optimize({ mode, admin }: { mode: Mode; admin: boolean }
   const [confirm, setConfirm] = useState<string | null>(null);
   const [riskAck, setRiskAck] = useState<string | null>(null);
   const profile = useHwProfile();
-  const { lang } = useLang();
+  const focusHandled = useRef(false);
+  const [focusHidden, setFocusHidden] = useState(false);
 
   const refresh = () => api.listTweaks().then(setTweaks);
   useEffect(() => { refresh(); }, []);
+
+  // Deep-link from the Dashboard: expand + scroll to the relevant tweak once.
+  useEffect(() => {
+    if (!focusId || focusHandled.current || !tweaks) return;
+    if (!tweaks.some((t) => t.id === focusId)) return;
+    focusHandled.current = true;
+    // Beginner mode filters out non-Low tweaks — surface an honest hint instead
+    // of a silent no-op when the linked tweak is not visible here.
+    if (mode === "beginner" && !tweaks.some((t) => t.id === focusId && t.risk === "Low")) {
+      setFocusHidden(true);
+      return;
+    }
+    setOpen(focusId);
+    requestAnimationFrame(() => {
+      const el = document.querySelector(`[data-tweak-id="${focusId}"]`);
+      el?.scrollIntoView({ behavior: "smooth", block: "center" });
+      el?.classList.add("tweak-focus");
+      setTimeout(() => el?.classList.remove("tweak-focus"), 2200);
+    });
+  }, [focusId, tweaks]);
+
+  const interp = (tpl: string, params: Record<string, string>) => {
+    let s = tpl;
+    for (const [k, v] of Object.entries(params)) s = s.replaceAll(`{${k}}`, v);
+    return s;
+  };
 
   const push = (m: string) => setLog((l) => [...l.slice(-200), `[${new Date().toLocaleTimeString()}] ${m}`]);
 
@@ -26,12 +54,12 @@ export default function Optimize({ mode, admin }: { mode: Mode; admin: boolean }
   const cats = [...new Set(visible.map((t) => t.category))];
 
   const doApply = async (t: any) => {
-    push(`Applying: ${t.name}…`);
+    push(interp(t("optApplyingLog"), { name: t.name }));
     try {
       await api.applyTweak(t.id);
-      push(`✔ Applied ${t.name} (backup + journal written — undo available)`);
+      push(interp(t("optAppliedLog"), { name: t.name }));
     } catch (e: any) {
-      push(`✘ ${t.name}: ${e}`);
+      push(interp(t("optErrLog"), { name: t.name, err: String(e) }));
     }
     setConfirm(null);
     setRiskAck(null);
@@ -39,33 +67,39 @@ export default function Optimize({ mode, admin }: { mode: Mode; admin: boolean }
   };
 
   const doRevert = async (t: any) => {
-    const label = t.undoable ? "Reverting" : "Force-resetting";
-    push(`${label}: ${t.name}…`);
+    const label = t.undoable ? t("optRevertingLog") : t("optForceResetLog");
+    push(interp(label, { name: t.name }));
     try {
       const res = await api.revertTweak(t.id);
       if ((res as any)?.journaled === false) {
-        push(`✔ ${t.name} force-reset to Windows defaults (no backup — registry value deleted)`);
+        push(interp(t("optForceResetDone"), { name: t.name }));
       } else {
-        push(`✔ Reverted ${t.name} to previous values (from journal backup)`);
+        push(interp(t("optRevertedDone"), { name: t.name }));
       }
     } catch (e: any) {
-      push(`✘ ${t.name}: ${e}`);
+      push(interp(t("optErrLog"), { name: t.name, err: String(e) }));
     }
     refresh();
   };
 
+  const statusLabel = (status: string) =>
+    status === "partial" ? t("optStatusPartial")
+    : status === "not_applied" ? t("optStatusNotApplied")
+    : status === "applied" ? t("optStatusApplied")
+    : t("optStatusUnknown");
+
   return (
     <>
-      <div className="page-title">Safe Optimization Engine</div>
+      <h1 className="page-title">{t("optTitle")}</h1>
       <div className="page-sub">
-        Nothing changes without your explicit confirmation. Every tweak is backed up, journaled and individually undoable.
-        {mode === "beginner" && " Beginner mode shows Low-risk tweaks only — switch to Expert for the full catalog."}
+        {t("optSub")}
+        {mode === "beginner" && ` ${t("optSubBeginner")}`}
       </div>
 
-      <Card title="Safety first">
+      <Card title={t("optSafetyTitle")}>
         <div className="row">
           <ActionBtn
-            label="Create System Restore Point"
+            label={t("optCreateRestorePoint")}
             onRun={async () => {
               try {
                 setRpStatus(await api.createRestorePoint("AD HyperOptimize — before optimization"));
@@ -74,15 +108,22 @@ export default function Optimize({ mode, admin }: { mode: Mode; admin: boolean }
               }
             }}
           />
-          <span className="muted">{rpStatus || "Recommended before applying Medium-risk tweaks. Requires admin."}</span>
+          <span className="muted">{rpStatus || t("optRestoreHint")}</span>
         </div>
       </Card>
 
-      {!tweaks && <div className="mt"><Spinner /> <span className="muted">Reading current system state…</span></div>}
+      {focusHidden && (
+        <div className="warn-banner" style={{ marginTop: 14 }}>
+          <b>ℹ </b>{t("optFocusHidden")}{" "}
+          <button className="btn small" style={{ marginLeft: 8 }} onClick={() => onSwitchExpert?.()}>{t("modeSwitchExpert")}</button>
+        </div>
+      )}
+
+      {!tweaks && <div className="mt"><Spinner /> <span className="muted">{t("optReadingState")}</span></div>}
 
       {cats.map((cat) => (
         <div key={cat} className="mt">
-          <h3 style={{ color: "var(--muted)", textTransform: "uppercase", fontSize: 12, letterSpacing: ".5px", marginBottom: 8 }}>{cat}</h3>
+          <h2 style={{ color: "var(--muted)", textTransform: "uppercase", fontSize: 12, letterSpacing: ".5px", marginBottom: 8 }}>{cat}</h2>
           {visible.filter((t) => t.category === cat).map((t) => {
             t = localizeTweak(t, lang);
             const hwRisk = profile?.tweakRisks?.[t.id];
@@ -94,30 +135,29 @@ export default function Optimize({ mode, admin }: { mode: Mode; admin: boolean }
             // Re-apply instead and keep Undo available.
             const applyTrigger =
               t.status === "partial"
-                ? { idle: "Re-apply", confirmLabel: "Confirm re-apply", cls: "btn small ghost", title: "Partially applied — some values only settle after a reboot, or one didn't take. Re-apply to retry." }
+                ? { idle: t("optReapply"), confirmLabel: t("optConfirmReapply"), cls: "btn small ghost", title: t("optPartialTooltip") }
                 : (t.status === "not_applied" || t.status === "unknown")
-                ? { idle: "Apply…", confirmLabel: "Confirm apply", cls: "btn small", title: undefined as string | undefined }
+                ? { idle: t("optApply"), confirmLabel: t("optConfirmApply"), cls: "btn small", title: undefined as string | undefined }
                 : null;
-            const statusLabel = t.status === "partial" ? "partially applied" : t.status === "not_applied" ? "not applied" : t.status;
             return (
-            <div className="tweak" key={t.id}>
+            <div className="tweak" key={t.id} data-tweak-id={t.id}>
               <div className="tweak-head">
                 <span className="tweak-name">{t.name}</span>
-                <Badge cls={`risk-${t.risk}`}>{t.risk} risk</Badge>
+                <Badge cls={`risk-${t.risk}`}>{t.risk === "Low" ? t("riskLow") : t.risk === "Medium" ? t("riskMedium") : t("riskHigh")}</Badge>
                 <RiskBadge id={t.id} />
-                <Badge cls={`st-${t.status}`}>{statusLabel}</Badge>
-                {t.requiresAdmin && <Badge cls="st-unknown">admin</Badge>}
-                <button className="btn small ghost" onClick={() => setOpen(open === t.id ? null : t.id)}>
-                  {open === t.id ? "Hide" : "Details"}
+                <Badge cls={`st-${t.status}`}>{statusLabel(t.status)}</Badge>
+                {t.requiresAdmin && <Badge cls="st-unknown">{t("optAdmin")}</Badge>}
+                <button className="btn small ghost" aria-expanded={open === t.id} onClick={() => setOpen(open === t.id ? null : t.id)}>
+                  {open === t.id ? t("optHide") : t("optDetails")}
                 </button>
                 {applyTrigger && (
                   confirm === t.id ? (
                     needsAck ? (
-                      <button className="btn small ghost" onClick={() => { setConfirm(null); setRiskAck(null); }}>Cancel</button>
+                      <button className="btn small ghost" onClick={() => { setConfirm(null); setRiskAck(null); }}>{t("cancel")}</button>
                     ) : (
                       <>
                         <button className="btn small danger" onClick={() => doApply(t)}>{applyTrigger.confirmLabel}</button>
-                        <button className="btn small ghost" onClick={() => { setConfirm(null); setRiskAck(null); }}>Cancel</button>
+                        <button className="btn small ghost" onClick={() => { setConfirm(null); setRiskAck(null); }}>{t("cancel")}</button>
                       </>
                     )
                   ) : (
@@ -134,30 +174,30 @@ export default function Optimize({ mode, admin }: { mode: Mode; admin: boolean }
                 {t.canUndo && (
                   <button
                     className="btn small ghost"
-                    title={t.undoable ? "Undo (restores from saved backup)" : "Reset to Windows default (no backup available — app journal was lost)"}
+                    title={t.undoable ? t("optUndoTooltip") : t("optResetTooltip")}
                     onClick={() => doRevert(t)}
                   >
-                    {t.undoable ? "Undo" : "Reset"}
+                    {t.undoable ? t("optUndo") : t("optReset")}
                   </button>
                 )}
               </div>
               <div className="tweak-desc">{t.description}</div>
               {open === t.id && (
                 <div className="tweak-detail">
-                  <b>Why it matters:</b> {t.rationale}<br />
-                  <b>Expected impact:</b> {t.impact}<br />
-                  <b>Risk:</b> {t.risk} · <b>Reversible:</b> {t.reversible ? "Yes — one-click undo, registry backup saved first" : "No"}<br />
+                  <b>{t("optWhy")}</b> {t.rationale}<br />
+                  <b>{t("optImpact")}</b> {t.impact}<br />
+                  <b>{t("optRiskLabel")}</b> {t.risk} · <b>{t("optReversibleLabel")}</b> {t.reversible ? t("optReversibleYes") : t("optReversibleNo")}<br />
                   <RiskNotice id={t.id} />
                   {confirm === t.id && needsAck && (
                     <div style={{ marginTop: 8 }}>
                       <button className="btn small danger" onClick={() => setRiskAck(t.id)}>
-                        I understand the risk for my hardware — continue
+                        {t("optRiskAck")}
                       </button>
                     </div>
                   )}
                   {confirm === t.id && !needsAck && (
                     <span style={{ color: "var(--yellow)" }}>
-                      Review the above, then press <b>Confirm apply</b>. A .reg backup and journal entry are written before any change.
+                      {t("optConfirmHint")}
                     </span>
                   )}
                 </div>
@@ -168,9 +208,9 @@ export default function Optimize({ mode, admin }: { mode: Mode; admin: boolean }
         </div>
       ))}
 
-      <Card title="Live log" style={{ marginTop: 14 }}>
+      <Card title={t("optLiveLog")} style={{ marginTop: 14 }}>
         <div className="log-console">
-          {log.length === 0 ? <span className="muted">No actions yet.</span> : log.map((l, i) => <div key={i}>{l}</div>)}
+          {log.length === 0 ? <span className="muted">{t("optNoActions")}</span> : log.map((l, i) => <div key={i}>{l}</div>)}
         </div>
       </Card>
     </>

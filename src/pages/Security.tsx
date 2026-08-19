@@ -6,6 +6,12 @@ import { useLang } from "../i18n";
 
 const ok = (v: any) => v === true || v === "True";
 
+const interp = (tpl: string, params: Record<string, string>) => {
+  let s = tpl;
+  for (const [k, v] of Object.entries(params)) s = s.replaceAll(`{${k}}`, v);
+  return s;
+};
+
 /** Collapse long GUID suffixes (e.g. "...TaskMachineCore{3AECA2AC-...}")
  * down to "...TaskMachineCore{…}" so autorun rows don't wrap to 2-3 lines
  * and blow out the card height. Full name is still available via title=. */
@@ -15,21 +21,24 @@ function shortenTaskName(name: string): string {
 }
 
 function HostsCard({ count, hoDisabledCount }: { count: number; hoDisabledCount: number }) {
+  const { t } = useLang();
   const [data, setData] = useState<{ active: string[]; hoDisabled: string[] } | null>(null);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState<"active" | "disabled">("active");
   const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
 
   const load = async () => {
     setLoading(true);
+    setErr("");
     try {
       const d = await api.hostsListAll();
       setData(d);
     } catch (e: any) {
-      alert(String(e));
+      setErr(String(e));
     } finally {
       setLoading(false);
     }
@@ -60,12 +69,13 @@ function HostsCard({ count, hoDisabledCount }: { count: number; hoDisabledCount:
   const disableSelected = async () => {
     if (!selected.size) return;
     setBusy(true);
+    setErr("");
     try {
       await api.hostsDisableEntries([...selected]);
       clearSel();
       await load();
     } catch (e: any) {
-      alert(String(e));
+      setErr(String(e));
     } finally {
       setBusy(false);
     }
@@ -74,29 +84,30 @@ function HostsCard({ count, hoDisabledCount }: { count: number; hoDisabledCount:
   const enableSelected = async () => {
     if (!selected.size) return;
     setBusy(true);
+    setErr("");
     try {
       await api.hostsEnableEntries([...selected]);
       clearSel();
       await load();
     } catch (e: any) {
-      alert(String(e));
+      setErr(String(e));
     } finally {
       setBusy(false);
     }
   };
 
-  const title = `🌐 Hosts file entries (${count} active${hoDisabledCount > 0 ? `, ${hoDisabledCount} disabled` : ""})`;
+  const title = `🌐 ${t("secHostsTitle")} (${count} ${t("secHostsActiveWord")}${hoDisabledCount > 0 ? `, ${hoDisabledCount} ${t("secHostsDisabledWord")}` : ""})`;
 
   return (
     <Card title={title} style={{ marginTop: 14 }}>
+      {err && <div style={{ color: "var(--red)", fontSize: 12, marginBottom: 8 }}>{err}</div>}
       {!data ? (
         <div className="row" style={{ gap: 10, alignItems: "center" }}>
           <span className="muted" style={{ fontSize: 13 }}>
-            {count} active entries · {hoDisabledCount > 0 ? `${hoDisabledCount} disabled by AD HyperOptimize · ` : ""}
-            likely an ad-blocker hosts list.
+            {count} {t("secHostsSummary")} {hoDisabledCount > 0 ? `${hoDisabledCount} ${t("secHostsDisabledBy")}` : ""}
           </span>
           <button className="btn small ghost" onClick={load} disabled={loading}>
-            {loading ? "Loading…" : "Manage entries"}
+            {loading ? t("secHostsLoading") : t("secHostsManage")}
           </button>
         </div>
       ) : (
@@ -107,16 +118,16 @@ function HostsCard({ count, hoDisabledCount }: { count: number; hoDisabledCount:
               className={`btn small ${tab === "active" ? "" : "ghost"}`}
               onClick={() => switchTab("active")}
             >
-              Active ({data.active.length})
+              {t("secHostsActiveTab")} ({data.active.length})
             </button>
             <button
               className={`btn small ${tab === "disabled" ? "" : "ghost"}`}
               onClick={() => switchTab("disabled")}
             >
-              Disabled ({data.hoDisabled.length})
+              {t("secHostsDisabledTab")} ({data.hoDisabled.length})
             </button>
             <div style={{ flex: 1 }} />
-            <button className="btn small ghost" onClick={load} disabled={loading} title="Refresh">
+            <button className="btn small ghost" onClick={load} disabled={loading} title={t("secRefresh")}>
               ↺
             </button>
           </div>
@@ -126,16 +137,16 @@ function HostsCard({ count, hoDisabledCount }: { count: number; hoDisabledCount:
             <input
               ref={searchRef}
               className="input"
-              placeholder="Filter entries…"
+              placeholder={t("secHostsFilter")}
               value={search}
               onChange={(e) => { setSearch(e.target.value); clearSel(); }}
-              style={{ flex: 1, padding: "4px 8px", fontSize: 12, background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 4, color: "var(--fg)" }}
+              style={{ flex: 1, padding: "4px 8px", fontSize: 12, background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 4, color: "var(--text)" }}
             />
-            <button className="btn small ghost" onClick={selectAll} title="Select all visible">
-              All
+            <button className="btn small ghost" onClick={selectAll} title={t("secHostsAll")}>
+              {t("secHostsAll")}
             </button>
             <button className="btn small ghost" onClick={clearSel} disabled={!selected.size}>
-              Clear
+              {t("secHostsClear")}
             </button>
             {tab === "active" && (
               <button
@@ -143,7 +154,7 @@ function HostsCard({ count, hoDisabledCount }: { count: number; hoDisabledCount:
                 onClick={disableSelected}
                 disabled={!selected.size || busy}
               >
-                {busy ? "…" : `⛔ Disable (${selected.size})`}
+                {busy ? "…" : `⛔ ${t("secHostsDisable")} (${selected.size})`}
               </button>
             )}
             {tab === "disabled" && (
@@ -152,7 +163,7 @@ function HostsCard({ count, hoDisabledCount }: { count: number; hoDisabledCount:
                 onClick={enableSelected}
                 disabled={!selected.size || busy}
               >
-                {busy ? "…" : `↩ Enable (${selected.size})`}
+                {busy ? "…" : `↩ ${t("secHostsEnable")} (${selected.size})`}
               </button>
             )}
           </div>
@@ -193,20 +204,20 @@ function HostsCard({ count, hoDisabledCount }: { count: number; hoDisabledCount:
             ))}
             {filtered.length > 200 && (
               <div className="muted" style={{ padding: "4px 8px" }}>
-                … {filtered.length - 200} more — refine filter to see them
+                … {filtered.length - 200} {t("secHostsMore")}
               </div>
             )}
             {filtered.length === 0 && (
               <div className="muted" style={{ padding: 10, textAlign: "center" }}>
-                No {tab} entries{search ? " matching filter" : ""}
+                {t("secHostsNoEntries")}{search ? t("secHostsMatchingFilter") : ""}
               </div>
             )}
           </div>
 
           <div className="muted" style={{ fontSize: 11, marginTop: 5 }}>
-            Showing {Math.min(filtered.length, 200)} / {filtered.length} {tab} entries
-            {selected.size > 0 && ` · ${selected.size} selected`}
-            {tab === "active" && " · Disabled entries are commented-out in-place (reversible)"}
+            {interp(t("secHostsShowing"), { a: String(Math.min(filtered.length, 200)), b: String(filtered.length) })}
+            {selected.size > 0 && ` · ${selected.size} ${t("secHostsSelected")}`}
+            {tab === "active" && ` · ${t("secHostsReversible")}`}
           </div>
         </>
       )}
@@ -241,15 +252,15 @@ export default function Security({ mode }: { mode: Mode }) {
   if (!sec)
     return (
       <>
-        <div className="page-title">Security & Anomalies</div>
-        <Spinner /> <span className="muted">Inspecting Defender, firewall, drivers, autoruns, hosts…</span>
+        <h1 className="page-title">{t("secTitle")}</h1>
+        <Spinner /> <span className="muted">{t("secInspecting")}</span>
       </>
     );
 
   const d = sec.defender ?? {};
   const light = (on: boolean) => (
     <span style={{ color: on ? "var(--green)" : "var(--red)", fontWeight: 700 }}>
-      {on ? "✓ On" : "✗ Off"}
+      {on ? `✓ ${t("secOn")}` : `✗ ${t("secOff")}`}
     </span>
   );
 
@@ -258,26 +269,26 @@ export default function Security({ mode }: { mode: Mode }) {
 
   const defenderRows = [
     {
-      label: "Real-Time Protection",
+      label: t("secRealTime"),
       on: ok(d.RealTimeProtectionEnabled),
       toggle: (v: boolean) => api.defenderSetRealtime(v).then(() => load(false)),
       canToggle: true,
     },
     {
-      label: "Cloud Protection",
+      label: t("secCloud"),
       on: ok(d.MAPSReporting),
       toggle: (v: boolean) => api.defenderSetCloud(v).then(() => load(false)),
       canToggle: true,
     },
     {
-      label: "Tamper Protection",
+      label: t("secTamper"),
       on: ok(d.IsTamperProtected),
       toggle: null,
       canToggle: false,
     },
-    { label: "Firewall (Domain)",  on: ok(fwMap["Domain"]?.Enabled),  toggle: null, canToggle: false },
-    { label: "Firewall (Private)", on: ok(fwMap["Private"]?.Enabled), toggle: null, canToggle: false },
-    { label: "Firewall (Public)",  on: ok(fwMap["Public"]?.Enabled),  toggle: null, canToggle: false },
+    { label: t("secFwDomain"),  on: ok(fwMap["Domain"]?.Enabled),  toggle: null, canToggle: false },
+    { label: t("secFwPrivate"), on: ok(fwMap["Private"]?.Enabled), toggle: null, canToggle: false },
+    { label: t("secFwPublic"),  on: ok(fwMap["Public"]?.Enabled),  toggle: null, canToggle: false },
   ];
 
   const susDrivers   = (sec.unsigned_drivers?.items ?? []) as any[];
@@ -287,15 +298,15 @@ export default function Security({ mode }: { mode: Mode }) {
 
   return (
     <>
-      <div className="page-title">🛡 Security & Anomalies</div>
-      <div className="page-sub">Defender, firewall, unsigned drivers, suspicious autoruns, and hosts file.</div>
+      <h1 className="page-title">🛡 {t("secTitle")}</h1>
+      <div className="page-sub">{t("secSub")}</div>
 
       <div className="row" style={{ gap: 8, marginBottom: 12 }}>
         <button className="btn small" disabled={busy} onClick={() => load(false)}>
-          {busy ? <Spinner /> : "⟳ Refresh"}
+          {busy ? <Spinner /> : `⟳ ${t("secRefresh")}`}
         </button>
         <button className="btn small ghost" disabled={busy} onClick={() => load(true)}>
-          {busy ? <Spinner /> : "🛡 Quick Defender Scan"}
+          {busy ? <Spinner /> : `🛡 ${t("secQuickScan")}`}
         </button>
       </div>
 
@@ -305,7 +316,7 @@ export default function Security({ mode }: { mode: Mode }) {
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, alignItems: "start" }}>
         {/* Defender + Firewall */}
-        <Card title="🛡️ Windows Defender & Firewall">
+        <Card title={`🛡️ ${t("secDefenderTitle")}`}>
           {defenderRows.map(r => (
             <div key={r.label} className="row" style={{ justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid var(--border)", fontSize: 13, alignItems: "center" }}>
               <span className="muted">{r.label}</span>
@@ -319,12 +330,12 @@ export default function Security({ mode }: { mode: Mode }) {
                     onClick={async () => {
                     setBusy(true);
                     try { if (r.toggle) await r.toggle(!r.on); }
-                    catch (e: any) { alert(String(e)); }
+                    catch (e: any) { setTaskMsg({ text: String(e), ok: false }); }
                     finally { setBusy(false); }
                     load(true);
                   }}
                   >
-                    {r.on ? "Disable" : "Enable"}
+                    {r.on ? t("secDisable") : t("secEnable")}
                   </button>
                 )}
               </div>
@@ -333,16 +344,14 @@ export default function Security({ mode }: { mode: Mode }) {
         </Card>
 
         {/* Drivers */}
-        <Card title={`⚠️ Unsigned / Suspicious Drivers (${susDrivers.length})`}>
+        <Card title={`⚠️ ${t("secDriversTitle")} (${susDrivers.length})`}>
           {susDrivers.length === 0 ? (
-            <span className="muted" style={{ fontSize: 13 }}>✓ No suspicious drivers found.</span>
+            <span className="muted" style={{ fontSize: 13 }}>✓ {t("secNoSuspiciousDrivers")}</span>
           ) : (
             <>
               <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", gap: 8, marginBottom: 6 }}>
                 <div className="muted" style={{ fontSize: 11 }}>
-                  Disable is reversible (driver stays installed, just stops loading). Remove uninstalls it —
-                  if the hardware is still plugged in, Windows usually redetects and reinstalls a driver on its own
-                  (the same "repair" trick as Device Manager's own Uninstall button). Consider a restore point first.
+                  {t("secDriversExplain")}
                 </div>
                 <button
                   className="btn small ghost"
@@ -350,19 +359,19 @@ export default function Security({ mode }: { mode: Mode }) {
                   onClick={async () => {
                     try {
                       await api.driversOpenDevmgr();
-                      setTaskMsg({ text: "Device Manager opened.", ok: true });
+                      setTaskMsg({ text: t("secDevMgrOpened"), ok: true });
                     } catch (e: any) {
                       setTaskMsg({ text: String(e), ok: false });
                     }
                   }}
                 >
-                  Open Device Manager
+                  {t("secOpenDevMgr")}
                 </button>
               </div>
               <div style={{ maxHeight: 280, overflowY: "auto" }}>
                 {susDrivers.map((raw: any, i: number) => {
                   const dr = typeof raw === "string" ? { device: raw } : raw ?? {};
-                  const label = dr.device || dr.name || "Unknown driver";
+                  const label = dr.device || dr.name || t("secUnknownDriver");
                   const deviceId: string = dr.deviceId || "";
                   const rowBusy = driverBusy === deviceId;
                   const run = async (
@@ -393,7 +402,7 @@ export default function Security({ mode }: { mode: Mode }) {
                           {label}
                         </div>
                         <div className="muted" style={{ fontSize: 11, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                          {dr.manufacturer || "Unknown manufacturer"}{dr.deviceClass ? ` · ${dr.deviceClass}` : ""}
+                          {dr.manufacturer || t("secUnknownMfr")}{dr.deviceClass ? ` · ${dr.deviceClass}` : ""}
                         </div>
                       </div>
                       <div className="row" style={{ gap: 6, flexShrink: 0 }}>
@@ -401,9 +410,9 @@ export default function Security({ mode }: { mode: Mode }) {
                           className="btn small ghost"
                           style={{ fontSize: 11 }}
                           disabled={rowBusy || !deviceId}
-                          onClick={() => run(api.securityDisableDriver, null, "Disabled")}
+                          onClick={() => run(api.securityDisableDriver, null, t("secDisabledAction"))}
                         >
-                          {rowBusy ? "…" : "Disable"}
+                          {rowBusy ? "…" : t("secDisable")}
                         </button>
                         <button
                           className="btn small ghost danger"
@@ -412,12 +421,12 @@ export default function Security({ mode }: { mode: Mode }) {
                           onClick={() =>
                             run(
                               api.securityRemoveDriver,
-                              `Remove "${label}"?\n\nThis uninstalls the driver. If the hardware is still connected, Windows will likely reinstall a driver for it automatically. A restore point is recommended first.`,
-                              "Removed"
+                              interp(t("secRemoveConfirm"), { label }),
+                              t("secRemovedAction")
                             )
                           }
                         >
-                          {rowBusy ? "…" : "Remove"}
+                          {rowBusy ? "…" : t("secRemove")}
                         </button>
                       </div>
                     </div>
@@ -443,9 +452,9 @@ export default function Security({ mode }: { mode: Mode }) {
 
       <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, alignItems: "start" }}>
         {/* Autoruns */}
-        <Card title={`📋 Autoruns / Scheduled Tasks (${susAutoruns.length})`}>
+        <Card title={`📋 ${t("secAutorunsTitle")} (${susAutoruns.length})`}>
           {susAutoruns.length === 0 ? (
-            <span className="muted" style={{ fontSize: 13 }}>✓ No non-Microsoft startup tasks found.</span>
+            <span className="muted" style={{ fontSize: 13 }}>✓ {t("secNoAutoruns")}</span>
           ) : (
             <div style={{ maxHeight: 360, overflowY: "auto" }}>
               {susAutoruns.map((a: any, i: number) => {
@@ -461,7 +470,7 @@ export default function Security({ mode }: { mode: Mode }) {
                       <div className="muted" style={{ fontSize: 11, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{taskPath}</div>
                     </div>
                     <span style={{ fontSize: 10, color: isDisabled ? "var(--muted)" : "var(--green)", flexShrink: 0 }}>
-                      {isDisabled ? "Disabled" : "Enabled"}
+                      {isDisabled ? t("secDisabled") : t("secEnabled")}
                     </span>
                     <button
                       className="btn small ghost"
@@ -474,7 +483,7 @@ export default function Security({ mode }: { mode: Mode }) {
                           const msg = isDisabled
                             ? await api.enableScheduledTask(taskPath, taskName)
                             : await api.disableScheduledTask(taskPath, taskName);
-                          setTaskMsg({ text: msg || (isDisabled ? `Enabled: ${taskName}` : `Disabled: ${taskName}`), ok: true });
+                          setTaskMsg({ text: msg || interp(isDisabled ? t("secEnabledAction") : t("secDisabledAction2"), { name: taskName }), ok: true });
                           // optimistic UI flip
                           setSec((prev: any) => {
                             if (!prev?.autoruns?.tasks_nonms) return prev;
@@ -497,7 +506,7 @@ export default function Security({ mode }: { mode: Mode }) {
                         }
                       }}
                     >
-                      {isDisabled ? "Enable" : "Disable"}
+                      {isDisabled ? t("secEnable") : t("secDisable")}
                     </button>
                   </div>
                 );
@@ -514,7 +523,7 @@ export default function Security({ mode }: { mode: Mode }) {
       </div>
 
       {mode === "expert" && sec && (
-        <Card title="Raw JSON" style={{ marginTop: 12 }}>
+        <Card title={t("secRawJson")} style={{ marginTop: 12 }}>
           <RawJson data={sec} />
         </Card>
       )}

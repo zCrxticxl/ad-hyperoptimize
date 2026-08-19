@@ -12,10 +12,11 @@ export default function Monitor() {
   const { t } = useLang();
   const [latest, setLatest] = useState<Metrics | null>(null);
   const [series, setSeries] = useState<any[]>([]);
+  const [err, setErr] = useState("");
   const unlisten = useRef<(() => void) | null>(null);
 
   useEffect(() => {
-    api.startMonitor();
+    api.startMonitor().catch((e: any) => setErr(String(e)));
     onMetrics((m) => {
       setLatest(m);
       setSeries((s) => {
@@ -52,8 +53,9 @@ export default function Monitor() {
 
   return (
     <>
-      <div className="page-title">{t("monTitle")}</div>
+      <h1 className="page-title">{t("monTitle")}</h1>
       <div className="page-sub">{t("monSub")}</div>
+      {err && <div style={{ color: "var(--red)", marginBottom: 10 }}>{err}</div>}
 
       <div className="grid grid-4">
         <Card title={t("monCpu")}><div className="stat-big">{latest?.cpuTotal.toFixed(1) ?? "—"}%</div>

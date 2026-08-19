@@ -9,6 +9,7 @@ export default function GameBooster({ admin }: { admin: boolean }) {
   const [games, setGames]       = useState<any[]>([]);
   const [bg, setBg]             = useState<any[]>([]);
   const [selBg, setSelBg]       = useState<Set<number>>(new Set());
+  const [confirmKill, setConfirmKill] = useState(false);
   const [loading, setLoading]   = useState(true);
   const [boosted, setBoosted]   = useState<number | null>(null);
   const [busy, setBusy]         = useState(false);
@@ -76,7 +77,7 @@ export default function GameBooster({ admin }: { admin: boolean }) {
 
   return (
     <>
-      <div className="page-title">🎮 {t("gameboostTitle")}</div>
+      <h1 className="page-title">🎮 {t("gameboostTitle")}</h1>
       <div className="page-sub">
         {t("gameboostSub")}
         {!admin && <span style={{ color: "var(--orange)" }}> · {t("gameboostAdminHint")}</span>}
@@ -169,22 +170,36 @@ export default function GameBooster({ admin }: { admin: boolean }) {
           <div className="muted">{t("gameboostNoKnownBloat")}</div>
         ) : (
           <>
-            <div className="row" style={{ gap: 8, marginBottom: 10 }}>
+            <div className="row" style={{ gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
               <button className="btn small ghost" onClick={selectAllBg}>{t("gameboostSelectAll")}</button>
               <button className="btn small ghost" onClick={clearSelBg}>{t("gameboostClear")}</button>
               <div style={{ flex: 1 }} />
-              <button
-                className="btn small danger"
-                disabled={!selBg.size || busy}
-                onClick={() => act(async () => {
-                  const r = await api.gameboostKillBackground([...selBg]);
-                  setSelBg(new Set());
-                  await refresh();
-                  return r;
-                })}
-              >
-                {busy ? "…" : `💀 ${t("gameboostKill")} (${selBg.size})`}
-              </button>
+              {!confirmKill ? (
+                <button
+                  className="btn small danger"
+                  disabled={!selBg.size || busy}
+                  onClick={() => setConfirmKill(true)}
+                >
+                  {busy ? "…" : `💀 ${t("gameboostKill")} (${selBg.size})`}
+                </button>
+              ) : (
+                <>
+                  <span style={{ color: "var(--yellow)", fontSize: 13 }}>⚠ {t("gameboostKillConfirm")} ({selBg.size})</span>
+                  <button
+                    className="btn small danger"
+                    disabled={busy}
+                    onClick={() => { setConfirmKill(false); act(async () => {
+                      const r = await api.gameboostKillBackground([...selBg]);
+                      setSelBg(new Set());
+                      await refresh();
+                      return r;
+                    }); }}
+                  >
+                    {busy ? "…" : t("gameboostKillConfirmBtn")}
+                  </button>
+                  <button className="btn small ghost" onClick={() => setConfirmKill(false)} disabled={busy}>{t("cancel")}</button>
+                </>
+              )}
             </div>
             {bg.map((p: any) => (
               <label

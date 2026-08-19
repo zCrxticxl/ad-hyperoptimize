@@ -7,13 +7,14 @@ export default function Reports() {
   const { t } = useLang();
   const [report, setReport] = useState<any | null>(null);
   const [history, setHistory] = useState<any[]>([]);
+  const [histErr, setHistErr] = useState("");
   const [restorePts, setRestorePts] = useState<any | null>(null);
   const [logs, setLogs] = useState<any | null>(null);
   const [health, setHealth] = useState<any | null>(null);
   const [undoBusy, setUndoBusy] = useState<string | null>(null);
   const [undoErr, setUndoErr] = useState<string>("");
 
-  const loadHistory = () => api.history().then(setHistory).catch(() => {});
+  const loadHistory = () => api.history().then(setHistory).catch((e: any) => { setHistErr(String(e)); setHistory([]); });
 
   useEffect(() => {
     loadHistory();
@@ -31,7 +32,7 @@ export default function Reports() {
 
   return (
     <>
-      <div className="page-title">{t("repTitle")}</div>
+      <h1 className="page-title">{t("repTitle")}</h1>
       <div className="page-sub">{t("repSub")}</div>
 
       <Card title={t("repGenerateReport")}>
@@ -52,8 +53,9 @@ export default function Reports() {
       </Card>
 
       <Card title={`${t("repChangeHistory")} (${history.length})`} style={{ marginTop: 14 }}>
+        {histErr && <div style={{ color: "var(--red)", fontSize: 12, marginBottom: 8 }}>{histErr}</div>}
         <table className="tbl">
-          <thead><tr><th>{t("repTime")}</th><th>{t("repTweak")}</th><th>{t("repState")}</th><th>{t("repBackups")}</th><th></th></tr></thead>
+          <thead><tr><th scope="col">{t("repTime")}</th><th scope="col">{t("repTweak")}</th><th scope="col">{t("repState")}</th><th scope="col">{t("repBackups")}</th><th scope="col"></th></tr></thead>
           <tbody>
             {[...history].reverse().map((h, i) => (
               <tr key={h.id ?? i}>

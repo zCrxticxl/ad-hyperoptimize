@@ -102,7 +102,7 @@ export default function NvidiaControlPanel() {
 
   return (
     <>
-      <div className="page-title">🟢 {t("nvcpTitle")}</div>
+      <h1 className="page-title">🟢 {t("nvcpTitle")}</h1>
       <div className="page-sub">{t("nvcpSub")}</div>
 
       {loading && <><Spinner /> <span className="muted">{t("gpuLoading")}</span></>}

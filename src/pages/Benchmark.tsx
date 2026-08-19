@@ -32,7 +32,7 @@ export default function Benchmark() {
 
   return (
     <>
-      <div className="page-title">{t("benchTitle")}</div>
+      <h1 className="page-title">{t("benchTitle")}</h1>
       <div className="page-sub">
         {t("benchSub")}
       </div>
@@ -56,7 +56,7 @@ export default function Benchmark() {
 
       <Card title={`${t("benchHistoryTitle")} (${history.length} ${t("benchRuns")}) — ${t("benchBeforeAfter")}`}>
         <table className="tbl">
-          <thead><tr><th>{t("benchColTime")}</th><th>{t("benchColTest")}</th><th>{t("benchColResult")}</th></tr></thead>
+          <thead><tr><th scope="col">{t("benchColTime")}</th><th scope="col">{t("benchColTest")}</th><th scope="col">{t("benchColResult")}</th></tr></thead>
           <tbody>
             {[...history].reverse().slice(0, 25).map((h, i) => (
               <tr key={i}>

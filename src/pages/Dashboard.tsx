@@ -6,12 +6,13 @@ import { useLang } from "../i18n";
 import { localizeFinding, localizeSummary } from "../localize";
 import type { Mode } from "../App";
 
-export default function Dashboard({ mode, go }: { mode: Mode; go: (p: string) => void }) {
+export default function Dashboard({ mode, go }: { mode: Mode; go: (p: string, target?: string) => void }) {
   const { t } = useLang();
   const [analysis, setAnalysis] = useState<any | null>(null);
   const [meta, setMeta] = useState<{ time: string; fromCache: boolean } | null>(null);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  const [showAll, setShowAll] = useState(false);
 
   const run = async (force: boolean) => {
     setBusy(true); setErr("");
@@ -24,7 +25,12 @@ export default function Dashboard({ mode, go }: { mode: Mode; go: (p: string) =>
 
   const score = analysis?.healthScore ?? null;
   const tone = score === null ? "neutral" : score >= 80 ? "good" : score >= 50 ? "warn" : "bad";
+  // The ring arc must reflect the ACTUAL score (a 71 must not render a 54% arc).
+  const arc = score === null ? 0 : Math.max(0, Math.min(100, score));
+  const ringColor =
+    tone === "good" ? "var(--green)" : tone === "warn" ? "var(--yellow)" : tone === "bad" ? "var(--red)" : "var(--muted)";
   const findings = analysis?.findings ?? [];
+  const visibleFindings = showAll ? findings : findings.slice(0, 5);
   const critical = findings.filter((finding: any) => finding.severity >= 4).length;
   const actionable = findings.filter((finding: any) => finding.tweakIds?.length > 0).length;
   const severityLabels = ["", t("dashSevInfo"), t("dashSevLow"), t("dashSevMedium"), t("dashSevHigh"), t("dashSevCritical")];
@@ -32,20 +38,20 @@ export default function Dashboard({ mode, go }: { mode: Mode; go: (p: string) =>
   return <>
     <section className="dashboard-hero">
       <div className="hero-copy">
-        <div className="eyebrow">SYSTEM OVERVIEW</div>
+        <div className="eyebrow">{t("dashEyebrow")}</div>
         <h1>{t("dashTitle")}</h1>
         <p>{analysis ? localizeSummary(findings, t) : busy ? t("dashRunningFullAnalysis") : t("dashSub")}</p>
         <div className="hero-actions">
           {/* Auto-Optimize is the "just make it faster" path — it stays the primary
               action so a new user never has to pick tweaks by hand. */}
-          <button className="btn" onClick={() => go("autoopt")}>⚡ {t("navAutoOpt")}</button>
+          <button className="btn" onClick={() => go("autoopt")}><span aria-hidden="true">⚡</span> {t("navAutoOpt")}</button>
           <button className="btn ghost" onClick={() => run(true)} disabled={busy}>{busy ? <><Spinner /> {t("dashAnalyzing")}</> : <>↻ {t("dashReanalyze")}</>}</button>
           {actionable > 0 && <button className="btn ghost" onClick={() => go("optimize")}>{actionable} · {t("dashFixInOptimize")} →</button>}
         </div>
         {meta && <div className="analysis-meta"><span className="status-dot is-ready" />{meta.fromCache ? `${t("dashCached")} · ` : ""}{t("dashAnalyzed")} {fmtAge(meta.time)}</div>}
         {err && <div className="inline-error">{err}</div>}
       </div>
-      <div className={`score-orbit ${tone}`}>
+      <div className="score-orbit" style={{ background: `conic-gradient(${ringColor} 0 ${arc}%, rgba(255,255,255,.09) ${arc}%)` }}>
         <div className="score-inner"><span className="score-value">{busy && score === null ? <Spinner /> : score ?? "—"}</span><span className="score-label">{t("dashHealthScore")}</span><span className="score-total">/ 100</span></div>
       </div>
     </section>
@@ -63,16 +69,20 @@ export default function Dashboard({ mode, go }: { mode: Mode; go: (p: string) =>
         {!analysis && busy && <div className="loading-panel"><Spinner /></div>}
         {analysis && findings.length === 0 && <div className="empty-state"><span>✓</span><b>{t("dashNoIssues")}</b><p>{t("dashSub")}</p></div>}
         <div className="finding-list">
-          {findings.slice(0, 5).map((finding: any, index: number) => {
+          {visibleFindings.map((finding: any, index: number) => {
             const localized = localizeFinding(finding, t);
             return <div key={index} className="finding-row">
               <Badge cls={`sev-${finding.severity}`}>{severityLabels[finding.severity]}</Badge>
               <div className="finding-copy"><b>{localized.title}</b><span>{localized.recommendation}</span></div>
-              {finding.tweakIds?.length > 0 && <button className="row-action" onClick={() => go("optimize")}>Fix →</button>}
+              {finding.tweakIds?.length > 0 && <button className="row-action" onClick={() => go("optimize", finding.tweakIds[0])}>{t("dashFix")}</button>}
             </div>;
           })}
         </div>
-        {findings.length > 5 && <button className="text-action" onClick={() => go("healthcheck")}>View all {findings.length} findings →</button>}
+        {findings.length > 5 && (
+          <button className="text-action" onClick={() => setShowAll(v => !v)}>
+            {showAll ? `▲ ${t("dashShowFewer")}` : `▼ ${t("dashShowAll")} (${findings.length})`}
+          </button>
+        )}
       </Card>
       <Card title={t("dashHardwareProfile")}><HwProfileCard /></Card>
     </div>

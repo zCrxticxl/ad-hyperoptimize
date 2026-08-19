@@ -71,26 +71,42 @@ export default function HealthCheck({ admin }: { admin: boolean }) {
     } finally { setRunning(null); }
   };
 
-  const allDone   = Object.values(results).length;
-  const hasCorrupt = Object.values(results).some(r => r.result === "corrupt");
+  const allDone    = Object.values(results).length;
+  const hasProblem = Object.values(results).some(r => r.result === "corrupt" || r.result === "error");
+  const hasRepaired = Object.values(results).some(r => r.result === "repaired");
+  const hasUnknown = Object.values(results).some(r => r.result === "unknown");
+  const repairedCount = Object.values(results).filter(r => r.result === "repaired").length;
+  const unknownCount   = Object.values(results).filter(r => r.result === "unknown").length;
+
+  // Only summarise once EVERY check has run — a green "all good" while other
+  // checks are still pending would be a false success.
+  const summary = allDone === CHECKS.length && allDone > 0
+    ? hasProblem
+      ? { tone: "bad", text: t("healthCorrupt") }
+      : hasRepaired
+      ? { tone: "warn", text: `⚡ ${repairedCount} ${t("repaired")}` }
+      : hasUnknown
+      ? { tone: "warn", text: `? ${unknownCount} ${t("unknown")}` }
+      : { tone: "good", text: `✔ ${allDone} ${t("healthAllGood")}` }
+    : null;
+
+  const TONE: Record<string, { bg: string; border: string }> = {
+    good: { bg: "rgba(34,197,94,.1)",  border: "var(--green)" },
+    warn: { bg: "rgba(245,158,11,.1)", border: "var(--orange)" },
+    bad:  { bg: "rgba(239,68,68,.1)",  border: "var(--red)" },
+  };
 
   return (
     <>
-      <div className="page-title">{t("healthTitle")}</div>
+      <h1 className="page-title">{t("healthTitle")}</h1>
       <div className="page-sub">{t("healthSub")}</div>
 
       {!admin && <div className="warn-banner">{t("healthAdminWarn")}</div>}
       {err && <div style={{ color: "var(--red)", marginBottom: 10 }}>{err}</div>}
 
-      {allDone > 0 && (
-        <div className="status-banner" style={{
-          background: hasCorrupt ? "rgba(239,68,68,.1)" : "rgba(34,197,94,.1)",
-          borderColor: hasCorrupt ? "var(--red)" : "var(--green)",
-          marginBottom: 16,
-        }}>
-          {hasCorrupt
-            ? t("healthCorrupt")
-            : `✔ ${allDone} ${t("healthAllGood")}`}
+      {summary && (
+        <div className="status-banner" style={{ background: TONE[summary.tone].bg, borderColor: TONE[summary.tone].border, marginBottom: 16 }}>
+          {summary.text}
         </div>
       )}
 

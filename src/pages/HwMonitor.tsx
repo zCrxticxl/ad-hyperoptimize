@@ -188,9 +188,16 @@ function SmartCard({ data }: { data: any }) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function HwMonitor() {
+  const { t } = useLang();
+  const interp = (tpl: string, params: Record<string, string>) => {
+    let s = tpl;
+    for (const [k, v] of Object.entries(params)) s = s.replaceAll(`{${k}}`, v);
+    return s;
+  };
   const [data, setData] = useState<any>(null);
   const [busy, setBusy] = useState(false);
   const [ts, setTs] = useState<string>("");
+  const [err, setErr] = useState("");
 
   const load = async () => {
     setBusy(true);
@@ -198,6 +205,9 @@ export default function HwMonitor() {
       const d = await api.hwFull();
       setData(d);
       setTs(new Date().toLocaleTimeString());
+      setErr("");
+    } catch (e: any) {
+      setErr(String(e));
     } finally {
       setBusy(false);
     }
@@ -211,23 +221,24 @@ export default function HwMonitor() {
 
   return (
     <>
-      <div className="page-title">🌡 Hardware Monitor</div>
+      <h1 className="page-title">🌡 {t("hwMonTitle")}</h1>
       <div className="page-sub">
-        CPU thermal zones · GPU temperatures &amp; utilisation (requires nvidia-smi) · SSD S.M.A.R.T.
-        {ts && <> · Updated {ts}</>}
+        {t("hwMonSub")}
+        {ts && <> · {interp(t("hwMonUpdated"), { ts })}</>}
         {" · "}
         <a style={{ color: "var(--accent)", cursor: "pointer" }} onClick={load}>
-          {busy ? "refreshing…" : "Refresh now"}
+          {busy ? t("hwMonRefreshing") : t("hwMonRefreshNow")}
         </a>
-        {" (auto-refresh every 10 s)"}
+        {" " + t("hwMonAutoRefresh")}
       </div>
 
       {!data ? (
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 40 }}>
-          <Spinner /> <span className="muted">Loading hardware data…</span>
+          <Spinner /> <span className="muted">{t("hwMonLoading")}</span>
         </div>
       ) : (
         <>
+          {err && <div style={{ color: "var(--red)", marginBottom: 10 }}>{err}</div>}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
             <CpuTempsCard data={data.temps} />
             <GpuCard data={data.temps} />
@@ -235,7 +246,7 @@ export default function HwMonitor() {
           <SmartCard data={data.smart} />
 
           {(data.fans?.fans ?? []).length > 0 && (
-            <Card title="Fan Speeds" style={{ marginTop: 14 }}>
+            <Card title={t("hwMonFanSpeeds")} style={{ marginTop: 14 }}>
               {data.fans.fans.map((f: any, i: number) => (
                 <div key={i} className="row" style={{ padding: "4px 0", borderBottom: "1px solid var(--border)" }}>
                   <span style={{ flex: 1 }}>{f.name}</span>

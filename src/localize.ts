@@ -120,8 +120,10 @@ export function localizeFinding(finding: Finding, t: (key: any) => string): { ti
 export function localizeSummary(findings: Finding[], t: (key: any) => string): string {
   if (findings.length === 0) return t("dashSummaryNone");
   const top = localizeFinding(findings[0], t);
+  const problems = findings.length === 1 ? t("dashProblemOne") : t("dashProblemMany");
   return interpolate(t("dashSummaryTemplate"), {
     count: findings.length,
+    problems,
     title: top.title,
     recommendation: top.recommendation,
   });

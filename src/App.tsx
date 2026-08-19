@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { check as checkUpdate } from "@tauri-apps/plugin-updater";
 import { api } from "./api";
-import { LangProvider, useLang, LANG_NAMES, Lang } from "./i18n";
+import { LangProvider, useLang, LANG_NAMES, Lang, plural } from "./i18n";
 import Onboarding from "./components/Onboarding";
 import Dashboard from "./pages/Dashboard";
 import Hardware from "./pages/Hardware";
@@ -101,13 +101,25 @@ export const buildNav: NavBuilder = (t) => [
 
 export type Mode = "beginner" | "expert";
 
+/** Tools that change system state — only these get the "revertible" trust pill
+ * (a read-only page must not claim it), which now also links to the undo hub. */
+const MUTATING_TOOLS = new Set([
+  "optimize", "autoopt", "cleanup", "uninstaller", "regclean", "gputweaks", "nvcontrol",
+  "bootopt", "privacy", "services", "startup", "schedtasks", "healthcheck", "updates",
+  "perftweaks", "powerplan", "gameboost", "debloater", "drivers", "restorepoints",
+  "profiles", "gameprofiles", "ctxmenu", "softinstaller", "diskanalyzer",
+]);
+
 const MODE_KEY = "ui.mode";
 const ONBOARDED_KEY = "ui.onboarded";
 
 /** Where the shell currently is: launcher home, a category grid, or a tool. */
-type Route = { kind: "home" } | { kind: "category"; id: string } | { kind: "tool"; id: string };
+type Route =
+  | { kind: "home" }
+  | { kind: "category"; id: string }
+  | { kind: "tool"; id: string; target?: string };
 
-function renderTool(page: string, mode: Mode, admin: boolean | null, go: (id: string) => void) {
+function renderTool(page: string, mode: Mode, admin: boolean | null, go: (id: string, target?: string) => void, onSwitchExpert: () => void, target?: string) {
   switch (page) {
     case "dashboard": return <Dashboard mode={mode} go={go} />;
     case "hardware": return <Hardware mode={mode} />;
@@ -116,7 +128,7 @@ function renderTool(page: string, mode: Mode, admin: boolean | null, go: (id: st
     case "processes": return <Processes />;
     case "startup": return <Startup admin={!!admin} />;
     case "schedtasks": return <ScheduledTasks admin={!!admin} />;
-    case "optimize": return <Optimize mode={mode} admin={!!admin} />;
+    case "optimize": return <Optimize mode={mode} admin={!!admin} focusId={target} onSwitchExpert={onSwitchExpert} />;
     case "profiles": return <Profiles />;
     case "gameprofiles": return <GameProfiles />;
     case "cleanup": return <Cleanup />;
@@ -161,6 +173,7 @@ function AppInner() {
   });
   const [query, setQuery] = useState("");
   const [updateBanner, setUpdateBanner] = useState<{ version: string } | null>(null);
+  const [modeNotice, setModeNotice] = useState(false);
   const updateChecked = useRef(false);
 
   const setMode = (next: Mode) => {
@@ -198,7 +211,7 @@ function AppInner() {
   const findTool = (toolId: string) => nav.flatMap((g) => g.items).find((i) => i.id === toolId);
 
   const openCategory = (id: string) => { setQuery(""); setRoute({ kind: "category", id }); };
-  const openTool = (id: string) => { setQuery(""); setRoute({ kind: "tool", id }); };
+  const openTool = (id: string, target?: string) => { setQuery(""); setRoute({ kind: "tool", id, target }); };
   const goHome = () => { setQuery(""); setRoute({ kind: "home" }); };
   const back = () => {
     if (route.kind === "tool") { const g = findGroupOf(route.id); setRoute(g ? { kind: "category", id: g.id } : { kind: "home" }); }
@@ -214,11 +227,17 @@ function AppInner() {
     : [];
 
   // Leaving Expert mode while sitting on an advanced tool/category would strand
-  // the user on a screen they can no longer reach.
+  // the user on a screen they can no longer reach — bounce home WITH a notice
+  // instead of a silent context loss (UI-020).
   useEffect(() => {
     if (mode !== "beginner") return;
-    if (route.kind === "tool" && !findTool(route.id)?.basic) setRoute({ kind: "home" });
-    if (route.kind === "category" && !visibleGroups.some((g) => g.id === route.id)) setRoute({ kind: "home" });
+    let stranded = false;
+    if (route.kind === "tool" && !findTool(route.id)?.basic) stranded = true;
+    if (route.kind === "category" && !visibleGroups.some((g) => g.id === route.id)) stranded = true;
+    if (stranded) {
+      setModeNotice(true);
+      setRoute({ kind: "home" });
+    }
   }, [mode]);
 
   if (!onboarded) return <Onboarding onDone={finishOnboarding} />;
@@ -260,14 +279,22 @@ function AppInner() {
           <select className="lang-select" value={lang} onChange={(e) => setLang(e.target.value as Lang)} aria-label="Language">
             {Object.entries(LANG_NAMES).map(([code, name]) => <option key={code} value={code}>{name}</option>)}
           </select>
-          <span className="admin-chip" title={admin ? t("adminBadge") : t("userBadge")}><span className={`status-dot ${admin ? "is-ready" : ""}`} />{admin === null ? "…" : admin ? "Admin" : t("userBadge")}</span>
-          <button className="social-btn coffee" onClick={() => api.openPath("https://www.buymeacoffee.com/zCrxticxl")} title={t("supportTip")}>☕</button>
-          <button className="social-btn" onClick={() => api.openPath("https://discord.gg/vFaKsVuxKP")} title="Discord">D</button>
-          <button className="social-btn x" onClick={() => api.openPath("https://x.com/zCrxticxl")} title="X">X</button>
+          <span className="admin-chip" title={admin ? t("adminBadge") : t("adminHint")}><span className={`status-dot ${admin ? "is-ready" : ""}`} />{admin === null ? "…" : admin ? t("adminBadge") : t("userBadge")}</span>
+          <button className="social-btn coffee" aria-label={t("supportTip")} onClick={() => api.openPath("https://www.buymeacoffee.com/zCrxticxl")} title={t("supportTip")}><span aria-hidden="true">☕</span></button>
+          <button className="social-btn" aria-label="Discord" onClick={() => api.openPath("https://discord.gg/vFaKsVuxKP")} title="Discord"><span aria-hidden="true">D</span></button>
+          <button className="social-btn x" aria-label="X" onClick={() => api.openPath("https://x.com/zCrxticxl")} title="X"><span aria-hidden="true">X</span></button>
         </div>
       </header>
 
       {updateBanner && <div className="update-banner"><div><b>↻ {t("navUpdateAvailable")}</b><span>v{updateBanner.version} {t("navUpdateReady")}</span></div><button className="btn small" onClick={() => { openTool("updates"); setUpdateBanner(null); }}>{t("navInstallUpdate")}</button><button className="icon-button" onClick={() => setUpdateBanner(null)} aria-label="Dismiss update">×</button></div>}
+
+      {modeNotice && (
+        <div className="warn-banner" style={{ margin: "12px 0 0" }}>
+          <b>ℹ </b>{t("modeNotice")}
+          <button className="btn small" style={{ marginLeft: 10 }} onClick={() => { setMode("expert"); setModeNotice(false); }}>{t("modeSwitchExpert")}</button>
+          <button className="btn small ghost" style={{ marginLeft: 6 }} onClick={() => setModeNotice(false)}>{t("close")}</button>
+        </div>
+      )}
 
       <main className="content">
         {/* Search overrides whatever route we're on. */}
@@ -295,7 +322,7 @@ function AppInner() {
                 <h1>{t("homeTitle")}</h1>
                 <p>{t("homeSub")}</p>
               </div>
-              <button className="btn big" onClick={() => openTool("autoopt")}>⚡ {t("navAutoOpt")}</button>
+              <button className="btn big" onClick={() => openTool("autoopt")}><span aria-hidden="true">⚡</span> {t("navAutoOpt")}</button>
             </div>
             <div className="category-grid">
               {visibleGroups.map((g) => (
@@ -303,14 +330,14 @@ function AppInner() {
                   <span className="category-icon" aria-hidden="true">{g.icon}</span>
                   <b>{g.group}</b>
                   <span className="category-desc">{g.desc}</span>
-                  <span className="category-count">{g.items.length} {t("homeTools")} →</span>
+                  <span className="category-count">{g.items.length} {plural(g.items.length, t("homeTool"), t("homeTools"))} →</span>
                 </button>
               ))}
             </div>
             {hiddenCount > 0 && (
               <button className="nav-unlock wide" onClick={() => setMode("expert")}>
                 <span aria-hidden="true">＋</span>
-                <span>{hiddenCount} {t("navMoreInExpert")}</span>
+                <span>{hiddenCount} {plural(hiddenCount, t("navMoreInExpertOne"), t("navMoreInExpert"))}</span>
               </button>
             )}
           </>
@@ -334,9 +361,13 @@ function AppInner() {
           <>
             <div className="tool-head">
               <button className="back-btn" onClick={back}>← {activeToolGroup?.group ?? t("navHome")}</button>
-              <span className="safe-pill"><span className="status-dot is-ready" />{t("safeRevertible")}</span>
+              {MUTATING_TOOLS.has(route.id) && (
+                <button className="safe-pill" style={{ border: 0, cursor: "pointer" }} onClick={() => openTool("reports")} title={t("safeRevertible")}>
+                  <span className="status-dot is-ready" /><span aria-hidden="true">🛟</span> {t("safeRevertible")}
+                </button>
+              )}
             </div>
-            <div className="page-content">{renderTool(route.id, mode, admin, openTool)}</div>
+            <div className="page-content">{renderTool(route.id, mode, admin, openTool, () => setMode("expert"), route.target)}</div>
           </>
         ) : null}
       </main>

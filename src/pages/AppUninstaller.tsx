@@ -13,6 +13,7 @@ export default function AppUninstaller({ admin }: { admin: boolean }) {
   const { t } = useLang();
   const [apps, setApps]             = useState<any[]>([]);
   const [loading, setLoading]       = useState(true);
+  const [loadErr, setLoadErr]       = useState("");
   const [search, setSearch]         = useState("");
   const [busy, setBusy]             = useState<string | null>(null);
   const [log, setLog]               = useState<Record<string, string>>({});
@@ -21,12 +22,17 @@ export default function AppUninstaller({ admin }: { admin: boolean }) {
   const [leftovers, setLeftovers]   = useState<Record<string, any[]>>({});
   const [selLeft, setSelLeft]       = useState<Record<string, Set<string>>>({});
   const [cleaning, setCleaning]     = useState<string | null>(null);
+  const [confirmClean, setConfirmClean] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
+    setLoadErr("");
     try {
       const d = await api.uninstallerList();
       setApps(d.apps ?? []);
+    } catch (e: any) {
+      setLoadErr(String(e));
+      setApps([]);
     } finally { setLoading(false); }
   };
 
@@ -67,6 +73,7 @@ export default function AppUninstaller({ admin }: { admin: boolean }) {
     const sel = selLeft[appName];
     if (!sel?.size) return;
     setCleaning(appName);
+    setConfirmClean(null);
     try {
       const msg = await api.cleanLeftovers([...sel]);
       setLog(prev => ({ ...prev, [appName]: msg }));
@@ -86,7 +93,7 @@ export default function AppUninstaller({ admin }: { admin: boolean }) {
 
   return (
     <>
-      <div className="page-title">🗑 {t("uninstTitle")}</div>
+      <h1 className="page-title">🗑 {t("uninstTitle")}</h1>
       <div className="page-sub">
         {t("uninstSub")}
         · {apps.length} {t("uninstAppsInstalled")}
@@ -105,6 +112,8 @@ export default function AppUninstaller({ admin }: { admin: boolean }) {
 
         {loading ? (
           <div className="row" style={{ gap: 10 }}><Spinner /><span className="muted">{t("uninstScanning")}</span></div>
+        ) : loadErr ? (
+          <div style={{ color: "var(--red)", marginBottom: 10 }}>{loadErr}</div>
         ) : filtered.length === 0 ? (
           <div className="muted">{t("uninstNoApps")}{search ? ` ${t("uninstMatchingFilter")}` : ""}.</div>
         ) : (
@@ -155,13 +164,23 @@ export default function AppUninstaller({ admin }: { admin: boolean }) {
                       <div className="row" style={{ marginBottom: 6, alignItems: "center", gap: 8 }}>
                         <span style={{ fontSize: 12, fontWeight: 600 }}>{appLeft.length} {t("uninstLeftoversFound")}</span>
                         <div style={{ flex: 1 }} />
-                        <button
-                          className="btn small danger"
-                          onClick={() => cleanLeft(app.name)}
-                          disabled={!appSel.size || cleaning === app.name}
-                        >
-                          {cleaning === app.name ? "…" : `🗑 ${t("uninstClean")} (${appSel.size})`}
-                        </button>
+                        {confirmClean !== app.name ? (
+                          <button
+                            className="btn small danger"
+                            onClick={() => setConfirmClean(app.name)}
+                            disabled={!appSel.size || cleaning === app.name}
+                          >
+                            {cleaning === app.name ? "…" : `🗑 ${t("uninstClean")} (${appSel.size})`}
+                          </button>
+                        ) : (
+                          <>
+                            <span style={{ color: "var(--yellow)", fontSize: 12 }}>⚠ {t("uninstConfirmClean")} ({appSel.size})</span>
+                            <button className="btn small danger" onClick={() => cleanLeft(app.name)} disabled={cleaning === app.name}>
+                              {cleaning === app.name ? "…" : t("uninstConfirmCleanBtn")}
+                            </button>
+                            <button className="btn small ghost" onClick={() => setConfirmClean(null)} disabled={cleaning === app.name}>{t("cancel")}</button>
+                          </>
+                        )}
                       </div>
                       {appLeft.map((item: any) => (
                         <label key={item.path} className="row" style={{ gap: 8, padding: "2px 0", cursor: "pointer", alignItems: "center" }}>

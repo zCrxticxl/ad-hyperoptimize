@@ -11,6 +11,7 @@ import { useLang } from "../i18n";
 type UpdateStatus = "idle" | "checking" | "up_to_date" | "available" | "downloading" | "ready" | "error";
 
 function SelfUpdateCard() {
+  const { t } = useLang();
   const [status, setStatus] = useState<UpdateStatus>("idle");
   const [currentVer, setCurrentVer] = useState("…");
   const [newVer, setNewVer]         = useState("");
@@ -74,16 +75,17 @@ function SelfUpdateCard() {
     error: errMsg.includes("No update server") ? "var(--muted)" : "var(--red)",
   };
   const statusLabel: Record<UpdateStatus, string> = {
-    idle: "", checking: "Checking…", up_to_date: "✓ Already on latest version",
-    available: `v${newVer} available`, downloading: `Downloading… ${progress}%`,
-    ready: "✓ Update downloaded — restart to apply", error: `Error: ${errMsg}`,
+    idle: "", checking: t("updChecking"), up_to_date: t("updUpToDate"),
+    available: t("updAvailable").replace("{ver}", () => newVer),
+    downloading: t("updDownloading").replace("{pct}", () => String(progress)),
+    ready: t("updReady"), error: t("updError").replace("{err}", () => errMsg),
   };
 
   return (
     <Card title="⟳ AD HyperOptimize — App Update">
       <div className="row" style={{ alignItems: "center", gap: 16, marginBottom: 10 }}>
         <div>
-          <span className="muted" style={{ fontSize: 12 }}>Current version </span>
+          <span className="muted" style={{ fontSize: 12 }}>{t("updCurrentVersion")} </span>
           <span className="mono" style={{ fontWeight: 700 }}>v{currentVer}</span>
         </div>
         {newVer && (
@@ -111,13 +113,13 @@ function SelfUpdateCard() {
 
       <div className="row" style={{ gap: 8 }}>
         <button className="btn small" onClick={checkUpdate} disabled={status === "checking" || status === "downloading"}>
-          {status === "checking" ? <><Spinner /> Checking…</> : "Check for updates"}
+          {status === "checking" ? <><Spinner /> {t("updChecking")}</> : t("updCheckBtn")}
         </button>
         {status === "available" && (
-          <button className="btn small" onClick={installUpdate}>⬇ Download & Install</button>
+          <button className="btn small" onClick={installUpdate}>{t("updDownloadBtn")}</button>
         )}
         {status === "ready" && (
-          <button className="btn small" onClick={() => relaunch()}>↺ Restart now</button>
+          <button className="btn small" onClick={() => relaunch()}>{t("updRestartBtn")}</button>
         )}
       </div>
     </Card>
@@ -202,7 +204,7 @@ export default function Updates({ admin }: { admin: boolean }) {
 
   return (
     <>
-      <div className="page-title">{t("updatesTitle")}</div>
+      <h1 className="page-title">{t("updatesTitle")}</h1>
       <div className="page-sub">{t("updatesSub")}</div>
 
       <SelfUpdateCard />
@@ -241,12 +243,12 @@ export default function Updates({ admin }: { admin: boolean }) {
             <table className="tbl">
               <thead>
                 <tr>
-                  <th>{t("colApp")}</th>
-                  <th>{t("colInstalled")}</th>
-                  <th>{t("colAvailable")}</th>
-                  <th>{t("colSource")}</th>
-                  <th>{t("colPath")}</th>
-                  <th style={{ width: 160 }}></th>
+                  <th scope="col">{t("colApp")}</th>
+                  <th scope="col">{t("colInstalled")}</th>
+                  <th scope="col">{t("colAvailable")}</th>
+                  <th scope="col">{t("colSource")}</th>
+                  <th scope="col">{t("colPath")}</th>
+                  <th scope="col" style={{ width: 160 }}></th>
                 </tr>
               </thead>
               <tbody>
@@ -344,7 +346,7 @@ export default function Updates({ admin }: { admin: boolean }) {
           {drivers?.count > 0 && (
             <>
               <table className="tbl">
-                <thead><tr><th>{t("colDriver")}</th><th>{t("colManufacturer")}</th><th>{t("colDate")}</th><th>{t("colSize")}</th></tr></thead>
+                <thead><tr><th scope="col">{t("colDriver")}</th><th scope="col">{t("colManufacturer")}</th><th scope="col">{t("colDate")}</th><th scope="col">{t("colSize")}</th></tr></thead>
                 <tbody>
                   {drivers.drivers.map((d: any, i: number) => (
                     <tr key={i}>
@@ -367,7 +369,8 @@ export default function Updates({ admin }: { admin: boolean }) {
                       {t("updatesDriverConfirm")} {drivers.count} {t("updatesDriverQuestion")}
                     </span>
                     <button className="btn ghost" onClick={async () => {
-                      try { await api.createRestorePoint("Before driver updates"); } catch {}
+                      try { await api.createRestorePoint("Before driver updates"); }
+                      catch (e: any) { setDrvResult({ error: `${t("updatesRestorePoint")}: ${String(e)}` }); }
                     }}>{t("updatesRestorePoint")}</button>
                     <button className="btn" style={{ background: "var(--red)" }} onClick={async () => {
                       try { setDrvResult(await api.installDriverUpdates()); }

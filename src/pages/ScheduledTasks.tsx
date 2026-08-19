@@ -68,7 +68,7 @@ export default function ScheduledTasks({ admin }: { admin: boolean }) {
 
   return (
     <>
-      <div className="page-title">{t("schedTitle")}</div>
+      <h1 className="page-title">{t("schedTitle")}</h1>
       <div className="page-sub">{t("schedSub")}</div>
 
       {!data && <><Spinner /> <span className="muted">{t("schedLoading")}</span></>}
@@ -128,11 +128,11 @@ export default function ScheduledTasks({ admin }: { admin: boolean }) {
             <table className="tbl">
               <thead>
                 <tr>
-                  <th>{t("schedTaskCol")}</th>
-                  <th>{t("schedCategory")}</th>
-                  {tab === "bloat" && <th>{t("schedDescription")}</th>}
-                  <th>{t("status")}</th>
-                  <th></th>
+                  <th scope="col">{t("schedTaskCol")}</th>
+                  <th scope="col">{t("schedCategory")}</th>
+                  {tab === "bloat" && <th scope="col">{t("schedDescription")}</th>}
+                  <th scope="col">{t("status")}</th>
+                  <th scope="col"></th>
                 </tr>
               </thead>
               <tbody>
@@ -182,7 +182,7 @@ export default function ScheduledTasks({ admin }: { admin: boolean }) {
                       <td style={{ width: 130 }}>
                         <button
                           className={`btn small ${task.enabled ? "ghost" : ""}`}
-                          disabled={isBusy || !admin}
+                          disabled={!!busy || isBusy || !admin}
                           title={!admin ? t("schedAdminTitle") : ""}
                           onClick={() => toggle(task)}
                         >
