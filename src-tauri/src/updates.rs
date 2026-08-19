@@ -39,11 +39,21 @@ Get-ItemProperty $paths -ErrorAction SilentlyContinue |
 /// spinner output is stripped, footer sentences and secondary sections are
 /// rejected by id sanity checks.
 pub fn scan_app_updates() -> Result<Value, String> {
-    let raw = ps::exec(
+    let raw = ps::exec_long(
         "winget.exe",
-        &["upgrade", "--accept-source-agreements", "--disable-interactivity"],
+        &[
+            "upgrade",
+            "--accept-source-agreements",
+            "--disable-interactivity",
+        ],
     )
-    .map_err(|e| if e.is_empty() { "winget not available on this system".into() } else { e })?;
+    .map_err(|e| {
+        if e.is_empty() {
+            "winget not available on this system".into()
+        } else {
+            e
+        }
+    })?;
 
     // winget redraws progress with '\r' — keep only the final segment per line.
     let lines: Vec<String> = raw
@@ -79,15 +89,21 @@ pub fn scan_app_updates() -> Result<Value, String> {
 
     let slice = |chars: &[char], idx: usize| -> String {
         let start = cols[idx].min(chars.len());
-        let end = if idx + 1 < cols.len() { cols[idx + 1].min(chars.len()) } else { chars.len() };
-        chars[start..end].iter().collect::<String>().trim().to_string()
+        let end = if idx + 1 < cols.len() {
+            cols[idx + 1].min(chars.len())
+        } else {
+            chars.len()
+        };
+        chars[start..end]
+            .iter()
+            .collect::<String>()
+            .trim()
+            .to_string()
     };
 
     // winget ids are single tokens: "Publisher.Name", "ARP\..." or Store ids.
     let id_ok = |id: &str| {
-        !id.is_empty()
-            && !id.contains(' ')
-            && id.chars().any(|c| c.is_ascii_alphanumeric())
+        !id.is_empty() && !id.contains(' ') && id.chars().any(|c| c.is_ascii_alphanumeric())
     };
 
     let reg = registry_apps();
@@ -112,13 +128,21 @@ pub fn scan_app_updates() -> Result<Value, String> {
         }
         let chars: Vec<char> = line.chars().collect();
         if chars.len() < cols[1] + 1 {
-            if apps.is_empty() { continue } else { break } // footer / blank
+            if apps.is_empty() {
+                continue;
+            } else {
+                break;
+            } // footer / blank
         }
         let name = slice(&chars, 0);
         let id = slice(&chars, 1);
         let version = slice(&chars, 2);
         let available = slice(&chars, 3);
-        let source = if cols.len() > 4 { slice(&chars, 4) } else { String::new() };
+        let source = if cols.len() > 4 {
+            slice(&chars, 4)
+        } else {
+            String::new()
+        };
         if !id_ok(&id) || available.is_empty() || name.is_empty() {
             continue; // footer sentence fragments, progress junk
         }
@@ -152,31 +176,36 @@ pub fn update_apps(id: Option<String>) -> Result<Value, String> {
     }
     // --disable-interactivity suppresses UAC on some packages → omit for per-app updates.
     let extra: &[&str] = if id.is_some() {
-        &["--silent", "--accept-source-agreements", "--accept-package-agreements"]
+        &[
+            "--silent",
+            "--accept-source-agreements",
+            "--accept-package-agreements",
+        ]
     } else {
-        &["--silent", "--accept-source-agreements", "--accept-package-agreements", "--disable-interactivity"]
+        &[
+            "--silent",
+            "--accept-source-agreements",
+            "--accept-package-agreements",
+            "--disable-interactivity",
+        ]
     };
     args.extend(extra.iter().map(|s| s.to_string()));
     let argrefs: Vec<&str> = args.iter().map(String::as_str).collect();
 
-    // winget writes errors to stdout (not stderr) — capture both.
-    #[cfg(windows)]
-    use std::os::windows::process::CommandExt;
-    let mut cmd = std::process::Command::new("winget.exe");
-    cmd.args(&argrefs);
-    #[cfg(windows)]
-    cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-
-    let out = cmd.output().map_err(|e| format!("winget spawn: {e}"))?;
-    let stdout = String::from_utf8_lossy(&out.stdout)
+    // winget writes errors to stdout (not stderr) — exec_capture returns the
+    // status + both streams, and enforces the long timeout + tree kill so a
+    // hung installer can never wedge the command or leak children.
+    let (status, stdout, _stderr) = ps::exec_capture("winget.exe", &argrefs)?;
+    let stdout = stdout
         .lines()
         .map(|l| l.rsplit('\r').next().unwrap_or("").to_string())
         .collect::<Vec<_>>()
         .join("\n");
 
-    if !out.status.success() {
+    if !status.success() {
         // Extract last meaningful lines from stdout as the error message
-        let err_lines: Vec<&str> = stdout.lines()
+        let err_lines: Vec<&str> = stdout
+            .lines()
             .filter(|l| !l.trim().is_empty())
             .rev()
             .take(6)
@@ -185,17 +214,22 @@ pub fn update_apps(id: Option<String>) -> Result<Value, String> {
             .rev()
             .collect();
         let msg = if err_lines.is_empty() {
-            format!("winget exited with code {}", out.status)
+            format!("winget exited with code {}", status)
         } else {
             err_lines.join("\n")
         };
         return Err(msg);
     }
 
-    let tail: String = stdout.lines()
+    let tail: String = stdout
+        .lines()
         .filter(|l| !l.trim().is_empty())
-        .rev().take(20).collect::<Vec<_>>()
-        .into_iter().rev().collect::<Vec<_>>()
+        .rev()
+        .take(20)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<Vec<_>>()
         .join("\n");
     Ok(json!({ "ok": true, "log": tail }))
 }
@@ -219,10 +253,14 @@ try {
   }
 } catch { @{ error = $_.Exception.Message } }
 "#;
-    match ps::run_json(script) {
+    match ps::run_json_long(script) {
         Ok(Value::Null) => json!({ "count": 0, "drivers": [] }),
         Ok(v) => {
-            let arr = if v.is_array() { v.as_array().unwrap().clone() } else { vec![v] };
+            let arr = if v.is_array() {
+                v.as_array().unwrap().clone()
+            } else {
+                vec![v]
+            };
             if arr.len() == 1 && arr[0].get("error").is_some() {
                 return json!({ "error": arr[0]["error"] });
             }
@@ -236,7 +274,9 @@ try {
 /// Returns per-update result codes and whether a reboot is needed.
 pub fn install_driver_updates() -> Result<Value, String> {
     if !ps::is_admin() {
-        return Err("Driver installation needs administrator rights. Restart the app as admin.".into());
+        return Err(
+            "Driver installation needs administrator rights. Restart the app as admin.".into(),
+        );
     }
     let script = r#"
 $session = New-Object -ComObject Microsoft.Update.Session
@@ -262,19 +302,23 @@ for ($i = 0; $i -lt $coll.Count; $i++) {
 @{ installed = $coll.Count; rebootRequired = [bool]$ir.RebootRequired; overall = $codes[$ir.ResultCode]; results = $results }
 }
 "#;
-    ps::run_json(script)
+    ps::run_json_long(script)
 }
 
 /// Detect GPU vendor for the "get your GPU driver from the vendor" hint.
 pub fn gpu_vendor_hint() -> Value {
-    let gpus = ps::run("(Get-CimInstance Win32_VideoController).Name -join ';'").unwrap_or_default();
+    let gpus =
+        ps::run("(Get-CimInstance Win32_VideoController).Name -join ';'").unwrap_or_default();
     let g = gpus.to_lowercase();
     let (vendor, url) = if g.contains("nvidia") {
         ("NVIDIA", "https://www.nvidia.com/Download/index.aspx")
     } else if g.contains("amd") || g.contains("radeon") {
         ("AMD", "https://www.amd.com/en/support")
     } else if g.contains("intel") || g.contains("arc") {
-        ("Intel", "https://www.intel.com/content/www/us/en/download-center/home.html")
+        (
+            "Intel",
+            "https://www.intel.com/content/www/us/en/download-center/home.html",
+        )
     } else {
         ("unknown", "")
     };

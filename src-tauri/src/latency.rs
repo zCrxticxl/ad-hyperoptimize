@@ -66,7 +66,10 @@ pub fn stall_probe(seconds: u32) -> Value {
     let verdict = if max < 250.0 {
         ("excellent", "No significant execution stalls. Drivers are well-behaved; suitable for real-time audio and competitive gaming.")
     } else if max < 1000.0 {
-        ("good", "Minor stalls under 1ms — normal Windows background behavior, imperceptible in games.")
+        (
+            "good",
+            "Minor stalls under 1ms — normal Windows background behavior, imperceptible in games.",
+        )
     } else if max < 4000.0 {
         ("fair", "Stalls of 1–4ms detected. Can cause occasional frametime spikes or audio crackle under load. Run a deep trace to identify the driver.")
     } else {
@@ -104,10 +107,14 @@ pub fn wpr_start() -> Result<String, String> {
 }
 
 pub fn wpr_stop() -> Result<Value, String> {
-    let path = crate::safety::app_data_dir()
-        .join("reports")
-        .join(format!("dpc-trace-{}.etl", chrono::Local::now().format("%Y%m%d-%H%M%S")));
-    ps::exec("wpr.exe", &["-stop", &path.to_string_lossy(), "PCOptSuite DPC trace"])?;
+    let path = crate::safety::app_data_dir().join("reports").join(format!(
+        "dpc-trace-{}.etl",
+        chrono::Local::now().format("%Y%m%d-%H%M%S")
+    ));
+    ps::exec(
+        "wpr.exe",
+        &["-stop", &path.to_string_lossy(), "PCOptSuite DPC trace"],
+    )?;
     Ok(json!({
         "etlPath": path.to_string_lossy(),
         "next": "Open this .etl in Windows Performance Analyzer (Microsoft Store: 'Windows Performance Analyzer'), add the 'DPC/ISR Duration by Module' graph — the top module is your latency offender."

@@ -5,15 +5,15 @@ use crate::ps;
 use serde_json::{json, Value};
 
 struct PrivacyTweak {
-    id:          &'static str,
-    name:        &'static str,
-    category:    &'static str,
+    id: &'static str,
+    name: &'static str,
+    category: &'static str,
     description: &'static str,
-    risk:        &'static str,
-    apply:       &'static str, // PS script
-    revert:      &'static str, // PS script
+    risk: &'static str,
+    apply: &'static str,  // PS script
+    revert: &'static str, // PS script
     /// PS expression returning $true when the privacy tweak IS applied.
-    check:       &'static str,
+    check: &'static str,
 }
 
 // Helper macro so long registry paths stay readable.
@@ -21,9 +21,13 @@ struct PrivacyTweak {
 macro_rules! regget {
     ($path:expr, $name:expr) => {
         concat!(
-            "(Get-ItemProperty -Path '", $path,
-            "' -Name '", $name,
-            "' -ErrorAction SilentlyContinue).'", $name, "'"
+            "(Get-ItemProperty -Path '",
+            $path,
+            "' -Name '",
+            $name,
+            "' -ErrorAction SilentlyContinue).'",
+            $name,
+            "'"
         )
     };
 }
@@ -221,51 +225,75 @@ static TWEAKS: &[PrivacyTweak] = &[
 // ── status check ─────────────────────────────────────────────────────────────
 
 fn check_statuses() -> std::collections::HashMap<String, bool> {
-    let assignments: Vec<String> = TWEAKS.iter().map(|t| {
-        let var = t.id.replace('-', "_");
-        format!("${var} = try {{ [bool]({}) }} catch {{ $false }};", t.check)
-    }).collect();
-    let entries: Vec<String> = TWEAKS.iter().map(|t| {
-        let var = t.id.replace('-', "_");
-        format!("'{}' = ${};", t.id, var)
-    }).collect();
+    let assignments: Vec<String> = TWEAKS
+        .iter()
+        .map(|t| {
+            let var = t.id.replace('-', "_");
+            format!("${var} = try {{ [bool]({}) }} catch {{ $false }};", t.check)
+        })
+        .collect();
+    let entries: Vec<String> = TWEAKS
+        .iter()
+        .map(|t| {
+            let var = t.id.replace('-', "_");
+            format!("'{}' = ${};", t.id, var)
+        })
+        .collect();
     let script = format!(
         "{} $r = @{{{}}}; $r | ConvertTo-Json -Compress",
-        assignments.join(" "), entries.join(" ")
+        assignments.join(" "),
+        entries.join(" ")
     );
     let raw = ps::run(&script).unwrap_or_default();
     let v: Value = serde_json::from_str(raw.trim()).unwrap_or(json!({}));
-    TWEAKS.iter().map(|t| (t.id.to_string(), v[t.id].as_bool().unwrap_or(false))).collect()
+    TWEAKS
+        .iter()
+        .map(|t| (t.id.to_string(), v[t.id].as_bool().unwrap_or(false)))
+        .collect()
 }
 
 // ── public API ────────────────────────────────────────────────────────────────
 
 pub fn scan() -> Value {
     let statuses = check_statuses();
-    let tweaks: Vec<Value> = TWEAKS.iter().map(|t| {
-        json!({
-            "id":          t.id,
-            "name":        t.name,
-            "category":    t.category,
-            "description": t.description,
-            "risk":        t.risk,
-            "applied":     statuses.get(t.id).copied().unwrap_or(false),
+    let tweaks: Vec<Value> = TWEAKS
+        .iter()
+        .map(|t| {
+            json!({
+                "id":          t.id,
+                "name":        t.name,
+                "category":    t.category,
+                "description": t.description,
+                "risk":        t.risk,
+                "applied":     statuses.get(t.id).copied().unwrap_or(false),
+            })
         })
-    }).collect();
-    let applied = tweaks.iter().filter(|t| t["applied"].as_bool().unwrap_or(false)).count();
+        .collect();
+    let applied = tweaks
+        .iter()
+        .filter(|t| t["applied"].as_bool().unwrap_or(false))
+        .count();
     json!({ "tweaks": tweaks, "applied": applied, "total": tweaks.len() })
 }
 
 pub fn apply(id: String) -> Result<Value, String> {
-    let t = TWEAKS.iter().find(|t| t.id == id)
+    let t = TWEAKS
+        .iter()
+        .find(|t| t.id == id)
         .ok_or_else(|| format!("Unknown tweak: {id}"))?;
-    let warn = ps::run(t.apply).err();
-    Ok(json!({ "ok": true, "id": id, "warning": warn }))
+    match ps::run(t.apply) {
+        Ok(_) => Ok(json!({ "ok": true,  "id": id })),
+        Err(e) => Ok(json!({ "ok": false, "id": id, "warning": e })),
+    }
 }
 
 pub fn revert(id: String) -> Result<Value, String> {
-    let t = TWEAKS.iter().find(|t| t.id == id)
+    let t = TWEAKS
+        .iter()
+        .find(|t| t.id == id)
         .ok_or_else(|| format!("Unknown tweak: {id}"))?;
-    let warn = ps::run(t.revert).err();
-    Ok(json!({ "ok": true, "id": id, "warning": warn }))
+    match ps::run(t.revert) {
+        Ok(_) => Ok(json!({ "ok": true,  "id": id })),
+        Err(e) => Ok(json!({ "ok": false, "id": id, "warning": e })),
+    }
 }

@@ -6,6 +6,9 @@ use crate::ps;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Mutex;
+
+static JOURNAL_LOCK: Mutex<()> = Mutex::new(());
 
 pub fn app_data_dir() -> PathBuf {
     let p = dirs::data_dir()
@@ -20,20 +23,20 @@ pub fn app_data_dir() -> PathBuf {
 #[serde(tag = "kind")]
 pub enum ChangeItem {
     Registry {
-        root: String,           // "HKLM" | "HKCU"
+        root: String, // "HKLM" | "HKCU"
         path: String,
         name: String,
-        prev: Option<RegVal>,   // None = value did not exist
+        prev: Option<RegVal>, // None = value did not exist
         new: RegVal,
     },
     ServiceStartup {
         service: String,
-        prev: String,           // Automatic | Manual | Disabled
+        prev: String, // Automatic | Manual | Disabled
         new: String,
     },
     Command {
-        applied: String,        // command that was run
-        revert: String,         // command that undoes it
+        applied: String, // command that was run
+        revert: String,  // command that undoes it
     },
 }
 
@@ -46,7 +49,7 @@ pub enum RegVal {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct JournalEntry {
-    pub id: String,             // unique entry id
+    pub id: String, // unique entry id
     pub tweak_id: String,
     pub tweak_name: String,
     pub time: String,
@@ -68,15 +71,34 @@ pub fn load_journal() -> Vec<JournalEntry> {
 
 pub fn save_journal(j: &[JournalEntry]) -> Result<(), String> {
     let tmp = journal_path().with_extension("json.tmp");
-    fs::write(&tmp, serde_json::to_string_pretty(j).map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())?;
+    fs::write(
+        &tmp,
+        serde_json::to_string_pretty(j).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
     fs::rename(&tmp, journal_path()).map_err(|e| e.to_string()) // atomic-ish swap
 }
 
-pub fn append_entry(entry: JournalEntry) -> Result<(), String> {
+/// Serializes every journal read-modify-write pair (apply, revert, undo,
+/// appends). Without this, two near-simultaneous commands could interleave
+/// load→modify→save and silently drop entries.
+pub fn with_journal<R>(
+    f: impl FnOnce(&mut Vec<JournalEntry>) -> Result<R, String>,
+) -> Result<R, String> {
+    let _g = JOURNAL_LOCK
+        .lock()
+        .map_err(|e| format!("journal lock: {e}"))?;
     let mut j = load_journal();
-    j.push(entry);
-    save_journal(&j)
+    let r = f(&mut j)?;
+    save_journal(&j)?;
+    Ok(r)
+}
+
+pub fn append_entry(entry: JournalEntry) -> Result<(), String> {
+    with_journal(|j| {
+        j.push(entry);
+        Ok(())
+    })
 }
 
 /// Export a registry key with reg.exe before touching it. Returns backup path.
@@ -95,7 +117,9 @@ pub fn backup_registry_key(root: &str, path: &str) -> Result<String, String> {
 /// to one per 24h by default — surface that as a warning, not a failure.
 pub fn create_restore_point(description: &str) -> Result<String, String> {
     if !ps::is_admin() {
-        return Err("Administrator rights required for restore points. Restart the app as admin.".into());
+        return Err(
+            "Administrator rights required for restore points. Restart the app as admin.".into(),
+        );
     }
     let desc = description.replace('\'', "");
     match ps::run(&format!(
@@ -114,26 +138,29 @@ pub fn list_restore_points() -> serde_json::Value {
         .unwrap_or_else(|e| serde_json::json!({ "error": e.trim() }))
 }
 
-/// Delete a restore point by sequence number (uses vssadmin).
+/// Delete a restore point by sequence number.
+///
+/// `SystemRestore.DeleteRestorePoint(SequenceNumber)` is the documented WMI
+/// API for exactly this. The old code called `.Delete()` on the *class*
+/// object (which always fails) and then fell back to `vssadmin … /oldest`,
+/// deleting the oldest shadow copy instead of the selected point.
 pub fn delete_restore_point(sequence_number: u32) -> Result<String, String> {
     if !ps::is_admin() {
         return Err("Administrator rights required.".into());
     }
-    // vssadmin needs the shadow ID; Get-ComputerRestorePoint doesn't expose it directly.
-    // Use WMI to get the shadow copy ID matching the sequence number.
-    let script = format!(r#"
+    let script = format!(
+        r#"
 $rp = Get-ComputerRestorePoint | Where-Object {{ $_.SequenceNumber -eq {sequence_number} }}
 if (-not $rp) {{ throw "Restore point {sequence_number} not found" }}
-$id = $rp.SequenceNumber
-$wmi = Get-WmiObject -Class SystemRestore -Namespace root\default | Where-Object {{ $_.SequenceNumber -eq $id }}
-if ($wmi) {{ $wmi.Delete() | Out-Null; "Deleted restore point {sequence_number}" }}
-else {{ vssadmin delete shadows /for=C: /oldest /quiet | Out-Null; "Deleted (oldest shadow)" }}
-"#);
+$result = ([wmiclass]'root\default:SystemRestore').DeleteRestorePoint({sequence_number})
+if ($result.ReturnValue -ne 0) {{ throw "DeleteRestorePoint failed (code $($result.ReturnValue))" }}
+"Deleted restore point {sequence_number}"
+"#
+    );
     ps::run(&script).map(|s| s.trim().to_string())
 }
 
 /// Open Windows System Restore UI (rstrui.exe) for interactive restore.
 pub fn launch_rstrui() -> Result<String, String> {
-    ps::run("Start-Process rstrui.exe; 'Opened System Restore'")
-        .map(|s| s.trim().to_string())
+    ps::run("Start-Process rstrui.exe; 'Opened System Restore'").map(|s| s.trim().to_string())
 }

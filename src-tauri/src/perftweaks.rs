@@ -56,7 +56,8 @@ pub fn timer_set(target_100ns: u32) -> Result<String, String> {
     // 4. Register a logon-trigger scheduled task that runs it as SYSTEM
     // 5. Start the task immediately — now the process stays alive and holds the resolution
     // 6. Sleep 800ms so timer_get() called right after sees the updated value
-    let script = format!(r#"
+    let script = format!(
+        r#"
 $target = {target_100ns}
 $actual = 0
 $msg = "Applied"
@@ -85,8 +86,9 @@ $a=0;[NtTP]::NtSetTimerResolution({target_100ns},$true,[ref]$a)|Out-Null;while($
     Start-Sleep -Milliseconds 800
 }}catch{{}}
 $msg
-"#);
-    ps::run(&script).map(|s| s.trim().to_string()).map_err(|e| e)
+"#
+    );
+    ps::run(&script).map(|s| s.trim().to_string())
 }
 
 pub fn timer_reset() -> Result<String, String> {
@@ -108,7 +110,7 @@ try {
 } catch {}
 "Timer reset to default"
 "#;
-    ps::run(script).map(|s| s.trim().to_string()).map_err(|e| e)
+    ps::run(script).map(|s| s.trim().to_string())
 }
 
 // ── MSI Mode ─────────────────────────────────────────────────────────────────
@@ -153,6 +155,13 @@ pub fn msi_set(reg_path: String, enabled: bool) -> Result<String, String> {
     // replacen is a no-op for that shape, kept only for back-compat with any
     // stale HKEY_LOCAL_MACHINE-prefixed value a client might still send.
     let ps_path = reg_path.replacen("HKEY_LOCAL_MACHINE", "HKLM:", 1);
+    // The path is embedded in a single-quoted PS string and can only target
+    // device instances the scan produced (HKLM:\SYSTEM\CurrentControlSet\Enum\…).
+    if !ps_path.starts_with(r"HKLM:\SYSTEM\CurrentControlSet\Enum\")
+        || !crate::ps::is_safe_ident(&ps_path)
+    {
+        return Err("Invalid registry path for MSI mode".into());
+    }
     let script = format!(
         r#"
 $msiKey = Join-Path '{ps_path}' 'Device Parameters\Interrupt Management\MessageSignaledInterruptProperties'
@@ -161,9 +170,12 @@ Set-ItemProperty -Path $msiKey -Name 'MSISupported' -Value {val} -Type DWord -Fo
 "OK — reboot required to take effect"
 "#
     );
-    ps::run(&script)
-        .map(|_| format!("MSI {} — reboot required", if enabled { "enabled" } else { "disabled" }))
-        .map_err(|e| e)
+    ps::run(&script).map(|_| {
+        format!(
+            "MSI {} — reboot required",
+            if enabled { "enabled" } else { "disabled" }
+        )
+    })
 }
 
 // ── Network Adapter Tweaks ────────────────────────────────────────────────────
@@ -220,12 +232,15 @@ pub fn net_tweak(adapter: String, keyword: String, value: u32) -> Result<String,
     if !allowed.contains(&keyword.as_str()) {
         return Err(format!("Disallowed keyword: {keyword}"));
     }
+    // Adapter names come from net_adapters(); they never contain path
+    // separators, and a name with PS quote chars must never reach the script.
+    if !crate::ps::is_safe_regkey_name(&adapter) {
+        return Err("Invalid adapter name".into());
+    }
     let script = format!(
         "Set-NetAdapterAdvancedProperty -Name '{adapter}' -RegistryKeyword '{keyword}' -RegistryValue {value} -ErrorAction Stop; 'OK'"
     );
-    ps::run(&script)
-        .map(|_| format!("{adapter}: {keyword} = {value}"))
-        .map_err(|e| e)
+    ps::run(&script).map(|_| format!("{adapter}: {keyword} = {value}"))
 }
 
 // Disable all optimisable properties on all active physical adapters in one shot
@@ -247,9 +262,7 @@ Get-NetAdapter -Physical | Where-Object { $_.Status -eq 'Up' } | ForEach-Object 
 }
 "$changed properties updated"
 "#;
-    ps::run(script)
-        .map(|s| s.trim().to_string())
-        .map_err(|e| e)
+    ps::run(script).map(|s| s.trim().to_string())
 }
 
 pub fn net_reset_all() -> Result<String, String> {
@@ -259,9 +272,7 @@ Get-NetAdapter -Physical | Where-Object { $_.Status -eq 'Up' } | ForEach-Object 
 }
 "All adapter advanced properties reset to driver defaults"
 "#;
-    ps::run(script)
-        .map(|s| s.trim().to_string())
-        .map_err(|e| e)
+    ps::run(script).map(|s| s.trim().to_string())
 }
 
 // ── RAM Standby Cleaner ───────────────────────────────────────────────────────
@@ -272,8 +283,8 @@ pub fn ram_info() -> Value {
     let mut sys = System::new_all();
     sys.refresh_memory();
     let total_mb = sys.total_memory() / 1024 / 1024;
-    let used_mb  = sys.used_memory()  / 1024 / 1024;
-    let free_mb  = sys.free_memory()  / 1024 / 1024;
+    let used_mb = sys.used_memory() / 1024 / 1024;
+    let free_mb = sys.free_memory() / 1024 / 1024;
 
     // Standby + modified from perf counters (best-effort)
     let standby_mb = ps::run(
@@ -313,8 +324,14 @@ $r = [RamFlush]::PurgeStandby()
 if ($r -eq 0) { "Standby list flushed successfully" } else { "Flush result: 0x$($r.ToString('X8'))" }
 "#;
     ps::run(script)
-        .map(|s| s.trim().to_string())
-        .map_err(|e| e)
+        .map(|s| {
+            let s = s.trim();
+            if s.starts_with("Flush result: 0x") {
+                return Err(s.to_string());
+            }
+            Ok(s.to_string())
+        })
+        .and_then(|r| r)
 }
 
 // ── Pagefile ─────────────────────────────────────────────────────────────────
@@ -353,31 +370,47 @@ $cs.AutomaticManagedPagefile = $true
 $cs.Put() | Out-Null
 "Automatic pagefile management enabled — reboot required"
 "#;
-    ps::run(script)
-        .map(|s| s.trim().to_string())
-        .map_err(|e| e)
+    ps::run(script).map(|s| s.trim().to_string())
 }
 
 pub fn pagefile_set_custom(path: String, init_mb: u32, max_mb: u32) -> Result<String, String> {
+    // Pagefile paths must be local drive paths and must not contain PS quote
+    // characters or wildcards — the value is embedded in single-quoted PS
+    // strings and used in a `-like '{path}*'` comparison.
+    let path = path.trim().to_string();
+    let is_local = path.len() >= 3
+        && path.as_bytes()[1] == b':'
+        && path.as_bytes()[2] == b'\\'
+        && path.as_bytes()[0].is_ascii_alphabetic();
+    if !is_local || !crate::ps::is_safe_ident(&path) || path.contains(['*', '?', '[', ']']) {
+        return Err("Invalid pagefile path".into());
+    }
+    if max_mb > 0 && init_mb > max_mb {
+        return Err("Initial size cannot exceed maximum size".into());
+    }
+    // Create/update the new pagefile setting BEFORE removing any old entry so
+    // the system never ends up without a pagefile when a later step fails.
     let script = format!(
         r#"
 $cs = Get-WmiObject Win32_ComputerSystem
 $cs.AutomaticManagedPagefile = $false
 $cs.Put() | Out-Null
-Get-WmiObject Win32_PageFileSetting -ErrorAction SilentlyContinue |
-    Where-Object {{ $_.Name -like '{path}*' }} |
-    ForEach-Object {{ $_.Delete() }}
-$pf = ([WmiClass]'Win32_PageFileSetting').CreateInstance()
-$pf.Name        = '{path}'
+$pf = Get-WmiObject Win32_PageFileSetting -ErrorAction SilentlyContinue |
+    Where-Object {{ $_.Name -eq '{path}' }} | Select-Object -First 1
+if (-not $pf) {{
+    $pf = ([WmiClass]'Win32_PageFileSetting').CreateInstance()
+    $pf.Name = '{path}'
+}}
 $pf.InitialSize = {init_mb}
 $pf.MaximumSize = {max_mb}
 $pf.Put() | Out-Null
+Get-WmiObject Win32_PageFileSetting -ErrorAction SilentlyContinue |
+    Where-Object {{ $_.Name -like '{path}*' -and $_.Name -ne '{path}' }} |
+    ForEach-Object {{ $_.Delete() }}
 "Pagefile: {path} {init_mb}MB–{max_mb}MB — reboot required"
 "#
     );
-    ps::run(&script)
-        .map(|s| s.trim().to_string())
-        .map_err(|e| e)
+    ps::run(&script).map(|s| s.trim().to_string())
 }
 
 pub fn pagefile_disable() -> Result<String, String> {
@@ -388,7 +421,5 @@ $cs.Put() | Out-Null
 Get-WmiObject Win32_PageFileSetting -ErrorAction SilentlyContinue | ForEach-Object { $_.Delete() }
 "Pagefile disabled — reboot required (only recommended with 32 GB+ RAM)"
 "#;
-    ps::run(script)
-        .map(|s| s.trim().to_string())
-        .map_err(|e| e)
+    ps::run(script).map(|s| s.trim().to_string())
 }

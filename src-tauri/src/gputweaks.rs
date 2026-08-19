@@ -10,7 +10,9 @@ use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ};
 #[cfg(windows)]
 use winreg::RegKey;
 
+#[cfg(windows)]
 use crate::safety::{self, ChangeItem, JournalEntry, RegVal};
+#[cfg(windows)]
 use crate::tweaks;
 
 const GPU_CLASS: &str =
@@ -20,12 +22,20 @@ const GPU_CLASS: &str =
 
 #[cfg(windows)]
 fn hive(root: &str) -> RegKey {
-    RegKey::predef(if root == "HKLM" { HKEY_LOCAL_MACHINE } else { HKEY_CURRENT_USER })
+    RegKey::predef(if root == "HKLM" {
+        HKEY_LOCAL_MACHINE
+    } else {
+        HKEY_CURRENT_USER
+    })
 }
 
 #[cfg(windows)]
 fn reg_read_dword(root: &str, path: &str, name: &str) -> Option<u32> {
-    hive(root).open_subkey_with_flags(path, KEY_READ).ok()?.get_value(name).ok()
+    hive(root)
+        .open_subkey_with_flags(path, KEY_READ)
+        .ok()?
+        .get_value(name)
+        .ok()
 }
 
 #[cfg(windows)]
@@ -33,9 +43,11 @@ fn reg_write_dword(root: &str, path: &str, name: &str, v: u32) -> Result<(), Str
     let (key, _) = hive(root)
         .create_subkey(path)
         .map_err(|e| format!("open {path}: {e}"))?;
-    key.set_value(name, &v).map_err(|e| format!("set {name}: {e}"))
+    key.set_value(name, &v)
+        .map_err(|e| format!("set {name}: {e}"))
 }
 
+#[cfg(windows)]
 fn svc_start_type(name: &str) -> String {
     crate::ps::run(&format!(
         "(Get-Service -Name '{name}' -ErrorAction SilentlyContinue).StartType"
@@ -45,6 +57,7 @@ fn svc_start_type(name: &str) -> String {
     .to_string()
 }
 
+#[cfg(windows)]
 fn svc_set(name: &str, mode: &str) -> Result<(), String> {
     crate::ps::run(&format!(
         "Set-Service -Name '{name}' -StartupType {mode} -ErrorAction Stop; 'OK'"
@@ -55,19 +68,39 @@ fn svc_set(name: &str, mode: &str) -> Result<(), String> {
 // ── GPU detection ───────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq)]
-enum Vendor { Nvidia, Amd, Intel, Unknown }
+enum Vendor {
+    Nvidia,
+    Amd,
+    Intel,
+    Unknown,
+}
 
 impl Vendor {
     #[allow(dead_code)]
     fn as_str(&self) -> &'static str {
-        match self { Self::Nvidia => "nvidia", Self::Amd => "amd", Self::Intel => "intel", Self::Unknown => "unknown" }
+        match self {
+            Self::Nvidia => "nvidia",
+            Self::Amd => "amd",
+            Self::Intel => "intel",
+            Self::Unknown => "unknown",
+        }
     }
     fn from_name(name: &str) -> Self {
         let n = name.to_lowercase();
-        if n.contains("nvidia") || n.contains("geforce") || n.contains("quadro") { Self::Nvidia }
-        else if n.contains("amd") || n.contains("radeon") { Self::Amd }
-        else if n.contains("intel") && (n.contains("arc") || n.contains("iris") || n.contains("uhd") || n.contains("hd graphics")) { Self::Intel }
-        else { Self::Unknown }
+        if n.contains("nvidia") || n.contains("geforce") || n.contains("quadro") {
+            Self::Nvidia
+        } else if n.contains("amd") || n.contains("radeon") {
+            Self::Amd
+        } else if n.contains("intel")
+            && (n.contains("arc")
+                || n.contains("iris")
+                || n.contains("uhd")
+                || n.contains("hd graphics"))
+        {
+            Self::Intel
+        } else {
+            Self::Unknown
+        }
     }
 }
 
@@ -106,27 +139,49 @@ if ($gpu) { $gpu | ConvertTo-Json -Compress } else { '{"Index":"","Name":"Unknow
 // ── Tweak definitions ───────────────────────────────────────────────────────
 
 #[derive(Clone)]
+// The variant fields are consumed by the Windows apply/check paths
+// (do_tweak/scan below); on non-Windows builds the catalog is still compiled
+// but nothing reads the fields, so silence the dead-code lint there only.
+#[cfg_attr(not(windows), allow(dead_code))]
 enum TweakAction {
     /// Value in the detected driver-class key (HKLM\...\{index})
-    DriverReg { name: &'static str, apply: u32, revert: u32 },
+    DriverReg {
+        name: &'static str,
+        apply: u32,
+        revert: u32,
+    },
     /// Fixed HKLM or HKCU path
-    FixedReg   { root: &'static str, path: &'static str, name: &'static str, apply: u32, revert: u32 },
+    FixedReg {
+        root: &'static str,
+        path: &'static str,
+        name: &'static str,
+        apply: u32,
+        revert: u32,
+    },
     /// Windows service startup type
-    Svc        { name: &'static str, apply: &'static str, revert: &'static str },
+    Svc {
+        name: &'static str,
+        apply: &'static str,
+        revert: &'static str,
+    },
     /// PowerShell script — check returns "True" or "1" when applied
-    Ps         { apply: &'static str, revert: &'static str, check: &'static str },
+    Ps {
+        apply: &'static str,
+        revert: &'static str,
+        check: &'static str,
+    },
 }
 
 struct GpuTweak {
-    id:          &'static str,
-    name:        &'static str,
-    category:    &'static str,
-    vendor:      &'static str, // "nvidia" | "amd" | "any"
+    id: &'static str,
+    name: &'static str,
+    category: &'static str,
+    vendor: &'static str, // "nvidia" | "amd" | "any"
     description: &'static str,
-    impact:      &'static str,
-    risk:        &'static str,
-    reboot:      bool,
-    actions:     Vec<TweakAction>,
+    impact: &'static str,
+    risk: &'static str,
+    reboot: bool,
+    actions: Vec<TweakAction>,
 }
 
 fn catalog() -> Vec<GpuTweak> {
@@ -359,7 +414,7 @@ if ($v -and $v -gt 10GB) { 'True' } else { 'False' }
 #[cfg(windows)]
 fn detect_status(tweak: &GpuTweak, driver_key: &str) -> &'static str {
     let mut checkable = 0usize;
-    let mut matching  = 0usize;
+    let mut matching = 0usize;
 
     for action in &tweak.actions {
         match action {
@@ -372,7 +427,13 @@ fn detect_status(tweak: &GpuTweak, driver_key: &str) -> &'static str {
                     matching += 1;
                 }
             }
-            TweakAction::FixedReg { root, path, name, apply, .. } => {
+            TweakAction::FixedReg {
+                root,
+                path,
+                name,
+                apply,
+                ..
+            } => {
                 checkable += 1;
                 if reg_read_dword(root, path, name) == Some(*apply) {
                     matching += 1;
@@ -388,18 +449,28 @@ fn detect_status(tweak: &GpuTweak, driver_key: &str) -> &'static str {
                 checkable += 1;
                 let out = crate::ps::run(check).unwrap_or_default();
                 let out = out.trim().to_lowercase();
-                if out == "true" || out == "1" { matching += 1; }
+                if out == "true" || out == "1" {
+                    matching += 1;
+                }
             }
         }
     }
-    if checkable == 0 { return "unknown"; }
-    if matching == checkable { "applied" }
-    else if matching == 0    { "not_applied" }
-    else                     { "partial" }
+    if checkable == 0 {
+        return "unknown";
+    }
+    if matching == checkable {
+        "applied"
+    } else if matching == 0 {
+        "not_applied"
+    } else {
+        "partial"
+    }
 }
 
 #[cfg(not(windows))]
-fn detect_status(_tweak: &GpuTweak, _driver_key: &str) -> &'static str { "unknown" }
+fn detect_status(_tweak: &GpuTweak, _driver_key: &str) -> &'static str {
+    "unknown"
+}
 
 // ── Apply / Revert ──────────────────────────────────────────────────────────
 
@@ -408,19 +479,34 @@ fn apply_action(action: &TweakAction, driver_key: &str, applying: bool) -> Resul
     // See the matching comment in detect_status: driver_key is already a
     // full HKLM path, so it must be used as-is here too.
     match action {
-        TweakAction::DriverReg { name, apply, revert } => {
-            reg_write_dword("HKLM", driver_key, name, if applying { *apply } else { *revert })
-        }
-        TweakAction::FixedReg { root, path, name, apply, revert } => {
-            reg_write_dword(root, path, name, if applying { *apply } else { *revert })
-        }
+        TweakAction::DriverReg {
+            name,
+            apply,
+            revert,
+        } => reg_write_dword(
+            "HKLM",
+            driver_key,
+            name,
+            if applying { *apply } else { *revert },
+        ),
+        TweakAction::FixedReg {
+            root,
+            path,
+            name,
+            apply,
+            revert,
+        } => reg_write_dword(root, path, name, if applying { *apply } else { *revert }),
         TweakAction::Ps { apply, revert, .. } => {
             let script = if applying { apply } else { revert };
-            crate::ps::run(script).map(|_| ()).map_err(|e| format!("PS: {e}"))
+            crate::ps::run(script)
+                .map(|_| ())
+                .map_err(|e| format!("PS: {e}"))
         }
-        TweakAction::Svc { name, apply, revert } => {
-            svc_set(name, if applying { apply } else { revert })
-        }
+        TweakAction::Svc {
+            name,
+            apply,
+            revert,
+        } => svc_set(name, if applying { apply } else { revert }),
     }
 }
 
@@ -434,30 +520,36 @@ fn apply_action(_action: &TweakAction, _driver_key: &str, _applying: bool) -> Re
 pub fn scan() -> serde_json::Value {
     let (vendor, gpu_name, driver_key) = detect_gpu();
     let tweaks_data = catalog();
-    let tweaks: Vec<serde_json::Value> = tweaks_data.iter().map(|tw| {
-        let vendor_str = format!("{:?}", vendor).to_lowercase();
-        let applicable = tw.vendor == "any" || tw.vendor == vendor_str;
-        let driver_key_needed = tw.actions.iter().any(|a| matches!(a, TweakAction::DriverReg { .. }));
-        let driver_key_missing = driver_key_needed && driver_key.is_empty();
-        let status = if applicable && !driver_key_missing {
-            detect_status(tw, &driver_key)
-        } else {
-            "unknown"
-        };
-        serde_json::json!({
-            "id":              tw.id,
-            "name":            tw.name,
-            "category":        tw.category,
-            "vendor":          tw.vendor,
-            "description":     tw.description,
-            "impact":          tw.impact,
-            "risk":            tw.risk,
-            "reboot":          tw.reboot,
-            "status":          status,
-            "applicable":      applicable,
-            "driverKeyMissing": driver_key_missing,
+    let tweaks: Vec<serde_json::Value> = tweaks_data
+        .iter()
+        .map(|tw| {
+            let vendor_str = format!("{:?}", vendor).to_lowercase();
+            let applicable = tw.vendor == "any" || tw.vendor == vendor_str;
+            let driver_key_needed = tw
+                .actions
+                .iter()
+                .any(|a| matches!(a, TweakAction::DriverReg { .. }));
+            let driver_key_missing = driver_key_needed && driver_key.is_empty();
+            let status = if applicable && !driver_key_missing {
+                detect_status(tw, &driver_key)
+            } else {
+                "unknown"
+            };
+            serde_json::json!({
+                "id":              tw.id,
+                "name":            tw.name,
+                "category":        tw.category,
+                "vendor":          tw.vendor,
+                "description":     tw.description,
+                "impact":          tw.impact,
+                "risk":            tw.risk,
+                "reboot":          tw.reboot,
+                "status":          status,
+                "applicable":      applicable,
+                "driverKeyMissing": driver_key_missing,
+            })
         })
-    }).collect();
+        .collect();
     serde_json::json!({
         "vendor":    format!("{:?}", vendor).to_lowercase(),
         "name":      gpu_name,
@@ -471,13 +563,64 @@ pub fn do_tweak(id: String, driver_key: String, applying: bool) -> Result<String
     let tweaks = catalog();
     for tw in &tweaks {
         if tw.id == id {
+            // driver_key arrives from the renderer; it must stay inside the
+            // display-adapter class key or arbitrary HKLM keys could be
+            // created by reg_write_dword.
+            let needs_driver_key = tw
+                .actions
+                .iter()
+                .any(|a| matches!(a, TweakAction::DriverReg { .. }));
+            if needs_driver_key && !is_valid_driver_key(&driver_key) {
+                return Err("Invalid GPU driver registry key".into());
+            }
             for action in &tw.actions {
                 apply_action(action, &driver_key, applying)?;
             }
-            return Ok(format!("{} {}", if applying { "Applied" } else { "Reverted" }, tw.name));
+            return Ok(format!(
+                "{} {}",
+                if applying { "Applied" } else { "Reverted" },
+                tw.name
+            ));
         }
     }
     Err(format!("Unknown GPU tweak: {id}"))
+}
+
+/// The driver class key is HKLM\SYSTEM\CurrentControlSet\Control\Class\
+/// {4d36e968-…}\<index>; require that exact prefix plus shell-safe chars so
+/// renderer-supplied paths can never escape into other registry areas.
+/// `..`/`.` components are rejected as defense in depth (registry has no
+/// traversal semantics, but such keys are never legitimate here).
+fn is_valid_driver_key(key: &str) -> bool {
+    let prefix = format!("{GPU_CLASS}\\");
+    if key.len() <= prefix.len() || !key.starts_with(&prefix) {
+        return false;
+    }
+    if !crate::ps::is_safe_ident(key) {
+        return false;
+    }
+    key.split('\\').all(|c| !matches!(c, "" | "." | ".."))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_valid_driver_key, GPU_CLASS};
+
+    #[test]
+    fn driver_key_validation() {
+        assert!(is_valid_driver_key(&format!("{GPU_CLASS}\\0000")));
+        assert!(is_valid_driver_key(&format!("{GPU_CLASS}\\0001\\Extra")));
+        assert!(!is_valid_driver_key(&format!("{GPU_CLASS}")));
+        assert!(!is_valid_driver_key(&format!("{GPU_CLASS}\\")));
+        assert!(!is_valid_driver_key("SYSTEM\\CurrentControlSet\\Control\\Class\\{00000000-0000-0000-0000-000000000000}\\0000"));
+        assert!(!is_valid_driver_key(&format!(
+            "{GPU_CLASS}\\0000'; calc; '"
+        )));
+        assert!(!is_valid_driver_key(&format!(
+            "{GPU_CLASS}\\0000\\..\\..\\SOFTWARE\\Evil"
+        )));
+        assert!(!is_valid_driver_key(""));
+    }
 }
 
 // ── NVIDIA Control Panel — editable global 3D settings ──────────────────────
@@ -495,6 +638,7 @@ pub fn do_tweak(id: String, driver_key: String, applying: bool) -> Result<String
 // other tweak in this app, so it shows up in Reports.tsx and is undone with
 // `tweaks::revert_entry` — identical plumbing to Quick Boost.
 
+#[cfg(windows)]
 const NV_TWEAK_HKCU: &str = "Software\\NVIDIA Corporation\\Global\\NVTweak";
 
 #[cfg(windows)]

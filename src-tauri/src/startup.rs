@@ -4,7 +4,9 @@
 //! 0x03 = disabled). Nothing is ever deleted; toggles are fully reversible.
 
 use serde_json::{json, Value};
+#[cfg(windows)]
 use std::fs;
+#[cfg(windows)]
 use std::path::PathBuf;
 
 #[cfg(windows)]
@@ -24,7 +26,11 @@ const APPROVED_FOLDER: &str =
 
 #[cfg(windows)]
 fn hive(root: &str) -> RegKey {
-    RegKey::predef(if root == "HKLM" { HKEY_LOCAL_MACHINE } else { HKEY_CURRENT_USER })
+    RegKey::predef(if root == "HKLM" {
+        HKEY_LOCAL_MACHINE
+    } else {
+        HKEY_CURRENT_USER
+    })
 }
 
 /// StartupApproved state: missing value or first byte 0x02/0x06 → enabled.
@@ -59,6 +65,7 @@ fn run_key_entries(root: &str, run_path: &str, approved_path: &str, scope: &str)
         .collect()
 }
 
+#[cfg(windows)]
 fn startup_folders() -> Vec<(PathBuf, &'static str)> {
     let mut v = Vec::new();
     if let Ok(appdata) = std::env::var("APPDATA") {
@@ -99,7 +106,11 @@ pub fn list() -> Value {
             "hklm_run32",
         ));
         for (dir, scope) in startup_folders() {
-            let root = if scope == "folder_common" { "HKLM" } else { "HKCU" };
+            let root = if scope == "folder_common" {
+                "HKLM"
+            } else {
+                "HKCU"
+            };
             if let Ok(rd) = fs::read_dir(&dir) {
                 for e in rd.flatten() {
                     let fname = e.file_name().to_string_lossy().into_owned();
@@ -149,7 +160,10 @@ pub fn toggle(scope: String, name: String, enable: bool) -> Result<Value, String
         }
         key.set_raw_value(
             &name,
-            &RegValue { bytes, vtype: winreg::enums::RegType::REG_BINARY },
+            &RegValue {
+                bytes,
+                vtype: winreg::enums::RegType::REG_BINARY,
+            },
         )
         .map_err(|e| format!("set state: {e}"))?;
         Ok(json!({ "name": name, "enabled": enable }))

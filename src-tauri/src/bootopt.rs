@@ -6,17 +6,17 @@ use serde_json::{json, Value};
 // ── BCD tweak catalog ────────────────────────────────────────────────────────
 
 struct BcdTweak {
-    id:          &'static str,
-    name:        &'static str,
+    id: &'static str,
+    name: &'static str,
     description: &'static str,
-    impact:      &'static str,
-    risk:        &'static str, // Low | Medium | High
+    impact: &'static str,
+    risk: &'static str, // Low | Medium | High
     /// bcdedit command to apply (executed via PowerShell)
-    apply_cmd:   &'static str,
+    apply_cmd: &'static str,
     /// bcdedit command to revert
-    revert_cmd:  &'static str,
+    revert_cmd: &'static str,
     /// How to check if applied: PowerShell expression returning "true"/"false"
-    check_expr:  &'static str,
+    check_expr: &'static str,
 }
 
 static TWEAKS: &[BcdTweak] = &[
@@ -27,7 +27,7 @@ static TWEAKS: &[BcdTweak] = &[
         impact:      "Saves 3–5 s on every boot",
         risk:        "Low",
         apply_cmd:   "bcdedit /timeout 0",
-        revert_cmd:  "bcdedit /timeout 30",
+        revert_cmd:  "bcdedit /deletevalue '{bootmgr}' timeout",
         check_expr:  r#"(bcdedit /enum '{bootmgr}' 2>$null | Select-String 'timeout\s+0$').Count -gt 0"#,
     },
     BcdTweak {
@@ -37,7 +37,7 @@ static TWEAKS: &[BcdTweak] = &[
         impact:      "Minimal, reduziert IO beim Start",
         risk:        "Low",
         apply_cmd:   "bcdedit /set '{current}' bootlog no",
-        revert_cmd:  "bcdedit /set '{current}' bootlog yes",
+        revert_cmd:  "bcdedit /deletevalue '{current}' bootlog",
         check_expr:  r#"(bcdedit /enum '{current}' 2>$null | Select-String 'bootlog\s+No').Count -gt 0"#,
     },
     BcdTweak {
@@ -67,7 +67,7 @@ static TWEAKS: &[BcdTweak] = &[
         impact:      "Faster bootloader transition",
         risk:        "Low",
         apply_cmd:   "bcdedit /set '{default}' bootmenupolicy standard",
-        revert_cmd:  "bcdedit /set '{default}' bootmenupolicy legacy",
+        revert_cmd:  "bcdedit /deletevalue '{default}' bootmenupolicy",
         check_expr:  r#"(bcdedit /enum '{default}' 2>$null | Select-String 'bootmenupolicy\s+Standard').Count -gt 0"#,
     },
     BcdTweak {
@@ -77,7 +77,7 @@ static TWEAKS: &[BcdTweak] = &[
         impact:      "Minimal",
         risk:        "Medium",
         apply_cmd:   "bcdedit /set '{current}' nx OptOut",
-        revert_cmd:  "bcdedit /set '{current}' nx OptIn",
+        revert_cmd:  "bcdedit /deletevalue '{current}' nx",
         check_expr:  r#"(bcdedit /enum '{current}' 2>$null | Select-String 'nx\s+OptOut').Count -gt 0"#,
     },
     BcdTweak {
@@ -87,7 +87,7 @@ static TWEAKS: &[BcdTweak] = &[
         impact:      "Sicherheits-Hygiene",
         risk:        "Low",
         apply_cmd:   "bcdedit /set testsigning off",
-        revert_cmd:  "bcdedit /set testsigning on",
+        revert_cmd:  "bcdedit /deletevalue testsigning",
         check_expr:  r#"(bcdedit /enum 2>$null | Select-String 'testsigning\s+No').Count -gt 0"#,
     },
 ];
@@ -99,7 +99,8 @@ static TWEAKS: &[BcdTweak] = &[
 /// Returns (events, log_was_disabled). If the log was disabled we just enabled it
 /// but won't have history yet — the caller should surface this to the user.
 fn query_boot_events(limit: usize) -> (Vec<Value>, bool) {
-    let script = format!(r#"
+    let script = format!(
+        r#"
 $logName = 'Microsoft-Windows-Diagnostics-Performance/Operational'
 $wasDisabled = $false
 $logInfo = Get-WinEvent -ListLog $logName -ErrorAction SilentlyContinue
@@ -132,7 +133,9 @@ if ($events) {{
     WasDisabled = $wasDisabled
     Events      = $results
 }} | ConvertTo-Json -Compress -Depth 4
-"#, limit = limit);
+"#,
+        limit = limit
+    );
 
     let raw = ps::run(&script).unwrap_or_default();
     let v: Value = serde_json::from_str(raw.trim()).unwrap_or(json!({}));
@@ -176,15 +179,24 @@ $out | ConvertTo-Json -Compress
 /// Check applied status for all tweaks — one PS call, one variable per tweak.
 fn check_statuses() -> std::collections::HashMap<String, bool> {
     // Each tweak gets its own $var assignment; collect into a hashtable for JSON.
-    let assignments: Vec<String> = TWEAKS.iter().map(|t| {
-        // Replace hyphens so the variable name is valid PS identifier
-        let var = t.id.replace('-', "_");
-        format!("${var} = try {{ [bool]({}) }} catch {{ $false }};", t.check_expr)
-    }).collect();
-    let entries: Vec<String> = TWEAKS.iter().map(|t| {
-        let var = t.id.replace('-', "_");
-        format!("'{}' = ${};", t.id, var)
-    }).collect();
+    let assignments: Vec<String> = TWEAKS
+        .iter()
+        .map(|t| {
+            // Replace hyphens so the variable name is valid PS identifier
+            let var = t.id.replace('-', "_");
+            format!(
+                "${var} = try {{ [bool]({}) }} catch {{ $false }};",
+                t.check_expr
+            )
+        })
+        .collect();
+    let entries: Vec<String> = TWEAKS
+        .iter()
+        .map(|t| {
+            let var = t.id.replace('-', "_");
+            format!("'{}' = ${};", t.id, var)
+        })
+        .collect();
     let script = format!(
         "{} $r = @{{{}}}; $r | ConvertTo-Json -Compress",
         assignments.join(" "),
@@ -192,35 +204,42 @@ fn check_statuses() -> std::collections::HashMap<String, bool> {
     );
     let raw = ps::run(&script).unwrap_or_default();
     let v: Value = serde_json::from_str(raw.trim()).unwrap_or(json!({}));
-    TWEAKS.iter().map(|t| {
-        let applied = v[t.id].as_bool().unwrap_or(false);
-        (t.id.to_string(), applied)
-    }).collect()
+    TWEAKS
+        .iter()
+        .map(|t| {
+            let applied = v[t.id].as_bool().unwrap_or(false);
+            (t.id.to_string(), applied)
+        })
+        .collect()
 }
 
 // ── public API ───────────────────────────────────────────────────────────────
 
 pub fn scan() -> Value {
     let (boot_events, log_was_disabled) = query_boot_events(20);
-    let bcd      = read_bcd();
+    let bcd = read_bcd();
     let statuses = check_statuses();
 
-    let last_boot_ms = boot_events.first()
+    let last_boot_ms = boot_events
+        .first()
         .and_then(|e| e["BootDurationMs"].as_i64())
         .filter(|&ms| ms > 0)
         .unwrap_or(-1);
 
-    let tweaks: Vec<Value> = TWEAKS.iter().map(|t| {
-        let applied = *statuses.get(t.id).unwrap_or(&false);
-        json!({
-            "id":          t.id,
-            "name":        t.name,
-            "description": t.description,
-            "impact":      t.impact,
-            "risk":        t.risk,
-            "applied":     applied,
+    let tweaks: Vec<Value> = TWEAKS
+        .iter()
+        .map(|t| {
+            let applied = *statuses.get(t.id).unwrap_or(&false);
+            json!({
+                "id":          t.id,
+                "name":        t.name,
+                "description": t.description,
+                "impact":      t.impact,
+                "risk":        t.risk,
+                "applied":     applied,
+            })
         })
-    }).collect();
+        .collect();
 
     json!({
         "bootEvents":      boot_events,
@@ -232,15 +251,19 @@ pub fn scan() -> Value {
 }
 
 pub fn apply_tweak(id: String) -> Result<Value, String> {
-    let t = TWEAKS.iter().find(|t| t.id == id)
+    let t = TWEAKS
+        .iter()
+        .find(|t| t.id == id)
         .ok_or_else(|| format!("Unknown tweak: {id}"))?;
-    ps::run(t.apply_cmd).map_err(|e| e)?;
+    ps::run(t.apply_cmd)?;
     Ok(json!({ "ok": true, "id": id }))
 }
 
 pub fn revert_tweak(id: String) -> Result<Value, String> {
-    let t = TWEAKS.iter().find(|t| t.id == id)
+    let t = TWEAKS
+        .iter()
+        .find(|t| t.id == id)
         .ok_or_else(|| format!("Unknown tweak: {id}"))?;
-    ps::run(t.revert_cmd).map_err(|e| e)?;
+    ps::run(t.revert_cmd)?;
     Ok(json!({ "ok": true, "id": id }))
 }

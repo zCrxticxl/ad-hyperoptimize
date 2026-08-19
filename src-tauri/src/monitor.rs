@@ -3,7 +3,7 @@
 
 use serde_json::json;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use sysinfo::{Disks, Networks, System};
 use tauri::{AppHandle, Emitter};
@@ -30,9 +30,15 @@ mod freq {
     #[link(name = "pdh")]
     extern "system" {
         fn PdhOpenQueryW(src: *const u16, user: usize, q: *mut HQuery) -> i32;
-        fn PdhAddEnglishCounterW(q: HQuery, path: *const u16, user: usize, c: *mut HCounter) -> i32;
+        fn PdhAddEnglishCounterW(q: HQuery, path: *const u16, user: usize, c: *mut HCounter)
+            -> i32;
         fn PdhCollectQueryData(q: HQuery) -> i32;
-        fn PdhGetFormattedCounterValue(c: HCounter, fmt: u32, ctype: *mut u32, val: *mut FmtValue) -> i32;
+        fn PdhGetFormattedCounterValue(
+            c: HCounter,
+            fmt: u32,
+            ctype: *mut u32,
+            val: *mut FmtValue,
+        ) -> i32;
         fn PdhCloseQuery(q: HQuery) -> i32;
     }
 
@@ -61,7 +67,10 @@ mod freq {
                     return None;
                 }
                 PdhCollectQueryData(q); // prime; rates need two samples
-                Some(Self { query: q, counter: c })
+                Some(Self {
+                    query: q,
+                    counter: c,
+                })
             }
         }
 
@@ -71,9 +80,15 @@ mod freq {
                 if PdhCollectQueryData(self.query) != 0 {
                     return None;
                 }
-                let mut val = FmtValue { c_status: 0, _pad: 0, double_value: 0.0 };
+                let mut val = FmtValue {
+                    c_status: 0,
+                    _pad: 0,
+                    double_value: 0.0,
+                };
                 let mut ctype = 0u32;
-                if PdhGetFormattedCounterValue(self.counter, PDH_FMT_DOUBLE, &mut ctype, &mut val) != 0 {
+                if PdhGetFormattedCounterValue(self.counter, PDH_FMT_DOUBLE, &mut ctype, &mut val)
+                    != 0
+                {
                     return None;
                 }
                 Some(val.double_value)
@@ -90,19 +105,28 @@ mod freq {
 
 pub struct MonitorState {
     pub running: Arc<AtomicBool>,
+    /// Join handle of the monitor thread — stop() joins it so a
+    /// stop→start sequence can never leave two loops emitting metrics.
+    thread: Mutex<Option<std::thread::JoinHandle<()>>>,
 }
 
 impl Default for MonitorState {
     fn default() -> Self {
-        Self { running: Arc::new(AtomicBool::new(false)) }
+        Self {
+            running: Arc::new(AtomicBool::new(false)),
+            thread: Mutex::new(None),
+        }
     }
 }
 
-pub fn start(app: AppHandle, state: Arc<AtomicBool>) {
-    if state.swap(true, Ordering::SeqCst) {
-        return; // already running
+pub fn start(app: AppHandle, st: &MonitorState) -> Result<(), String> {
+    if st.running.swap(true, Ordering::SeqCst) {
+        return Ok(()); // already running
     }
-    std::thread::spawn(move || {
+    let running = st.running.clone();
+    // Builder::spawn returns io::Result — on failure we must reset the flag,
+    // otherwise every later start() no-ops and the monitor is dead forever.
+    let handle = std::thread::Builder::new().spawn(move || {
         let mut sys = System::new_all();
         let mut networks = Networks::new_with_refreshed_list();
         let mut disks = Disks::new_with_refreshed_list();
@@ -112,7 +136,7 @@ pub fn start(app: AppHandle, state: Arc<AtomicBool>) {
         sys.refresh_cpu();
         std::thread::sleep(Duration::from_millis(400));
 
-        while state.load(Ordering::SeqCst) {
+        while running.load(Ordering::SeqCst) {
             sys.refresh_cpu();
             sys.refresh_memory();
             sys.refresh_processes();
@@ -133,7 +157,7 @@ pub fn start(app: AppHandle, state: Arc<AtomicBool>) {
             let freq_mhz = base_mhz;
 
             let (mut rx, mut tx) = (0u64, 0u64);
-            for (_, n) in networks.iter() {
+            for n in networks.values() {
                 rx += n.received();
                 tx += n.transmitted();
             }
@@ -149,7 +173,7 @@ pub fn start(app: AppHandle, state: Arc<AtomicBool>) {
                 .take(6)
                 .map(|(n, c, m)| json!({ "name": n, "cpu": (*c * 10.0).round() / 10.0, "memMb": m / 1_048_576 }))
                 .collect();
-            procs.sort_by(|a, b| b.2.cmp(&a.2));
+            procs.sort_by_key(|p| std::cmp::Reverse(p.2));
             let top_mem: Vec<_> = procs
                 .iter()
                 .take(6)
@@ -181,11 +205,33 @@ pub fn start(app: AppHandle, state: Arc<AtomicBool>) {
                 "topMem": top_mem,
             });
             let _ = app.emit("metrics", payload);
-            std::thread::sleep(Duration::from_millis(1000));
+            // Interruptible sleep: stop() joins the thread, so it must not
+            // block for the full second while the loop is between iterations.
+            for _ in 0..10 {
+                if !running.load(Ordering::SeqCst) {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
         }
     });
+    let handle = match handle {
+        Ok(h) => h,
+        Err(e) => {
+            st.running.store(false, Ordering::SeqCst);
+            return Err(format!("failed to start monitor thread: {e}"));
+        }
+    };
+    *st.thread
+        .lock()
+        .map_err(|_| "monitor lock poisoned".to_string())? = Some(handle);
+    Ok(())
 }
 
-pub fn stop(state: &Arc<AtomicBool>) {
-    state.store(false, Ordering::SeqCst);
+pub fn stop(st: &MonitorState) {
+    st.running.store(false, Ordering::SeqCst);
+    let handle = st.thread.lock().unwrap().take();
+    if let Some(h) = handle {
+        let _ = h.join();
+    }
 }

@@ -189,14 +189,16 @@ export default function RegClean({ admin }: { admin: boolean }) {
             ✓ {result.deleted} {t("regCleaned")}
           </span>{" "}
           {t("regBackupAt")}{" "}
-          <span className="mono" style={{ fontSize: 11 }}>{result.backupPath}</span>
-          <button
-            className="btn ghost small"
-            style={{ marginLeft: 10 }}
-            onClick={() => api.openPath(result.backupPath)}
-          >
-            {t("open")}
-          </button>
+          <span className="mono" style={{ fontSize: 11 }}>{result.backupPath || "—"}</span>
+          {result.backupPath && (
+            <button
+              className="btn ghost small"
+              style={{ marginLeft: 10 }}
+              onClick={() => api.openPath(result.backupPath)}
+            >
+              {t("open")}
+            </button>
+          )}
           {result.errors?.length > 0 && (
             <div style={{ color: "var(--yellow)", marginTop: 6 }}>
               ⚠ {result.errors.length} {t("regErrors")} {result.errors.slice(0, 3).join(" · ")}

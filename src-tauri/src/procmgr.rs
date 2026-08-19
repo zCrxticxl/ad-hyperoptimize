@@ -7,8 +7,17 @@ use std::time::Duration;
 use sysinfo::{Pid, System};
 
 const PROTECTED: &[&str] = &[
-    "system", "registry", "smss.exe", "csrss.exe", "wininit.exe", "winlogon.exe",
-    "services.exe", "lsass.exe", "svchost.exe", "dwm.exe", "fontdrvhost.exe",
+    "system",
+    "registry",
+    "smss.exe",
+    "csrss.exe",
+    "wininit.exe",
+    "winlogon.exe",
+    "services.exe",
+    "lsass.exe",
+    "svchost.exe",
+    "dwm.exe",
+    "fontdrvhost.exe",
     "memory compression",
 ];
 
@@ -39,7 +48,10 @@ pub fn list() -> Value {
         })
         .collect();
     procs.sort_by(|a, b| {
-        b["cpu"].as_f64().partial_cmp(&a["cpu"].as_f64()).unwrap_or(std::cmp::Ordering::Equal)
+        b["cpu"]
+            .as_f64()
+            .partial_cmp(&a["cpu"].as_f64())
+            .unwrap_or(std::cmp::Ordering::Equal)
     });
     json!({ "coreCount": ncpu, "processes": procs })
 }
@@ -47,9 +59,14 @@ pub fn list() -> Value {
 pub fn kill(pid: u32) -> Result<Value, String> {
     let mut sys = System::new();
     sys.refresh_processes();
-    let p = sys.process(Pid::from_u32(pid)).ok_or("Process not found (already terminated?)")?;
+    let p = sys
+        .process(Pid::from_u32(pid))
+        .ok_or("Process not found (already terminated?)")?;
     if is_protected(p.name()) {
-        return Err(format!("'{}' ist ein geschützter Systemprozess — Beenden würde Windows crashen.", p.name()));
+        return Err(format!(
+            "'{}' ist ein geschützter Systemprozess — Beenden würde Windows crashen.",
+            p.name()
+        ));
     }
     if p.kill() {
         Ok(json!({ "killed": pid }))
@@ -58,7 +75,14 @@ pub fn kill(pid: u32) -> Result<Value, String> {
     }
 }
 
-const PRIORITIES: &[&str] = &["Idle", "BelowNormal", "Normal", "AboveNormal", "High", "RealTime"];
+const PRIORITIES: &[&str] = &[
+    "Idle",
+    "BelowNormal",
+    "Normal",
+    "AboveNormal",
+    "High",
+    "RealTime",
+];
 
 pub fn set_priority(pid: u32, priority: String) -> Result<Value, String> {
     if !PRIORITIES.contains(&priority.as_str()) {
@@ -94,6 +118,7 @@ use winreg::RegKey;
 #[cfg(windows)]
 const IFEO: &str = "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Image File Execution Options";
 
+#[cfg(windows)]
 fn prio_to_dword(p: &str) -> Option<u32> {
     Some(match p {
         "Idle" => 1,
@@ -105,6 +130,7 @@ fn prio_to_dword(p: &str) -> Option<u32> {
     })
 }
 
+#[cfg(windows)]
 fn dword_to_prio(d: u32) -> &'static str {
     match d {
         1 => "Idle",
@@ -116,14 +142,40 @@ fn dword_to_prio(d: u32) -> &'static str {
     }
 }
 
+/// Exe names are embedded in PS single-quoted strings and used as registry
+/// subkey names; require a plain, shell-safe file name.
+fn is_valid_exe_name(exe: &str) -> bool {
+    !exe.is_empty()
+        && exe.len() <= 255
+        && exe.to_lowercase().ends_with(".exe")
+        && !exe.contains(['\\', '/'])
+        && ps::is_safe_ident(exe)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_valid_exe_name;
+
+    #[test]
+    fn exe_name_validation() {
+        assert!(is_valid_exe_name("chrome.exe"));
+        assert!(is_valid_exe_name("My App (x64).exe"));
+        assert!(is_valid_exe_name("CHROME.EXE"));
+        assert!(is_valid_exe_name("evil.exe.exe.exe"));
+        assert!(!is_valid_exe_name(""));
+    }
+}
+
 /// All exes with a permanent CpuPriorityClass override.
 pub fn perm_list() -> Value {
     #[cfg(windows)]
     {
         let mut out = serde_json::Map::new();
-        if let Ok(ifeo) = RegKey::predef(HKEY_LOCAL_MACHINE).open_subkey_with_flags(IFEO, KEY_READ) {
+        if let Ok(ifeo) = RegKey::predef(HKEY_LOCAL_MACHINE).open_subkey_with_flags(IFEO, KEY_READ)
+        {
             for exe in ifeo.enum_keys().filter_map(|k| k.ok()) {
-                if let Ok(po) = ifeo.open_subkey_with_flags(format!("{exe}\\PerfOptions"), KEY_READ) {
+                if let Ok(po) = ifeo.open_subkey_with_flags(format!("{exe}\\PerfOptions"), KEY_READ)
+                {
                     if let Ok(d) = po.get_value::<u32, _>("CpuPriorityClass") {
                         out.insert(exe.to_lowercase(), json!(dword_to_prio(d)));
                     }
@@ -139,11 +191,11 @@ pub fn perm_list() -> Value {
 /// Set permanent priority for an exe name (e.g. "chrome.exe") and apply it to
 /// all currently running instances too.
 pub fn perm_set(exe: String, priority: String) -> Result<Value, String> {
+    if !is_valid_exe_name(&exe) {
+        return Err("erwarte einen Exe-Namen wie 'chrome.exe'".into());
+    }
     #[cfg(windows)]
     {
-        if !exe.to_lowercase().ends_with(".exe") || exe.contains(['\\', '/']) {
-            return Err("erwarte einen Exe-Namen wie 'chrome.exe'".into());
-        }
         if !ps::is_admin() {
             return Err("Dauerhafte Priorität braucht Adminrechte (HKLM/IFEO).".into());
         }
@@ -152,7 +204,8 @@ pub fn perm_set(exe: String, priority: String) -> Result<Value, String> {
         let (key, _) = RegKey::predef(HKEY_LOCAL_MACHINE)
             .create_subkey(format!("{IFEO}\\{exe}\\PerfOptions"))
             .map_err(|e| format!("IFEO: {e}"))?;
-        key.set_value("CpuPriorityClass", &d).map_err(|e| e.to_string())?;
+        key.set_value("CpuPriorityClass", &d)
+            .map_err(|e| e.to_string())?;
         // Best effort: also apply to running instances right now.
         let base = exe.trim_end_matches(".exe").trim_end_matches(".EXE");
         let _ = ps::run(&format!(
@@ -168,15 +221,19 @@ pub fn perm_set(exe: String, priority: String) -> Result<Value, String> {
 }
 
 pub fn perm_remove(exe: String) -> Result<Value, String> {
+    if !is_valid_exe_name(&exe) {
+        return Err("erwarte einen Exe-Namen wie 'chrome.exe'".into());
+    }
     #[cfg(windows)]
     {
         if !ps::is_admin() {
             return Err("Adminrechte erforderlich.".into());
         }
         let ifeo = RegKey::predef(HKEY_LOCAL_MACHINE)
-            .open_subkey_with_flags(IFEO, KEY_READ | winreg::enums::KEY_SET_VALUE)
+            .open_subkey_with_flags(IFEO, winreg::enums::KEY_ALL_ACCESS)
             .map_err(|e| e.to_string())?;
-        ifeo.delete_subkey_all(format!("{exe}\\PerfOptions")).map_err(|e| e.to_string())?;
+        ifeo.delete_subkey_all(format!("{exe}\\PerfOptions"))
+            .map_err(|e| e.to_string())?;
         let _ = ifeo.delete_subkey(&exe); // remove now-empty parent; ignore if it has other values
         Ok(json!({ "exe": exe, "removed": true }))
     }
@@ -185,12 +242,4 @@ pub fn perm_remove(exe: String) -> Result<Value, String> {
         let _ = exe;
         Err("Windows only".into())
     }
-}
-
-#[allow(dead_code)]
-pub fn get_detail(pid: u32) -> Value {
-    ps::run_json(&format!(
-        "Get-Process -Id {pid} -ErrorAction Stop | Select-Object Id,ProcessName,PriorityClass,@{{n='affinity';e={{[int64]$_.ProcessorAffinity}}}},StartTime,Path"
-    ))
-    .unwrap_or_else(|e| json!({ "error": e.trim() }))
 }

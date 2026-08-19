@@ -24,16 +24,16 @@ fn lock(state: &SharedState) -> MutexGuard<'_, SwitcherState> {
 }
 
 // ── Power-plan GUIDs ─────────────────────────────────────────────────────────
-pub(crate) const PLAN_BALANCED:          &str = "381b4222-f694-41f0-9685-ff5bb260df2e";
-pub(crate) const PLAN_HIGH_PERFORMANCE:  &str = "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c";
-const PLAN_ULTIMATE:          &str = "e9a42b02-d5df-448d-aa00-03f14749eb61";
+pub(crate) const PLAN_BALANCED: &str = "381b4222-f694-41f0-9685-ff5bb260df2e";
+pub(crate) const PLAN_HIGH_PERFORMANCE: &str = "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c";
+const PLAN_ULTIMATE: &str = "e9a42b02-d5df-448d-aa00-03f14749eb61";
 
 // ── Shared state ─────────────────────────────────────────────────────────────
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct SwitcherState {
-    pub enabled:        bool,
+    pub enabled: bool,
     pub default_preset: String, // "performance" | "balanced" | "quality"
-    pub active_game:    Option<String>, // game id
+    pub active_game: Option<String>, // game id
     pub prev_plan_guid: Option<String>, // power plan before game launched
 }
 
@@ -41,9 +41,9 @@ pub type SharedState = Arc<Mutex<SwitcherState>>;
 
 pub fn new_state() -> SharedState {
     Arc::new(Mutex::new(SwitcherState {
-        enabled:        false,
+        enabled: false,
         default_preset: "performance".into(),
-        active_game:    None,
+        active_game: None,
         prev_plan_guid: None,
     }))
 }
@@ -61,14 +61,16 @@ pub fn start(state: SharedState, app: tauri::AppHandle) {
                 let s = lock(&state);
                 (s.enabled, s.active_game.clone(), s.default_preset.clone())
             };
-            if !enabled { continue; }
+            if !enabled {
+                continue;
+            }
 
             let running = get_process_names();
 
             // Detect a known game in the running process list
-            let detected = gamedb::get_all().iter().find(|g| {
-                g.processes.iter().any(|p| running.contains(&p.to_string()))
-            });
+            let detected = gamedb::get_all()
+                .iter()
+                .find(|g| g.processes.iter().any(|p| running.contains(&p.to_string())));
 
             match (detected, current_game) {
                 // New game launched
@@ -76,15 +78,18 @@ pub fn start(state: SharedState, app: tauri::AppHandle) {
                     let prev = get_active_plan_guid();
                     {
                         let mut s = lock(&state);
-                        s.active_game    = Some(game.id.to_string());
+                        s.active_game = Some(game.id.to_string());
                         s.prev_plan_guid = prev.clone();
                     }
                     apply_power_plan_for_preset(game, &preset);
-                    let _ = app.emit("game-detected", json!({
-                        "id": game.id, "name": game.name,
-                        "preset": preset,
-                        "powerPlan": plan_label_for_preset(game, &preset),
-                    }));
+                    let _ = app.emit(
+                        "game-detected",
+                        json!({
+                            "id": game.id, "name": game.name,
+                            "preset": preset,
+                            "powerPlan": plan_label_for_preset(game, &preset),
+                        }),
+                    );
                 }
 
                 // Active game no longer running — revert
@@ -105,11 +110,14 @@ pub fn start(state: SharedState, app: tauri::AppHandle) {
                         // keep prev_plan_guid from original game launch
                     }
                     apply_power_plan_for_preset(game, &preset);
-                    let _ = app.emit("game-detected", json!({
-                        "id": game.id, "name": game.name,
-                        "preset": preset,
-                        "powerPlan": plan_label_for_preset(game, &preset),
-                    }));
+                    let _ = app.emit(
+                        "game-detected",
+                        json!({
+                            "id": game.id, "name": game.name,
+                            "preset": preset,
+                            "powerPlan": plan_label_for_preset(game, &preset),
+                        }),
+                    );
                 }
 
                 _ => {}
@@ -142,7 +150,7 @@ pub fn cmd_game_switcher_configure(
     default_preset: String,
 ) -> Value {
     let mut s = lock(state);
-    s.enabled        = enabled;
+    s.enabled = enabled;
     s.default_preset = default_preset;
     json!({ "ok": true })
 }
@@ -172,7 +180,10 @@ pub fn cmd_game_revert(state: &SharedState) -> Value {
 fn get_process_names() -> Vec<String> {
     let Ok(out) = std::process::Command::new("tasklist")
         .args(["/fo", "csv", "/nh"])
-        .output() else { return vec![]; };
+        .output()
+    else {
+        return vec![];
+    };
     String::from_utf8_lossy(&out.stdout)
         .lines()
         .filter_map(|line| {
@@ -185,9 +196,10 @@ fn get_process_names() -> Vec<String> {
 
 pub(crate) fn get_active_plan_guid() -> Option<String> {
     let out = ps::run("powercfg /getactivescheme").ok()?;
-    // Output: "Power Scheme GUID: xxxxxxxx-xxxx-... (Name)"
+    // Output: "Power Scheme GUID: xxxxxxxx-xxxx-... (Name)" — the header is
+    // localized; the GUID itself is not.
     out.split_whitespace()
-        .find(|s| s.contains('-') && s.len() == 36)
+        .find(|s| ps::is_guid(s))
         .map(|s| s.to_string())
 }
 
@@ -206,13 +218,13 @@ fn set_power_plan(guid: &str) {
 fn apply_power_plan_for_preset(game: &Game, preset: &str) {
     let plan_key = match preset {
         "balanced" => game.presets.balanced.power_plan,
-        "quality"  => game.presets.quality.power_plan,
-        _          => game.presets.performance.power_plan,
+        "quality" => game.presets.quality.power_plan,
+        _ => game.presets.performance.power_plan,
     };
     let guid = match plan_key {
-        "ultimate"         => PLAN_ULTIMATE,
+        "ultimate" => PLAN_ULTIMATE,
         "high_performance" => PLAN_HIGH_PERFORMANCE,
-        _                  => PLAN_BALANCED,
+        _ => PLAN_BALANCED,
     };
     set_power_plan(guid);
 }
@@ -220,7 +232,9 @@ fn apply_power_plan_for_preset(game: &Game, preset: &str) {
 fn revert_power_plan(state: &SharedState) {
     let guid = {
         let s = lock(state);
-        s.prev_plan_guid.clone().unwrap_or_else(|| PLAN_BALANCED.to_string())
+        s.prev_plan_guid
+            .clone()
+            .unwrap_or_else(|| PLAN_BALANCED.to_string())
     };
     set_power_plan(&guid);
 }
@@ -228,7 +242,7 @@ fn revert_power_plan(state: &SharedState) {
 fn plan_label_for_preset(game: &Game, preset: &str) -> &'static str {
     match preset {
         "balanced" => game.presets.balanced.power_plan,
-        "quality"  => game.presets.quality.power_plan,
-        _          => game.presets.performance.power_plan,
+        "quality" => game.presets.quality.power_plan,
+        _ => game.presets.performance.power_plan,
     }
 }
