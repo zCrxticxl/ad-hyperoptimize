@@ -1,6 +1,4 @@
-# v1.5.0 (unreleased), UI/UX audit, full i18n, feature search
-
-> Draft changelog for the next release. Cut the tag + version bump when ready.
+# v1.5.0, UI/UX audit, full i18n, feature search
 
 ## What's new
 

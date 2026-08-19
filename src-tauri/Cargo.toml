@@ -1,6 +1,6 @@
 [package]
 name = "ad-hyperoptimize"
-version = "1.4.0"
+version = "1.5.0"
 description = "AD HyperOptimize — PC Optimization & Deep Diagnostic Suite"
 edition = "2021"
 rust-version = "1.77"
