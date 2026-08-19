@@ -177,7 +177,10 @@ function AppInner() {
   });
   const [query, setQuery] = useState("");
   const [recents, setRecents] = useState<string[]>(() => {
-    try { return JSON.parse(localStorage.getItem(RECENTS_KEY) || "[]"); } catch { return []; }
+    try {
+      const parsed = JSON.parse(localStorage.getItem(RECENTS_KEY) || "[]");
+      return Array.isArray(parsed) ? parsed.filter((x) => typeof x === "string") : [];
+    } catch { return []; }
   });
   const [featureIndex, setFeatureIndex] = useState<any[]>([]);
   const featureLoaded = useRef(false);
@@ -282,9 +285,11 @@ function AppInner() {
   }, [normalizedQuery]);
 
   // Feature hits (deep-linkable). Each becomes a distinct result card.
+  // In Beginner mode only surface features from tools that are beginner-allowed.
   const featureResults = normalizedQuery && featureIndex.length
     ? featureIndex
         .filter((f) => (f.name + " " + f.desc).toLocaleLowerCase().includes(normalizedQuery))
+        .filter((f) => mode === "expert" || !!findTool(f.tool)?.basic)
         .map((f) => ({ ...f, feature: true }))
     : [];
   const allResults = [...searchResults, ...featureResults];
