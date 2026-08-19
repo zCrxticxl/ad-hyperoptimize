@@ -57,7 +57,7 @@ export default function PowerPlan({ admin }: { admin: boolean }) {
 
   return (
     <>
-      <div className="page-title">🔋 {t("pwrTitle")}</div>
+      <h1 className="page-title">🔋 {t("pwrTitle")}</h1>
       <div className="page-sub">
         {t("pwrSub")}
         {!admin && <span style={{ color: "var(--orange)" }}> · {t("pwrAdminRequiredHint")}</span>}

@@ -83,7 +83,7 @@ export default function RestorePointManager({ admin }: { admin: boolean }) {
 
   return (
     <>
-      <div className="page-title">🛟 {t("restoreTitle")}</div>
+      <h1 className="page-title">🛟 {t("restoreTitle")}</h1>
       <div className="page-sub">
         {t("restoreSub")}
         {!admin && <span style={{ color: "var(--orange)" }}> · {t("restoreAdminRequiredHint")}</span>}

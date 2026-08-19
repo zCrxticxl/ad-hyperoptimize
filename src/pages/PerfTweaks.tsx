@@ -488,7 +488,7 @@ export default function PerfTweaks({ admin }: { admin: boolean }) {
   const { t } = useLang();
   return (
     <>
-      <div className="page-title">⚡ {t("perfPageTitle")}</div>
+      <h1 className="page-title">⚡ {t("perfPageTitle")}</h1>
       <div className="page-sub">
         {t("perfPageSub")}
       </div>

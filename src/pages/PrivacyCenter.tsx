@@ -98,7 +98,7 @@ export default function PrivacyCenter({ admin }: { admin: boolean }) {
 
   return (
     <>
-      <div className="page-title">{t("privTitle")}</div>
+      <h1 className="page-title">{t("privTitle")}</h1>
       <div className="page-sub">{t("privSub")}</div>
 
       {loading && <><Spinner /> <span className="muted">{t("privLoading")}</span></>}

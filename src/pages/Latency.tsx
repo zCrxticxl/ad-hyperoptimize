@@ -21,7 +21,7 @@ export default function Latency() {
 
   return (
     <>
-      <div className="page-title">{t("latTitle")}</div>
+      <h1 className="page-title">{t("latTitle")}</h1>
       <div className="page-sub">
         {t("latSub")}
       </div>
@@ -62,7 +62,7 @@ export default function Latency() {
         }} />
         {counters && !counters[0]?.error && (
           <table className="tbl mt">
-            <thead><tr><th>{t("latCore")}</th><th>{t("latAvgDpcPct")}</th><th>{t("latPeakDpcPct")}</th><th>{t("latAvgIntPct")}</th><th>{t("latDpcRate")}</th><th></th></tr></thead>
+            <thead><tr><th scope="col">{t("latCore")}</th><th scope="col">{t("latAvgDpcPct")}</th><th scope="col">{t("latPeakDpcPct")}</th><th scope="col">{t("latAvgIntPct")}</th><th scope="col">{t("latDpcRate")}</th><th scope="col"></th></tr></thead>
             <tbody>
               {[...counters]
                 .sort((a, b) => String(a.core).localeCompare(String(b.core), undefined, { numeric: true }))

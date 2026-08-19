@@ -5,18 +5,22 @@ import { useLang } from "../i18n";
 import { analyzeBottleneck, RATING_CLS, RATING_KEY, ComponentRating, Rating } from "../lib/pcAdvisor";
 
 // ─── severity styling ────────────────────────────────────────────────────────
-const SEV: Record<string, { bg: string; border: string; icon: string; label: string }> = {
-  info:    { bg: "rgba(0,140,255,0.07)",   border: "var(--accent)",  icon: "ℹ", label: "INFO"    },
-  warning: { bg: "rgba(255,165,0,0.09)",   border: "var(--orange)",  icon: "⚠", label: "WARNING" },
-  danger:  { bg: "rgba(220,50,50,0.10)",   border: "var(--red)",     icon: "✕", label: "ISSUE"   },
+const SEV: Record<string, { bg: string; border: string; icon: string; labelKey: string }> = {
+  info:    { bg: "rgba(0,140,255,0.07)",   border: "var(--accent)",  icon: "ℹ", labelKey: "hwSevInfo" },
+  warning: { bg: "rgba(255,165,0,0.09)",   border: "var(--orange)",  icon: "⚠", labelKey: "hwSevWarning" },
+  danger:  { bg: "rgba(220,50,50,0.10)",   border: "var(--red)",     icon: "✕", labelKey: "hwSevIssue" },
 };
 
 // ─── single collapsible banner ───────────────────────────────────────────────
 function WarningBanner({ w }: { w: HwWarning }) {
+  const { t } = useLang();
   const [open, setOpen] = useState(false);
   const s = SEV[w.severity] ?? SEV.info;
   return (
     <div
+      role="button"
+      tabIndex={0}
+      aria-expanded={open}
       style={{
         background:   s.bg,
         border:       `1px solid ${s.border}`,
@@ -27,10 +31,11 @@ function WarningBanner({ w }: { w: HwWarning }) {
         userSelect:   "none",
       }}
       onClick={() => setOpen(o => !o)}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen(o => !o); } }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <span style={{ color: s.border, fontWeight: 700, fontSize: 13, minWidth: 14 }}>{s.icon}</span>
-        <span style={{ fontWeight: 600, fontSize: 12, color: s.border }}>{s.label}</span>
+        <span style={{ fontWeight: 600, fontSize: 12, color: s.border }}>{t(s.labelKey as any)}</span>
         <span style={{ fontWeight: 600, fontSize: 12 }}>{w.title}</span>
         <span style={{ marginLeft: "auto", fontSize: 10, opacity: 0.45 }}>{open ? "▲" : "▼"}</span>
       </div>
@@ -88,32 +93,32 @@ export function HwWarningChips({ page }: { page: string }) {
 // ─── per-tweak hardware risk badge + block-on-apply gate ─────────────────────
 // Use anywhere a tweak/setting has an `id` that may appear in profile.tweakRisks.
 
-const OK_STYLE = { bg: "rgba(80,200,120,0.08)", border: "var(--green)" };
-
 export function RiskBadge({ id }: { id: string }) {
   const profile = useHwProfile();
   const risk = useTweakRisk(id);
+  const { t } = useLang();
 
   // Hardware not detected yet — don't claim a verdict we haven't checked.
   if (!profile) return null;
 
   if (!risk) {
+    // Absence of a risk record is NOT evidence of safety — word it honestly.
     return (
       <span
-        title="No known issue for your detected hardware"
+        title={t("hwNoKnownIssue")}
         style={{
-          fontSize: 10.5,
+          fontSize: 11,
           fontWeight: 700,
           padding: "1px 7px",
           borderRadius: 10,
-          background: OK_STYLE.bg,
-          border: `1px solid ${OK_STYLE.border}`,
-          color: OK_STYLE.border,
+          background: "rgba(143,155,179,.12)",
+          border: "1px solid #8f9bb3",
+          color: "#aab5cc",
           cursor: "help",
           whiteSpace: "nowrap",
         }}
       >
-        ✓ OK FOR YOUR HARDWARE
+        ✓ {t("hwNoKnownIssue")}
       </span>
     );
   }
@@ -123,7 +128,7 @@ export function RiskBadge({ id }: { id: string }) {
     <span
       title={risk.message}
       style={{
-        fontSize: 10.5,
+        fontSize: 11,
         fontWeight: 700,
         padding: "1px 7px",
         borderRadius: 10,
@@ -134,7 +139,7 @@ export function RiskBadge({ id }: { id: string }) {
         whiteSpace: "nowrap",
       }}
     >
-      {s.icon} {risk.severity === "danger" ? "RISKY FOR YOUR HARDWARE" : "CHECK YOUR HARDWARE"}
+      {s.icon} {risk.severity === "danger" ? t("hwRiskForHw") : t("hwCheckHw")}
     </span>
   );
 }
@@ -198,7 +203,7 @@ function fmtRam(mb: number) {
 export function HwProfileCard() {
   const p: HwProfile | null = useHwProfile();
   const { t } = useLang();
-  if (!p) return <div className="muted" style={{ fontSize: 12 }}>Detecting hardware…</div>;
+  if (!p) return <div className="muted" style={{ fontSize: 12 }}>{t("hwDetecting")}</div>;
 
   const bottleneck = analyzeBottleneck(p);
   const ratingOf = (key: ComponentRating["key"]) => bottleneck.components.find(c => c.key === key)?.rating;

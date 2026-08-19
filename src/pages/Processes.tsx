@@ -6,7 +6,7 @@ import { useLang } from "../i18n";
 const PRIORITIES = ["Idle", "BelowNormal", "Normal", "AboveNormal", "High", "RealTime"];
 const PERM_PRIORITIES = ["Idle", "BelowNormal", "Normal", "AboveNormal", "High"];
 const INTERVALS = [
-  { v: 0, label: "aus" },
+  { v: 0, label: "" },
   { v: 1000, label: "1s" },
   { v: 2000, label: "2s" },
   { v: 3000, label: "3s" },
@@ -76,14 +76,14 @@ export default function Processes() {
 
   return (
     <>
-      <div className="page-title">{t("procTitle")}</div>
+      <h1 className="page-title">{t("procTitle")}</h1>
       <div className="page-sub">{t("procSub")}</div>
 
       <Card title={`${t("procCard")} ${data ? `(${data.processes.length}, ${t("procShown")})` : ""}`}>
         <div className="row" style={{ marginBottom: 10 }}>
           <input
             className="select"
-            placeholder="Filter…"
+            placeholder={t("procFilter")}
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             style={{ width: 180 }}
@@ -93,14 +93,14 @@ export default function Processes() {
             <option value="memMb">{t("sortRam")}</option>
           </select>
           <button className="btn ghost small" onClick={load}>{t("procRefresh")}</button>
-          <span className="muted" style={{ fontSize: 12 }}>Auto-Refresh:</span>
+          <span className="muted" style={{ fontSize: 12 }}>{t("procAutoRefresh")}</span>
           <select
             className="select"
             value={interval}
             onChange={(e) => setIntervalMs(+e.target.value)}
             style={{ padding: "4px 8px" }}
           >
-            {INTERVALS.map((i) => <option key={i.v} value={i.v}>{i.label}</option>)}
+            {INTERVALS.map((i) => <option key={i.v} value={i.v}>{i.label || t("procIntervalOff")}</option>)}
           </select>
           {msg && <span style={{ color: msg.startsWith("✔") ? "var(--green)" : "var(--yellow)", fontSize: 12 }}>{msg}</span>}
         </div>
@@ -110,13 +110,13 @@ export default function Processes() {
           <table className="tbl">
             <thead>
               <tr>
-                <th>{t("procProcess")}</th>
-                <th>PID</th>
-                <th>CPU %</th>
-                <th>RAM</th>
-                <th>{t("procPriority")}</th>
-                <th></th>
-                <th></th>
+                <th scope="col">{t("procProcess")}</th>
+                <th scope="col">PID</th>
+                <th scope="col">{t("procColCpu")}</th>
+                <th scope="col">RAM</th>
+                <th scope="col">{t("procPriority")}</th>
+                <th scope="col"></th>
+                <th scope="col"></th>
               </tr>
             </thead>
             <tbody>

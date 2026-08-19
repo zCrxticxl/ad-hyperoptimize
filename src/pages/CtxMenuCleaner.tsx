@@ -44,7 +44,7 @@ export default function CtxMenuCleaner({ admin }: { admin: boolean }) {
 
   return (
     <>
-      <div className="page-title">☰ {t("ctxmenuTitle")}</div>
+      <h1 className="page-title">☰ {t("ctxmenuTitle")}</h1>
       <div className="page-sub">
         {t("ctxmenuSub")}
         {!admin && <span style={{ color: "var(--orange)" }}> · {t("ctxmenuAdminHint")}</span>}

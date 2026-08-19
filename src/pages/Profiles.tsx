@@ -41,7 +41,7 @@ export default function Profiles() {
 
   return (
     <>
-      <div className="page-title">{t("profilesTitle")}</div>
+      <h1 className="page-title">{t("profilesTitle")}</h1>
       <div className="page-sub">{t("profilesSub")}</div>
 
       {!profiles && <Spinner />}
@@ -80,7 +80,7 @@ export default function Profiles() {
               )}
               {p.appliedCount > 0 && (
                 <ActionBtn
-                  label="Revert"
+                  label={t("profRevertBtn")}
                   className="btn small ghost"
                   onRun={async () => {
                     setResult(await api.profileRevert(p.id));
@@ -119,26 +119,26 @@ export default function Profiles() {
           </div>
           {b && a && (
             <table className="tbl mt">
-              <thead><tr><th>Benchmark</th><th>{t("profilesBefore")}</th><th>{t("profilesAfter")}</th><th>Δ</th></tr></thead>
+              <thead><tr><th scope="col">Benchmark</th><th scope="col">{t("profilesBefore")}</th><th scope="col">{t("profilesAfter")}</th><th scope="col">Δ</th></tr></thead>
               <tbody>
                 <tr>
-                  <td>CPU single (MB/s)</td><td>{b.cpu.singleMBs}</td><td>{a.cpu.singleMBs}</td>
+                  <td>{t("profBenchCpuSingle")}</td><td>{b.cpu.singleMBs}</td><td>{a.cpu.singleMBs}</td>
                   <td>{delta(b.cpu.singleMBs, a.cpu.singleMBs)}</td>
                 </tr>
                 <tr>
-                  <td>CPU multi (MB/s)</td><td>{b.cpu.multiMBs}</td><td>{a.cpu.multiMBs}</td>
+                  <td>{t("profBenchCpuMulti")}</td><td>{b.cpu.multiMBs}</td><td>{a.cpu.multiMBs}</td>
                   <td>{delta(b.cpu.multiMBs, a.cpu.multiMBs)}</td>
                 </tr>
                 <tr>
-                  <td>RAM copy (GB/s)</td><td>{b.memory.copyGBs}</td><td>{a.memory.copyGBs}</td>
+                  <td>{t("profBenchRamCopy")}</td><td>{b.memory.copyGBs}</td><td>{a.memory.copyGBs}</td>
                   <td>{delta(b.memory.copyGBs, a.memory.copyGBs)}</td>
                 </tr>
                 <tr>
-                  <td>Disk write (MB/s)</td><td>{b.disk.seqWriteMBs}</td><td>{a.disk.seqWriteMBs}</td>
+                  <td>{t("profBenchDiskWrite")}</td><td>{b.disk.seqWriteMBs}</td><td>{a.disk.seqWriteMBs}</td>
                   <td>{delta(b.disk.seqWriteMBs, a.disk.seqWriteMBs)}</td>
                 </tr>
                 <tr>
-                  <td>Disk read (MB/s)</td><td>{b.disk.seqReadMBs}</td><td>{a.disk.seqReadMBs}</td>
+                  <td>{t("profBenchDiskRead")}</td><td>{b.disk.seqReadMBs}</td><td>{a.disk.seqReadMBs}</td>
                   <td>{delta(b.disk.seqReadMBs, a.disk.seqReadMBs)}</td>
                 </tr>
               </tbody>

@@ -164,13 +164,15 @@ export default function DriverManager() {
   const { t } = useLang();
   const [data, setData]       = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [err, setErr]         = useState("");
   const [search, setSearch]   = useState("");
   const [filter, setFilter]   = useState<"all" | "old" | "unsigned">("all");
   const [log, setLog]         = useState("");
 
   const load = async () => {
     setLoading(true);
-    try { setData(await api.driversList()); }
+    try { setData(await api.driversList()); setErr(""); }
+    catch (e: any) { setErr(String(e)); }
     finally { setLoading(false); }
   };
 
@@ -198,7 +200,7 @@ export default function DriverManager() {
 
   return (
     <>
-      <div className="page-title">🔧 {t("drvPageTitle")}</div>
+      <h1 className="page-title">🔧 {t("drvPageTitle")}</h1>
       <div className="page-sub">
         {t("drvPageSub1")}
         {t("drvPageSub2")}
@@ -221,6 +223,7 @@ export default function DriverManager() {
           </div>
         ) : (
           <>
+            {err && <div style={{ color: "var(--red)", marginBottom: 10 }}>{err}</div>}
             <div className="row" style={{ gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
               <input
                 placeholder={t("drvSearchPlaceholder")}

@@ -131,14 +131,24 @@ export default function SoftwareInstaller() {
       selected.forEach(id => { n[id] = { ...n[id], status: "idle", message: "" }; });
       return n;
     });
-    await api.swInstall([...selected]);
+    try {
+      await api.swInstall([...selected]);
+    } catch (e: any) {
+      setInstalling(false);
+      setLog(String(e));
+      setStates(prev => {
+        const n = { ...prev };
+        selected.forEach(id => { n[id] = { ...n[id], status: "error", message: String(e) }; });
+        return n;
+      });
+    }
   };
 
   const selectedNotInstalled = [...selected].filter(id => !states[id]?.installed);
 
   return (
     <>
-      <div className="page-title">📦 {t("softinstTitle")}</div>
+      <h1 className="page-title">📦 {t("softinstTitle")}</h1>
       <div className="page-sub">
         {t("softinstSub")}
       </div>
@@ -194,7 +204,11 @@ export default function SoftwareInstaller() {
             return (
               <div
                 key={app.id}
+                role="button"
+                tabIndex={0}
+                aria-pressed={isSelected}
                 onClick={() => !installing && toggle(app.wingetId)}
+                onKeyDown={(e) => { if (!installing && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); toggle(app.wingetId); } }}
                 style={{
                   display:      "flex",
                   alignItems:   "center",

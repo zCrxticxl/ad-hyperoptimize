@@ -31,13 +31,13 @@ export default function Onboarding({ onDone }: { onDone: (mode: Mode) => void })
 
         <div className="onboarding-choices">
           <button className="onboarding-choice recommended" onClick={() => onDone("beginner")}>
-            <span className="choice-icon">🌱</span>
+            <span className="choice-icon" aria-hidden="true">🌱</span>
             <b>{t("onbBeginnerTitle")}</b>
             <span className="choice-desc">{t("onbBeginnerDesc")}</span>
             <span className="choice-tag">{t("onbRecommended")}</span>
           </button>
           <button className="onboarding-choice" onClick={() => onDone("expert")}>
-            <span className="choice-icon">🛠️</span>
+            <span className="choice-icon" aria-hidden="true">🛠️</span>
             <b>{t("onbExpertTitle")}</b>
             <span className="choice-desc">{t("onbExpertDesc")}</span>
           </button>

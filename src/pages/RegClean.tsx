@@ -36,6 +36,7 @@ export default function RegClean({ admin }: { admin: boolean }) {
   const [filter, setFilter] = useState<string>("All");
   const [search, setSearch] = useState("");
   const [cleaning, setCleaning] = useState(false);
+  const [confirmClean, setConfirmClean] = useState(false);
   const [result, setResult] = useState<any | null>(null);
   const [err, setErr] = useState("");
   const [backups, setBackups] = useState<any[] | null>(null);
@@ -86,6 +87,7 @@ export default function RegClean({ admin }: { admin: boolean }) {
     const entries = data.orphans.filter((o) => sel.has(o.id));
     setCleaning(true);
     setErr("");
+    setConfirmClean(false);
     try {
       const r = await api.regcleanClean(entries);
       setResult(r);
@@ -126,11 +128,9 @@ export default function RegClean({ admin }: { admin: boolean }) {
 
   return (
     <>
-      <div className="page-title">Registry Orphan Cleaner</div>
+      <h1 className="page-title">{t("regTitle")}</h1>
       <div className="page-sub">
-        Scans five categories of dead entries: MUI cache of uninstalled apps, broken uninstall keys,
-        orphaned app paths, SharedDLL ghosts and dead shell extensions. Before each deletion the affected
-        key is exported to a real .reg file — use “Restore…” to bring a previous cleanup back.
+        {t("regSub")}
       </div>
 
       {/* Scan button + status */}
@@ -139,7 +139,7 @@ export default function RegClean({ admin }: { admin: boolean }) {
           {scanning ? <><Spinner /> {t("regScanning")}</> : t("regScan")}
         </button>
         <button className="btn ghost" onClick={toggleBackups} disabled={cleaning}>
-          ↩ {backups ? "Hide restore" : "Restore…"}
+          ↩ {backups ? t("regHideRestore") : t("regRestoreBtn")}
         </button>
         {data && (
           <span className="muted" style={{ fontSize: 13 }}>
@@ -151,20 +151,20 @@ export default function RegClean({ admin }: { admin: boolean }) {
 
       {/* Restore panel */}
       {backups && (
-        <Card title="Restore a previous cleanup" style={{ marginBottom: 16 }}>
+        <Card title={t("regRestoreTitle")} style={{ marginBottom: 16 }}>
           {restoreMsg && <div style={{ fontSize: 13, marginBottom: 8, color: restoreMsg.startsWith("✓") ? "var(--green)" : "var(--red)" }}>{restoreMsg}</div>}
           {backups.length === 0 ? (
-            <div className="muted" style={{ fontSize: 13 }}>No backups yet — they are created automatically when you clean.</div>
+            <div className="muted" style={{ fontSize: 13 }}>{t("regNoBackups")}</div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               {backups.map((b) => (
                 <div key={b.path} className="row" style={{ gap: 10, alignItems: "center", padding: "6px 0", borderBottom: "1px solid var(--border)" }}>
                   <span style={{ fontSize: 13, flex: 1 }}>
-                    {new Date(b.time).toLocaleString()} · <span className="muted">{b.count} entries</span>
+                    {new Date(b.time).toLocaleString()} · <span className="muted">{b.count} {t("regEntriesWord")}</span>
                   </span>
                   <button className="btn ghost small" onClick={() => api.openPath(b.path)}>{t("open")}</button>
                   <button className="btn small" disabled={restoring === b.path} onClick={() => doRestore(b.path)}>
-                    {restoring === b.path ? <><Spinner /> Restoring</> : "Restore"}
+                    {restoring === b.path ? <><Spinner /> {t("regRestoring")}</> : t("regRestore")}
                   </button>
                 </div>
               ))}
@@ -215,12 +215,15 @@ export default function RegClean({ admin }: { admin: boolean }) {
           {/* Summary chips */}
           <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
             {allCats.map((cat) => (
-              <div
+              <button
                 key={cat}
                 className="stat-chip"
+                type="button"
+                aria-pressed={filter === cat || filter === "All"}
                 style={{
                   borderColor: CATEGORY_COLORS[cat] ?? "var(--border)",
                   cursor: "pointer",
+                  font: "inherit",
                   opacity: filter === cat || filter === "All" ? 1 : 0.5,
                 }}
                 onClick={() => setFilter(filter === cat ? "All" : cat)}
@@ -229,7 +232,7 @@ export default function RegClean({ admin }: { admin: boolean }) {
                   {data.counts[cat] ?? 0}
                 </span>
                 <span className="chip-lbl">{cat}</span>
-              </div>
+              </button>
             ))}
           </div>
 
@@ -264,17 +267,17 @@ export default function RegClean({ admin }: { admin: boolean }) {
             <table className="tbl">
               <thead>
                 <tr>
-                  <th style={{ width: 28 }}>
+                  <th scope="col" style={{ width: 28 }}>
                     <input
                       type="checkbox"
                       checked={sel.size > 0 && visible.every((o) => sel.has(o.id))}
                       onChange={(e) => (e.target.checked ? selectAll() : selectNone())}
                     />
                   </th>
-                  <th>{t("regColName")}</th>
-                  <th>{t("regColCat")}</th>
-                  <th>{t("regColPath")}</th>
-                  <th>{t("regColReason")}</th>
+                  <th scope="col">{t("regColName")}</th>
+                  <th scope="col">{t("regColCat")}</th>
+                  <th scope="col">{t("regColPath")}</th>
+                  <th scope="col">{t("regColReason")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -338,14 +341,26 @@ export default function RegClean({ admin }: { admin: boolean }) {
 
             {/* Action footer */}
             <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 14, flexWrap: "wrap" }}>
-              <button
-                className="btn"
-                disabled={sel.size === 0 || cleaning}
-                onClick={doClean}
-                style={sel.size > 0 ? { background: "var(--accent)" } : {}}
-              >
-                {cleaning ? <><Spinner /> {t("regClean")}</> : `🗑 Backup & ${sel.size} ${t("regCleanEntries")}`}
-              </button>
+              {!confirmClean ? (
+                <button
+                  className="btn"
+                  disabled={sel.size === 0 || cleaning}
+                  onClick={() => setConfirmClean(true)}
+                  style={sel.size > 0 ? { background: "var(--accent)" } : {}}
+                >
+                  {cleaning ? <><Spinner /> {t("regClean")}</> : `🗑 ${t("regBackupPrefix")} ${sel.size} ${t("regCleanEntries")}`}
+                </button>
+              ) : (
+                <>
+                  <span style={{ color: "var(--yellow)", fontSize: 13 }}>
+                    ⚠ {t("regConfirmClean")} ({sel.size})
+                  </span>
+                  <button className="btn danger" disabled={cleaning} onClick={doClean}>
+                    {cleaning ? <><Spinner /> {t("regClean")}</> : t("regConfirmBtn")}
+                  </button>
+                  <button className="btn small ghost" onClick={() => setConfirmClean(false)} disabled={cleaning}>{t("cancel")}</button>
+                </>
+              )}
               {!admin && (
                 <span style={{ color: "var(--yellow)", fontSize: 12 }}>
                   {t("regAdminHint")}

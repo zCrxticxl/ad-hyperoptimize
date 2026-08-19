@@ -118,11 +118,11 @@ function BootChart({ events, logWasDisabled }: { events: BootEvent[]; logWasDisa
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <thead>
               <tr style={{ color: "var(--muted)", borderBottom: "1px solid var(--border)" }}>
-                <th style={{ textAlign: "left",  padding: "3px 8px" }}>{t("bootTblDate")}</th>
-                <th style={{ textAlign: "right", padding: "3px 8px" }}>{t("bootTblTotal")}</th>
-                <th style={{ textAlign: "right", padding: "3px 8px" }}>{t("bootTblMain")}</th>
-                <th style={{ textAlign: "right", padding: "3px 8px" }}>{t("bootTblPost")}</th>
-                <th style={{ textAlign: "left",  padding: "3px 8px" }}>{t("bootTblRating")}</th>
+                <th scope="col" style={{ textAlign: "left",  padding: "3px 8px" }}>{t("bootTblDate")}</th>
+                <th scope="col" style={{ textAlign: "right", padding: "3px 8px" }}>{t("bootTblTotal")}</th>
+                <th scope="col" style={{ textAlign: "right", padding: "3px 8px" }}>{t("bootTblMain")}</th>
+                <th scope="col" style={{ textAlign: "right", padding: "3px 8px" }}>{t("bootTblPost")}</th>
+                <th scope="col" style={{ textAlign: "left",  padding: "3px 8px" }}>{t("bootTblRating")}</th>
               </tr>
             </thead>
             <tbody>
@@ -259,7 +259,7 @@ export default function BootOptimizer({ admin }: { admin: boolean }) {
 
   return (
     <>
-      <div className="page-title">{t("bootTitle")}</div>
+      <h1 className="page-title">{t("bootTitle")}</h1>
       <div className="page-sub">{t("bootSub")}</div>
 
       {loading && <><Spinner /> <span className="muted">{t("bootLoading")}</span></>}

@@ -6,7 +6,7 @@ export const Card: React.FC<{ title?: string; children: React.ReactNode; style?:
   style,
 }) => (
   <div className="card" style={style}>
-    {title && <h3>{title}</h3>}
+    {title && <h2 className="card-title">{title}</h2>}
     {children}
   </div>
 );
@@ -53,20 +53,47 @@ export const ActionBtn: React.FC<{
   disabled?: boolean;
 }> = ({ label, onRun, className = "btn", disabled }) => {
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   return (
-    <button
-      className={className}
-      disabled={busy || disabled}
-      onClick={async () => {
-        setBusy(true);
-        try {
-          await onRun();
-        } finally {
-          setBusy(false);
-        }
-      }}
+    <>
+      <button
+        className={className}
+        disabled={busy || disabled}
+        onClick={async () => {
+          setBusy(true);
+          setError(null);
+          try {
+            await onRun();
+          } catch (e: any) {
+            setError(String(e));
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        {busy ? <Spinner /> : label}
+      </button>
+      {error && <ErrorBanner msg={error} />}
+    </>
+  );
+};
+
+/** Inline error banner with optional retry. Never swallow a failure silently. */
+export const ErrorBanner: React.FC<{ msg?: string | null; onRetry?: () => void }> = ({ msg, onRetry }) => {
+  if (!msg) return null;
+  return (
+    <div
+      role="alert"
+      className="warn-banner"
+      style={{ borderColor: "var(--red)", color: "var(--red)", background: "rgba(255,97,125,.08)" }}
     >
-      {busy ? <Spinner /> : label}
-    </button>
+      <b>⚠ </b>
+      {msg}
+      {onRetry && (
+        <button className="btn small ghost" style={{ marginLeft: 8 }} onClick={onRetry} title="Retry">
+          ↻
+        </button>
+      )}
+    </div>
   );
 };

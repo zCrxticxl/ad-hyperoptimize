@@ -80,7 +80,7 @@ export default function ServicesManager({ admin }: { admin: boolean }) {
 
   return (
     <>
-      <div className="page-title">{t("svcTitle")}</div>
+      <h1 className="page-title">{t("svcTitle")}</h1>
       <div className="page-sub">{t("svcSub")}</div>
 
       {!admin && <div className="warn-banner">{t("svcAdminWarn")}</div>}
@@ -146,21 +146,21 @@ export default function ServicesManager({ admin }: { admin: boolean }) {
                   <select
                     className="sel"
                     value={svc.startType}
-                    disabled={isBusy || !admin}
+                    disabled={!!busy || isBusy || !admin}
                     onChange={e => doSetStartup(svc, e.target.value)}
                   >
                     {START_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
                   </select>
                   {running ? (
-                    <button className="btn small ghost" disabled={isBusy || !admin} onClick={() => doControl(svc, "stop")}>
+                    <button className="btn small ghost" disabled={!!busy || isBusy || !admin} onClick={() => doControl(svc, "stop")}>
                       {isBusy ? <Spinner /> : t("svcStop")}
                     </button>
                   ) : (
-                    <button className="btn small" disabled={isBusy || !admin || svc.startType === "Disabled"} onClick={() => doControl(svc, "start")}>
+                    <button className="btn small" disabled={!!busy || isBusy || !admin || svc.startType === "Disabled"} onClick={() => doControl(svc, "start")}>
                       {isBusy ? <Spinner /> : t("svcStart")}
                     </button>
                   )}
-                  <button className="btn small ghost" disabled={isBusy || !admin || !running} onClick={() => doControl(svc, "restart")}>
+                  <button className="btn small ghost" disabled={!!busy || isBusy || !admin || !running} onClick={() => doControl(svc, "restart")}>
                     {isBusy ? <Spinner /> : "↺"}
                   </button>
                 </div>

@@ -1,19 +1,3 @@
-:root {
-  --bg: #0b0e14;
-  --bg2: #11151f;
-  --card: #161b27;
-  --card2: #1c2333;
-  --border: #232b3d;
-  --text: #e6edf3;
-  --muted: #8b95a8;
-  --accent: #4f8cff;
-  --accent2: #7c5cff;
-  --green: #3fd68f;
-  --yellow: #ffd166;
-  --orange: #ff8c42;
-  --red: #ff4d6d;
-  --cyan: #4cc9f0;
-}
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -72,7 +56,7 @@ body {
   animation: fadeIn .25s ease;
 }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
-.card h3 { font-size: 13px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 10px; }
+.card h2.card-title { font-size: 13px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 10px; }
 .stat-big { font-size: 28px; font-weight: 700; }
 .stat-sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
 
@@ -223,8 +207,11 @@ details pre { user-select: text; white-space: pre-wrap; word-break: break-all; }
   --accent2: #9a6bff;
   --green: #42d49b;
   --yellow: #f7c969;
+  --orange: #ff8c42;
   --red: #ff617d;
   --cyan: #64d6ff;
+  --fg: #f1f5ff;
+  --input-bg: #141925;
 }
 
 body { background: radial-gradient(circle at 88% -10%, rgba(109, 141, 255, .14), transparent 31rem), var(--bg); letter-spacing: .01em; }
@@ -278,7 +265,7 @@ body { background: radial-gradient(circle at 88% -10%, rgba(109, 141, 255, .14),
 .page-title { font-size: 26px; letter-spacing: -.045em; margin-bottom: 6px; }
 .page-sub { max-width: 720px; line-height: 1.55; margin-bottom: 22px; }
 .card { border-color: rgba(143,155,179,.17); border-radius: 14px; background: linear-gradient(145deg, rgba(27,33,48,.96), rgba(18,23,34,.96)); box-shadow: 0 12px 30px rgba(0,0,0,.12); }
-.card h3 { color: #aab5cc; }
+.card h2.card-title { color: #aab5cc; }
 .btn { border-radius: 9px; box-shadow: 0 6px 15px rgba(80,105,240,.2); }
 .btn.ghost { background: rgba(255,255,255,.04); }
 .btn:focus-visible, .nav-item:focus-visible, .nav-group-label:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
@@ -411,3 +398,84 @@ body { background: radial-gradient(circle at 88% -10%, rgba(109, 141, 255, .14),
 
 .nav-unlock.wide { width: 100%; margin: 22px 0 0; justify-content: center; padding: 13px; }
 .btn.big { padding: 12px 20px; font-size: 14px; font-weight: 700; }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   A11y & consistency pass (UI-011..018)
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ── UI-011: contrast — darker fills for white text ≥4.5:1 ───────────── */
+:root {
+  --accent-strong: #3d5af0; /* white text ≈5.3:1 */
+  --red-strong:    #d1355c; /* white text ≈4.8:1 */
+}
+.btn { background: var(--accent-strong); }
+.btn.danger { background: var(--red-strong); }
+.btn.big { background: var(--accent-strong); }
+.mode-toggle button.on { background: var(--accent-strong); }
+.choice-tag { background: var(--accent-strong); }
+.brand-mark { background: linear-gradient(135deg, var(--accent-strong), var(--accent2)); }
+.social-btn.coffee { background: var(--red-strong); border-color: var(--red-strong); }
+.social-btn.coffee:hover { background: var(--red-strong); filter: brightness(1.1); }
+.crumb-sep { color: #6b7894; }
+.topbar-search input::placeholder, .nav-search::placeholder { color: #8b96ad; }
+.search-input::placeholder { color: #8b96ad; }
+
+/* ── UI-012: visible keyboard focus on every live control ─────────────── */
+.btn:focus-visible, .crumb:focus-visible, .back-btn:focus-visible,
+.brand-home:focus-visible, .tool-card:focus-visible, .category-card:focus-visible,
+.mode-toggle button:focus-visible, .overview-stat.action:focus-visible,
+.row-action:focus-visible, .text-action:focus-visible, .icon-button:focus-visible,
+.topbar-search-clear:focus-visible, .social-btn:focus-visible, .nav-unlock:focus-visible,
+.onboarding-choice:focus-visible, summary:focus-visible, input:focus-visible,
+select:focus-visible, textarea:focus-visible {
+  outline: 2px solid var(--cyan); outline-offset: 2px;
+}
+.topbar-search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.search-input:focus { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+
+/* ── UI-013: reduced motion ───────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ── UI-016: readable floor for small labels (no global type change) ──── */
+.stat-lbl, .chip-lbl, .tool-cat, .brand-caption, .score-total,
+.svc-sname, .finding-copy span { font-size: 11px !important; }
+.score-total { font-size: 11px; }
+
+/* ── UI-017: copyable technical text ──────────────────────────────────── */
+.mono, .tweak-detail, details pre, .log-console, .tbl td, table td,
+pre, code, .svc-desc { user-select: text; -webkit-user-select: text; }
+
+/* UI-024: deep-linked tweak highlight flash */
+.tweak-focus { animation: tweak-flash 2.2s ease; }
+@keyframes tweak-flash {
+  0%, 60% { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(109,141,255,.35); }
+  100% { border-color: var(--border); box-shadow: none; }
+}
+
+/* ── UI-025: Paused service status class (referenced but was undefined) ── */
+.st-medium { background: rgba(247,201,105,.14); color: var(--yellow); }
+
+/* ── UI-028: responsive — narrow-window fixes ─────────────────────────── */
+@media (max-width: 900px) {
+  .grid-4, .grid-3 { grid-template-columns: 1fr 1fr; }
+  .dashboard-stats { grid-template-columns: 1fr; }
+  .tweak-head { flex-wrap: wrap; }
+  .svc-controls { flex-wrap: wrap; }
+}
+@media (max-width: 720px) {
+  .grid-4, .grid-3, .grid-2 { grid-template-columns: 1fr; }
+  .dashboard-grid { grid-template-columns: 1fr; }
+  .topbar { flex-wrap: wrap; }
+  .topbar-search { max-width: 100%; order: 5; margin-left: 0; }
+  .content { padding: 16px 14px 28px; }
+  .dashboard-hero { grid-template-columns: 1fr; }
+  .tbl { display: block; overflow-x: auto; }
+  .tool-head { flex-wrap: wrap; }
+}

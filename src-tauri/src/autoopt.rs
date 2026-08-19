@@ -83,7 +83,9 @@ pub fn scan() -> Value {
                 "name":        t["name"].as_str().unwrap_or(id),
                 "description": t["description"].as_str().unwrap_or(""),
                 "impact":      t.get("impact").and_then(|v| v.as_str()).unwrap_or(""),
-                "risk":        "safe",
+                // Propagate the real catalog risk (Low/Medium/High) so the
+                // Auto-Optimizer can never present a Medium tweak as "safe".
+                "risk":        t["risk"].as_str().unwrap_or("Low"),
                 "applied":     applied,
             }));
         }
@@ -104,7 +106,7 @@ pub fn scan() -> Value {
                 "name":        p["name"].as_str().unwrap_or(id),
                 "description": p["description"].as_str().unwrap_or(""),
                 "impact":      "",
-                "risk":        "safe",
+                "risk":        p["risk"].as_str().unwrap_or("Low"),
                 "applied":     applied,
             }));
         }
@@ -125,7 +127,7 @@ pub fn scan() -> Value {
                 "name":        d["name"].as_str().unwrap_or(id),
                 "description": d["description"].as_str().unwrap_or(""),
                 "impact":      "",
-                "risk":        "safe",
+                "risk":        "Low",
                 "applied":     applied,
             }));
         }

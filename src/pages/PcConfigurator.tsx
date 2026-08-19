@@ -55,7 +55,7 @@ export default function PcConfigurator() {
   if (!hw || !bottleneck) {
     return (
       <>
-        <div className="page-title">{t("pcconfTitle")}</div>
+        <h1 className="page-title">{t("pcconfTitle")}</h1>
         <div className="page-sub">{t("pcconfSub")}</div>
       </>
     );
@@ -174,7 +174,7 @@ export default function PcConfigurator() {
 
   return (
     <>
-      <div className="page-title">{t("pcconfTitle")}</div>
+      <h1 className="page-title">{t("pcconfTitle")}</h1>
       <div className="page-sub">{t("pcconfSub")}</div>
 
       <div className="mode-toggle" style={{ margin: "14px 0", width: 360 }}>

@@ -34,7 +34,7 @@ export default function Hardware({ mode }: { mode: Mode }) {
   if (!scan)
     return (
       <>
-        <div className="page-title">{t("hwTitle")}</div>
+        <h1 className="page-title">{t("hwTitle")}</h1>
         <div className="page-sub">{t("hwSub")}</div>
         <Spinner /> <span className="muted">{t("hwScanningFirstRun")}</span>
       </>
@@ -45,13 +45,19 @@ export default function Hardware({ mode }: { mode: Mode }) {
 
   return (
     <>
-      <div className="page-title">{t("hwTitle")}</div>
+      <h1 className="page-title">{t("hwTitle")}</h1>
       <div className="page-sub">
         {meta && <>{t("hwScanned")} {fmtAge(meta.time)}{meta.fromCache ? ` (${t("hwCached")})` : ""} · </>}
-        <a style={{ color: "var(--accent)", cursor: "pointer" }} onClick={() => load(true)}>
+        <button className="text-action" onClick={() => load(true)}>
           {busy ? t("hwRescanning") : t("hwRescanNow")}
-        </a>
+        </button>
       </div>
+
+      {scan.error && (
+        <div className="warn-banner" style={{ borderColor: "var(--red)", color: "var(--red)", background: "rgba(255,97,125,.08)" }}>
+          <b>⚠ </b>{scan.error} — <button className="btn small ghost" onClick={() => load(true)}>↻ {t("hwRescanNow")}</button>
+        </div>
+      )}
 
       <div className="grid grid-2">
         <Card title={t("hwOperatingSystem")}>
@@ -101,7 +107,7 @@ export default function Hardware({ mode }: { mode: Mode }) {
 
       <Card title={t("hwStorageSmart")} style={{ marginTop: 14 }}>
         <table className="tbl">
-          <thead><tr><th>{t("hwDisk")}</th><th>{t("hwType")}</th><th>{t("hwBus")}</th><th>{t("hwSize")}</th><th>{t("hwHealth")}</th></tr></thead>
+          <thead><tr><th scope="col">{t("hwDisk")}</th><th scope="col">{t("hwType")}</th><th scope="col">{t("hwBus")}</th><th scope="col">{t("hwSize")}</th><th scope="col">{t("hwHealth")}</th></tr></thead>
           <tbody>
             {asArr(scan.disks).map((d: any, i: number) => (
               <tr key={i}>
@@ -114,7 +120,7 @@ export default function Hardware({ mode }: { mode: Mode }) {
         </table>
         {asArr(scan.smart).length > 0 && (
           <table className="tbl mt">
-            <thead><tr><th>{t("hwSmartDev")}</th><th>{t("hwTempC")}</th><th>{t("hwWearPct")}</th><th>{t("hwReadErrs")}</th><th>{t("hwPowerOnHrs")}</th></tr></thead>
+            <thead><tr><th scope="col">{t("hwSmartDev")}</th><th scope="col">{t("hwTempC")}</th><th scope="col">{t("hwWearPct")}</th><th scope="col">{t("hwReadErrs")}</th><th scope="col">{t("hwPowerOnHrs")}</th></tr></thead>
             <tbody>
               {asArr(scan.smart).map((s: any, i: number) => (
                 <tr key={i}>
@@ -133,7 +139,7 @@ export default function Hardware({ mode }: { mode: Mode }) {
             <button className="btn ghost small" onClick={() => api.bootAnalysis().then(setBoot)}>{t("hwAnalyzeBootHistory")}</button>
           ) : (
             <table className="tbl">
-              <thead><tr><th>{t("hwBoot")}</th><th>{t("hwDuration")}</th></tr></thead>
+              <thead><tr><th scope="col">{t("hwBoot")}</th><th scope="col">{t("hwDuration")}</th></tr></thead>
               <tbody>
                 {asArr(boot).map((b: any, i: number) => (
                   <tr key={i}><td>{b.time}</td><td>{(b.bootMs / 1000).toFixed(1)} s</td></tr>

@@ -1,12 +1,14 @@
 import React, { useEffect, useState, useMemo } from "react";
 import { api } from "../api";
-import { Card, Spinner } from "../components/ui";
+import { Badge, Card, Spinner } from "../components/ui";
 import { useLang } from "../i18n";
 
 type Rec = {
   id: string; module: string; category: string; name: string;
   description: string; impact: string; risk: string; applied: boolean;
 };
+
+const RISK_KEY: Record<string, "riskLow" | "riskMedium" | "riskHigh"> = { Low: "riskLow", Medium: "riskMedium", High: "riskHigh" };
 
 export default function AutoOptimizer({ admin }: { admin: boolean }) {
   const { t } = useLang();
@@ -15,12 +17,16 @@ export default function AutoOptimizer({ admin }: { admin: boolean }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy]       = useState(false);
   const [results, setResults] = useState<any>(null);
+  const [confirming, setConfirming] = useState(false);
 
   const load = async (clearResults = false) => {
     setLoading(true);
     if (clearResults) setResults(null);
-    try { setData(await api.autooptScan()); }
-    finally { setLoading(false); }
+    try {
+      setData(await api.autooptScan());
+    } catch (e: any) {
+      setResults({ error: String(e) });
+    } finally { setLoading(false); }
   };
 
   useEffect(() => { load(true); }, []);
@@ -29,10 +35,12 @@ export default function AutoOptimizer({ admin }: { admin: boolean }) {
   const pending     = recs.filter(r => !r.applied);
   const applied     = recs.filter(r => r.applied);
 
-  // Auto-select all pending on first load
+  // Auto-select only LOW-risk pending items on first load. Anything Medium/High
+  // stays unselected so a one-click user is never silently signed up for it;
+  // "Select all" still offers everything behind an explicit confirmation.
   useEffect(() => {
     if (pending.length && selected.size === 0) {
-      setSelected(new Set(pending.map(r => r.id)));
+      setSelected(new Set(pending.filter(r => r.risk === "Low").map(r => r.id)));
     }
   }, [data]);
 
@@ -51,13 +59,17 @@ export default function AutoOptimizer({ admin }: { admin: boolean }) {
     return n;
   });
 
+  const selectedRecs = pending.filter(r => selected.has(r.id));
+  const hasNonLow = selectedRecs.some(r => r.risk !== "Low");
+  const categories = [...new Set(selectedRecs.map(r => r.category))];
+
   const applySelected = async () => {
-    const items = pending.filter(r => selected.has(r.id));
-    if (!items.length) return;
+    if (!selectedRecs.length) return;
     setBusy(true);
     try {
-      const res = await api.autooptApply(items);
+      const res = await api.autooptApply(selectedRecs);
       setResults(res);
+      setConfirming(false);
       await load(false); // keep results visible after rescan
     } catch (e: any) {
       setResults({ error: String(e) });
@@ -70,7 +82,7 @@ export default function AutoOptimizer({ admin }: { admin: boolean }) {
 
   return (
     <>
-      <div className="page-title">✨ {t("autoTitle")}</div>
+      <h1 className="page-title">✨ {t("autoTitle")}</h1>
       <div className="page-sub">
         {t("autoSub")}
         {!admin && <span style={{ color: "var(--orange)" }}> · {t("autoAdminHint")}</span>}
@@ -110,7 +122,7 @@ export default function AutoOptimizer({ admin }: { admin: boolean }) {
                   <>
                     <button className="btn small ghost" onClick={() => setSelected(new Set(pending.map(r => r.id)))}>{t("autoSelectAll")}</button>
                     <button className="btn small ghost" onClick={() => setSelected(new Set())}>{t("autoClear")}</button>
-                    <button className="btn" disabled={!selected.size || busy} onClick={applySelected}>
+                    <button className="btn" disabled={!selected.size || busy} onClick={() => setConfirming(true)}>
                       {busy ? <><Spinner /> {t("autoApplying")}</> : `⚡ ${t("autoApplyBtn")} (${selected.size})`}
                     </button>
                   </>
@@ -119,6 +131,25 @@ export default function AutoOptimizer({ admin }: { admin: boolean }) {
               </div>
             </div>
           </Card>
+
+          {/* Confirm step — always shown before applying, warns for non-Low risk */}
+          {confirming && (
+            <Card title={`${t("autoConfirmTitle")} (${selectedRecs.length})`} style={{ marginBottom: 14, borderColor: hasNonLow ? "var(--red)" : undefined }}>
+              <div className="muted" style={{ fontSize: 13, lineHeight: 1.6 }}>
+                {t("autoConfirmNote")}
+              </div>
+              <div className="row" style={{ gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                <span className="badge st-not_applied">{t("autoConfirmCategories")}: {categories.join(" · ")}</span>
+                {hasNonLow && <span className="badge risk-High">⚠ {t("autoConfirmWarn")}</span>}
+              </div>
+              <div className="row" style={{ gap: 8, marginTop: 14 }}>
+                <button className={`btn ${hasNonLow ? "danger" : ""}`} disabled={busy} onClick={applySelected}>
+                  {busy ? <><Spinner /> {t("autoApplying")}</> : `⚡ ${t("autoApplyBtn")} (${selectedRecs.length})`}
+                </button>
+                <button className="btn small ghost" onClick={() => setConfirming(false)} disabled={busy}>{t("cancel")}</button>
+              </div>
+            </Card>
+          )}
 
           {/* Results */}
           {results && (
@@ -157,6 +188,9 @@ export default function AutoOptimizer({ admin }: { admin: boolean }) {
                         <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>{r.description}</div>
                         {r.impact && <div style={{ fontSize: 11, color: "var(--green)", marginTop: 2 }}>↑ {r.impact}</div>}
                       </div>
+                      <span style={{ alignSelf: "center", flexShrink: 0 }}>
+                        <Badge cls={`risk-${r.risk}`}>{t(RISK_KEY[r.risk] ?? "riskLow")}</Badge>
+                      </span>
                       <span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 4, background: "var(--bg2)", color: "var(--muted)", flexShrink: 0, alignSelf: "center" }}>
                         {r.module === "tweak" ? t("autoBadgeTweak") : r.module === "privacy" ? t("autoBadgePrivacy") : t("autoBadgeDebloat")}
                       </span>

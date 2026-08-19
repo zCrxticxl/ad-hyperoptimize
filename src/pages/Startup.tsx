@@ -17,7 +17,7 @@ export default function Startup({ admin }: { admin: boolean }) {
     folder_common: t("scopeFolderCommon"),
   };
 
-  const load = () => api.startupList().then((r) => setItems(r.items));
+  const load = () => api.startupList().then((r) => setItems(r.items)).catch((e) => { setErr(String(e)); setItems([]); });
   useEffect(() => {
     load();
   }, []);
@@ -39,7 +39,7 @@ export default function Startup({ admin }: { admin: boolean }) {
 
   return (
     <>
-      <div className="page-title">{t("startupTitle")}</div>
+      <h1 className="page-title">{t("startupTitle")}</h1>
       <div className="page-sub">{t("startupSub")}</div>
 
       {!items && <><Spinner /> <span className="muted">{t("startupLoading")}</span></>}
@@ -50,10 +50,10 @@ export default function Startup({ admin }: { admin: boolean }) {
           <table className="tbl">
             <thead>
               <tr>
-                <th>{t("startupProgram")}</th>
-                <th>{t("startupCommand")}</th>
-                <th>{t("startupSource")}</th>
-                <th>{t("status")}</th>
+                <th scope="col">{t("startupProgram")}</th>
+                <th scope="col">{t("startupCommand")}</th>
+                <th scope="col">{t("startupSource")}</th>
+                <th scope="col">{t("status")}</th>
               </tr>
             </thead>
             <tbody>

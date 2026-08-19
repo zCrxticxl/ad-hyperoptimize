@@ -9,14 +9,16 @@ export default function Cleanup() {
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [result, setResult] = useState<any | null>(null);
   const [confirm, setConfirm] = useState(false);
+  const [err, setErr] = useState("");
 
   const scan = (force: boolean) => {
     setCats(null);
     setResult(null);
+    setErr("");
     api.scanCleanup(force).then((env) => {
       setCats(env.data);
       setSel(new Set());
-    });
+    }).catch((e: any) => { setErr(String(e)); setCats([]); });
   };
   useEffect(() => scan(false), []);
 
@@ -31,18 +33,19 @@ export default function Cleanup() {
 
   return (
     <>
-      <div className="page-title">{t("cleanupTitle")}</div>
+      <h1 className="page-title">{t("cleanupTitle")}</h1>
       <div className="page-sub">
         {t("cleanupSub")}
       </div>
 
       {!cats && <><Spinner /> <span className="muted">{t("cleanupScanning")}</span></>}
+      {err && <div style={{ color: "var(--red)", marginBottom: 10 }}>{err}</div>}
 
       {cats && (
         <Card title={`${t("cleanupReclaimable")}: ${fmtBytes(cats.reduce((a, c) => a + c.bytes, 0))}`}>
           <table className="tbl">
             <thead>
-              <tr><th></th><th>{t("cleanupColCategory")}</th><th>{t("cleanupColFiles")}</th><th>{t("cleanupColSize")}</th><th>{t("cleanupColNotes")}</th></tr>
+              <tr><th scope="col"></th><th scope="col">{t("cleanupColCategory")}</th><th scope="col">{t("cleanupColFiles")}</th><th scope="col">{t("cleanupColSize")}</th><th scope="col">{t("cleanupColNotes")}</th></tr>
             </thead>
             <tbody>
               {cats.map((c) => (

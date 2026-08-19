@@ -60,6 +60,7 @@ export default function Debloater({ admin }: { admin: boolean }) {
   const [applyingAll, setApplyingAll] = useState(false);
   const [selBloat, setSelBloat]   = useState<Set<string>>(new Set(RECOMMENDED_BLOAT));
   const [removingBloat, setRemovingBloat] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState(false);
   const [bloatLog, setBloatLog]   = useState("");
 
   useEffect(() => {
@@ -88,29 +89,40 @@ export default function Debloater({ admin }: { admin: boolean }) {
   const applySection = async (ids: string[]) => {
     if (!requireAdmin()) return;
     setApplyingAll(true);
+    let applied = 0, failed = 0;
     for (const id of ids) {
       const t = tweaks.find(tw => tw.id === id && !tw.applied);
       if (!t) continue;
-      try { await api.debloaterTweakApply(t.id); setTweaks(prev => prev.map(tw => tw.id === id ? { ...tw, applied: true } : tw)); } catch {}
+      try { await api.debloaterTweakApply(t.id); setTweaks(prev => prev.map(tw => tw.id === id ? { ...tw, applied: true } : tw)); applied++; }
+      catch { failed++; }
     }
     setApplyingAll(false);
-    setLog({ msg: t("debloatSectionApplied"), ok: true });
+    if (failed > 0) {
+      setLog({ msg: `${applied} ${t("debloatTweaksWord")} ${t("debloatSectionApplied")}, ${failed} ${t("debloatSkipped")}`, ok: false });
+    } else {
+      setLog({ msg: t("debloatSectionApplied"), ok: true });
+    }
   };
 
   const applyAll = async () => {
     if (!requireAdmin()) return;
     setApplyingAll(true); setLog(null);
-    let n = 0;
+    let n = 0, failed = 0;
     for (const t of unapplied) {
-      try { await api.debloaterTweakApply(t.id); setTweaks(prev => prev.map(tw => tw.id === t.id ? { ...tw, applied: true } : tw)); n++; } catch {}
+      try { await api.debloaterTweakApply(t.id); setTweaks(prev => prev.map(tw => tw.id === t.id ? { ...tw, applied: true } : tw)); n++; }
+      catch { failed++; }
     }
     setApplyingAll(false);
-    setLog({ msg: `${t("debloatAppliedN")} ${n} ${n !== 1 ? t("debloatTweaksWord") : t("debloatTweakWord")}. ${t("debloatRestartRecommended")}`, ok: true });
+    if (failed > 0) {
+      setLog({ msg: `${t("debloatAppliedN")} ${n} ${n !== 1 ? t("debloatTweaksWord") : t("debloatTweakWord")}, ${failed} ${t("debloatSkipped")}. ${t("debloatRestartRecommended")}`, ok: false });
+    } else {
+      setLog({ msg: `${t("debloatAppliedN")} ${n} ${n !== 1 ? t("debloatTweaksWord") : t("debloatTweakWord")}. ${t("debloatRestartRecommended")}`, ok: true });
+    }
   };
 
   const removeBloat = async () => {
     if (!requireAdmin()) return;
-    setRemovingBloat(true); setBloatLog("");
+    setRemovingBloat(true); setBloatLog(""); setConfirmRemove(false);
     let removed = 0, failed = 0;
     for (const name of selBloat) {
       try { await api.debloaterRemoveProvisioned(name); removed++; } catch { failed++; }
@@ -129,7 +141,7 @@ export default function Debloater({ admin }: { admin: boolean }) {
 
   return (
     <>
-      <div className="page-title">🚀 {t("debloatTitle")}</div>
+      <h1 className="page-title">🚀 {t("debloatTitle")}</h1>
       <div className="page-sub">
         {t("debloatSub")}
         {!admin && <span style={{ color: "var(--orange)" }}> · {t("debloatAdminRequired")}</span>}
@@ -236,10 +248,20 @@ export default function Debloater({ admin }: { admin: boolean }) {
           );
         })}
 
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12 }}>
-          <button className="btn danger" disabled={!selBloat.size || removingBloat || !admin} onClick={removeBloat}>
-            {removingBloat ? <><Spinner /> {t("debloatRemoving")}</> : `🗑 ${t("debloatRemoveBtn")} (${selBloat.size})`}
-          </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+          {!confirmRemove ? (
+            <button className="btn danger" disabled={!selBloat.size || removingBloat || !admin} onClick={() => setConfirmRemove(true)}>
+              {removingBloat ? <><Spinner /> {t("debloatRemoving")}</> : `🗑 ${t("debloatRemoveBtn")} (${selBloat.size})`}
+            </button>
+          ) : (
+            <>
+              <span style={{ color: "var(--yellow)", fontSize: 13 }}>⚠ {t("debloatConfirmRemove")} ({selBloat.size})</span>
+              <button className="btn danger" disabled={removingBloat || !admin} onClick={removeBloat}>
+                {removingBloat ? <><Spinner /> {t("debloatRemoving")}</> : t("debloatConfirmBtn")}
+              </button>
+              <button className="btn small ghost" onClick={() => setConfirmRemove(false)} disabled={removingBloat}>{t("cancel")}</button>
+            </>
+          )}
           <button className="btn small ghost" onClick={() => setSelBloat(new Set(RECOMMENDED_BLOAT))}>{t("debloatReset")}</button>
           <button className="btn small ghost" onClick={() => setSelBloat(new Set(BLOAT_PACKAGES.map(b => b.name)))}>{t("debloatAll")}</button>
           <button className="btn small ghost" onClick={() => setSelBloat(new Set())}>{t("debloatNone")}</button>

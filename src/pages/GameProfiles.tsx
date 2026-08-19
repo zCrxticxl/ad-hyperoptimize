@@ -62,15 +62,19 @@ export default function GameProfiles() {
   const toggleSwitcher = async () => {
     if (!status) return;
     const next = !status.enabled;
-    await api.gameSwitcherConfigure(next, status.defaultPreset ?? "performance");
-    setStatus((s: any) => ({ ...s, enabled: next }));
-    showToast(next ? `✅ ${t("gameprofToastSwitcherEnabled")}` : `⏸ ${t("gameprofToastSwitcherDisabled")}`);
+    try {
+      await api.gameSwitcherConfigure(next, status.defaultPreset ?? "performance");
+      setStatus((s: any) => ({ ...s, enabled: next }));
+      showToast(next ? `✅ ${t("gameprofToastSwitcherEnabled")}` : `⏸ ${t("gameprofToastSwitcherDisabled")}`);
+    } catch (e: any) { showToast(`${t("gameprofToastError")}: ${String(e)}`); }
   };
 
   const changeDefaultPreset = async (p: string) => {
     if (!status) return;
-    await api.gameSwitcherConfigure(status.enabled, p);
-    setStatus((s: any) => ({ ...s, defaultPreset: p }));
+    try {
+      await api.gameSwitcherConfigure(status.enabled, p);
+      setStatus((s: any) => ({ ...s, defaultPreset: p }));
+    } catch (e: any) { showToast(`${t("gameprofToastError")}: ${String(e)}`); }
   };
 
   const applyPreset = async (game: any, p: string) => {
@@ -79,14 +83,17 @@ export default function GameProfiles() {
       const res = await api.gameApplyPreset(game.id, p);
       if (res.ok) showToast(`⚡ ${t("gameprofToastApplied")} ${p} ${t("gameprofToastPresetFor")} ${game.name} — ${t("gameprofToastPowerPlan")}: ${PLAN_LABELS[res.powerPlan] ?? res.powerPlan}`);
       else showToast(`${t("gameprofToastError")}: ${res.error}`);
-    } finally { setBusy(false); }
+    } catch (e: any) { showToast(`${t("gameprofToastError")}: ${String(e)}`); }
+    finally { setBusy(false); }
   };
 
   const revert = async () => {
     setBusy(true);
-    await api.gameRevert();
-    setBusy(false);
-    showToast(`🔁 ${t("gameprofToastReverted")}`);
+    try {
+      await api.gameRevert();
+      showToast(`🔁 ${t("gameprofToastReverted")}`);
+    } catch (e: any) { showToast(`${t("gameprofToastError")}: ${String(e)}`); }
+    finally { setBusy(false); }
   };
 
   const currentPreset = (game: any) =>
@@ -189,7 +196,7 @@ export default function GameProfiles() {
                 >
                   <span style={{fontSize:13}}>{game.name}</span>
                   {status?.activeGame === game.id && (
-                    <span style={{fontSize:10, color:"#22c55e"}}>● ACTIVE</span>
+                    <span style={{fontSize:10, color:"#22c55e"}}>● {t("gameprofActive")}</span>
                   )}
                   {game.competitive && (
                     <span style={{fontSize:10, color:"#f59e0b"}}>⚡</span>

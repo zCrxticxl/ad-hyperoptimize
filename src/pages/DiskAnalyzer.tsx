@@ -178,7 +178,9 @@ function DriveCard({ drive, selected, onClick }: { drive: Drive; selected: boole
   const { t } = useLang();
   const color = drive.pct > 90 ? "var(--red)" : drive.pct > 70 ? "var(--yellow)" : "var(--accent)";
   return (
-    <div onClick={onClick} style={{
+    <div role="button" tabIndex={0} aria-pressed={selected} onClick={onClick}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); } }}
+      style={{
       border: `1px solid ${selected ? "var(--accent)" : "var(--border)"}`,
       borderRadius: 10, padding: "12px 16px", cursor: "pointer", minWidth: 140,
       background: selected ? "var(--accent)11" : "var(--card)", transition: "border-color .15s",
@@ -219,6 +221,7 @@ function LargestTab({ path, drives, currentRoot }: LargestTabProps) {
   const [data, setData]           = useState<LargestData | null>(null);
   const [loading, setLoading]     = useState(false);
   const [scanned, setScanned]     = useState(0);
+  const [err, setErr]             = useState("");
   const [view, setView]           = useState<"files" | "folders">("files");
   const [filter, setFilter]       = useState("");
   const [sel, setSel]             = useState<Set<string>>(new Set());
@@ -252,6 +255,7 @@ function LargestTab({ path, drives, currentRoot }: LargestTabProps) {
     // Full result arrives when scan completes
     api.diskLargest(path, 50)
       .then(setData)
+      .catch((e: any) => setErr(String(e)))
       .finally(() => {
         setLoading(false);
         setScanned(0);
@@ -288,19 +292,20 @@ function LargestTab({ path, drives, currentRoot }: LargestTabProps) {
 
   return (
     <div>
+      {err && <div style={{ color: "var(--red)", marginBottom: 10 }}>{err}</div>}
       {data && (
         <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 14 }}>
           {[[t("diskFiles"), data.fileCount.toLocaleString(lang === "de" ? "de-DE" : "en-US")], [t("diskTotalSize"), data.totalSizeFmt], ["Ø", fmtBytes(data.fileCount > 0 ? data.totalSize / data.fileCount : 0)]].map(([l, v]) => (
             <div key={l} className="stat-chip"><div className="chip-val">{v}</div><div className="chip-lbl">{l}</div></div>
           ))}
-          {data.capped && <div style={{ color: "var(--yellow)", fontSize: 12, alignSelf: "center" }}>⚠ Scan capped at 2M files</div>}
+          {data.capped && <div style={{ color: "var(--yellow)", fontSize: 12, alignSelf: "center" }}>⚠ {t("diskScanCapped")}</div>}
         </div>
       )}
 
       <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
         <button className={`btn small ${view === "files" ? "" : "ghost"}`} onClick={() => { setView("files"); setSel(new Set()); }}>{t("diskFiles")}</button>
         <button className={`btn small ${view === "folders" ? "" : "ghost"}`} onClick={() => { setView("folders"); setSel(new Set()); }}>{t("diskFolders")}</button>
-        <input placeholder="Filter…" value={filter} onChange={e => setFilter(e.target.value)}
+        <input placeholder={t("diskFilter")} value={filter} onChange={e => setFilter(e.target.value)}
           style={{ background: "var(--input-bg)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)", padding: "4px 10px", fontSize: 12, width: 180 }} />
         <button className="btn small ghost" onClick={load} disabled={loading}>{loading ? <Spinner /> : "↻"}</button>
         {sel.size > 0 && <span style={{ color: "var(--accent)", fontSize: 12, marginLeft: 4 }}>{sel.size} {t("diskSelected")}</span>}
@@ -311,7 +316,7 @@ function LargestTab({ path, drives, currentRoot }: LargestTabProps) {
           <Spinner />
           <span>
             {scanned > 0
-              ? `Scanning… ${scanned.toLocaleString()} files indexed`
+              ? t("diskScanningN").replace("{n}", scanned.toLocaleString(lang === "de" ? "de-DE" : "en-US"))
               : t("diskLoading")}
           </span>
         </div>
@@ -323,14 +328,14 @@ function LargestTab({ path, drives, currentRoot }: LargestTabProps) {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <thead>
               <tr style={{ color: "var(--muted)", borderBottom: "1px solid var(--border)" }}>
-                <th style={{ padding: "4px 8px", width: 20 }}>
+                <th scope="col" style={{ padding: "4px 8px", width: 20 }}>
                   <Chk checked={allSel} indeterminate={someSel} onChange={toggleAll} />
                 </th>
-                <th style={{ textAlign: "left", padding: "4px 8px" }}>#</th>
-                <th style={{ textAlign: "left", padding: "4px 8px" }}>{t("colApp")}</th>
-                <th style={{ textAlign: "left", padding: "4px 8px" }}>Type</th>
-                <th style={{ textAlign: "right", padding: "4px 8px" }}>{t("colSize")}</th>
-                <th style={{ textAlign: "right", padding: "4px 8px" }}>{t("colDate")}</th>
+                <th scope="col" style={{ textAlign: "left", padding: "4px 8px" }}>#</th>
+                <th scope="col" style={{ textAlign: "left", padding: "4px 8px" }}>{t("colApp")}</th>
+                <th scope="col" style={{ textAlign: "left", padding: "4px 8px" }}>Type</th>
+                <th scope="col" style={{ textAlign: "right", padding: "4px 8px" }}>{t("colSize")}</th>
+                <th scope="col" style={{ textAlign: "right", padding: "4px 8px" }}>{t("colDate")}</th>
               </tr>
             </thead>
             <tbody>
@@ -370,7 +375,10 @@ function LargestTab({ path, drives, currentRoot }: LargestTabProps) {
           {filteredFolders.map((f, i) => {
             const checked = sel.has(f.path);
             return (
-              <div key={f.path} title={f.path} onClick={() => toggle(f.path)} style={{
+              <div key={f.path} title={f.path} role="button" tabIndex={0} aria-pressed={sel.has(f.path)}
+                onClick={() => toggle(f.path)}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(f.path); } }}
+                style={{
                 display: "flex", alignItems: "center", gap: 12,
                 padding: "8px 10px", borderBottom: "1px solid var(--border-subtle, #282828)",
                 background: checked ? "var(--accent)0d" : undefined, cursor: "pointer",
@@ -413,10 +421,11 @@ function DuplicatesTab({ path, drives, currentRoot }: DuplicatesTabProps) {
   const { t, lang } = useLang();
   const [data, setData]       = useState<DupData | null>(null);
   const [loading, setLoading] = useState(false);
+  const [err, setErr]         = useState("");
   const [open, setOpen]       = useState<string | null>(null);
   const [sel, setSel]         = useState<Set<string>>(new Set()); // selected file paths
 
-  const load = () => { setLoading(true); setSel(new Set()); api.diskDuplicates(path).then(setData).finally(() => setLoading(false)); };
+  const load = () => { setLoading(true); setSel(new Set()); setErr(""); api.diskDuplicates(path).then(setData).catch((e: any) => setErr(String(e))).finally(() => setLoading(false)); };
 
   const toggle = (p: string) => setSel(s => { const n = new Set(s); n.has(p) ? n.delete(p) : n.add(p); return n; });
 
@@ -433,13 +442,14 @@ function DuplicatesTab({ path, drives, currentRoot }: DuplicatesTabProps) {
 
   return (
     <div>
+      {err && <div style={{ color: "var(--red)", marginBottom: 10 }}>{err}</div>}
       {!data && !loading && (
         <div style={{ textAlign: "center", padding: "40px 0" }}>
           <div className="muted" style={{ marginBottom: 14 }}>SHA-256 · Min. 100 KB · Only size-matched candidates are hashed</div>
           <button className="btn" onClick={load}>🔍 {t("diskScanDupes")}</button>
         </div>
       )}
-      {loading && <><Spinner /> <span className="muted">Hashing candidates…</span></>}
+      {loading && <><Spinner /> <span className="muted">{t("diskHashing")}</span></>}
       {data && !loading && (
         <>
           <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 14, alignItems: "center" }}>
@@ -447,10 +457,9 @@ function DuplicatesTab({ path, drives, currentRoot }: DuplicatesTabProps) {
               <div key={String(l)} className="stat-chip"><div className="chip-val">{v}</div><div className="chip-lbl">{l}</div></div>
             ))}
             <button className="btn small ghost" onClick={selectAllCopies} style={{ marginLeft: 4 }}>{t("diskSelectCopies")}</button>
-            <button className="btn small ghost" onClick={load}>↻ Rescan</button>
+            <button className="btn small ghost" onClick={load}>↻ {t("diskRescan")}</button>
           </div>
-
-          {data.groups.length === 0 && <div className="muted" style={{ textAlign: "center", padding: 30 }}>✓ No duplicates (≥100 KB)</div>}
+          {data.groups.length === 0 && <div className="muted" style={{ textAlign: "center", padding: 30 }}>✓ {t("diskNoDuplicates")}</div>}
 
           {data.groups.map(g => (
             <div key={g.hash} style={{ border: "1px solid var(--border)", borderRadius: 8, marginBottom: 8, overflow: "hidden" }}>
@@ -473,7 +482,10 @@ function DuplicatesTab({ path, drives, currentRoot }: DuplicatesTabProps) {
                   {g.files.map((f, i) => {
                     const checked = sel.has(f.path);
                     return (
-                      <div key={f.path} onClick={() => toggle(f.path)} style={{
+                      <div key={f.path} role="button" tabIndex={0} aria-pressed={sel.has(f.path)}
+                        onClick={() => toggle(f.path)}
+                        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(f.path); } }}
+                        style={{
                         display: "flex", alignItems: "center", gap: 10, padding: "6px 0",
                         borderBottom: i < g.files.length - 1 ? "1px solid var(--border-subtle, #282828)" : undefined,
                         background: checked ? "var(--accent)0d" : undefined, cursor: "pointer", borderRadius: 4,
@@ -517,7 +529,8 @@ function TempTab() {
   const { t, lang } = useLang();
   const [data, setData]       = useState<TempData | null>(null);
   const [loading, setLoading] = useState(true);
-  const load = () => { setLoading(true); api.diskTempAge().then(setData).finally(() => setLoading(false)); };
+  const [err, setErr]         = useState("");
+  const load = () => { setLoading(true); setErr(""); api.diskTempAge().then(setData).catch((e: any) => setErr(String(e))).finally(() => setLoading(false)); };
   useEffect(() => { load(); }, []);
 
   if (loading) return <><Spinner /> <span className="muted">{t("diskScanTemp")}</span></>;
@@ -525,6 +538,7 @@ function TempTab() {
 
   return (
     <div>
+      {err && <div style={{ color: "var(--red)", marginBottom: 10 }}>{err}</div>}
       <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 14 }}>
         {[[t("diskTempTitle"), data.totalCount.toLocaleString(lang === "de" ? "de-DE" : "en-US")], [t("diskTotalSize"), data.totalSizeFmt]].map(([l, v]) => (
           <div key={String(l)} className="stat-chip"><div className="chip-val">{v}</div><div className="chip-lbl">{l}</div></div>
@@ -611,11 +625,11 @@ function OrganizeTab() {
         <input
           value={root}
           onChange={e => setRoot(e.target.value)}
-          placeholder="Folder to organize…"
-          style={{ flex: 1, padding: "7px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg2)", color: "var(--fg)", fontSize: 13 }}
+          placeholder={t("diskOrganizeFolder")}
+          style={{ flex: 1, padding: "7px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg2)", color: "var(--text)", fontSize: 13 }}
         />
         <button className="btn small" onClick={doPreview} disabled={busy}>
-          {busy ? <Spinner /> : "Preview"}
+          {busy ? <Spinner /> : t("diskOrganizePreview")}
         </button>
       </div>
 
@@ -628,13 +642,13 @@ function OrganizeTab() {
       {preview && (
         <>
           <div className="row" style={{ justifyContent: "space-between", marginBottom: 8 }}>
-            <span className="muted" style={{ fontSize: 13 }}>{preview.items.length} files · {preview.total_size_fmt}</span>
+            <span className="muted" style={{ fontSize: 13 }}>{preview.items.length} {t("diskFilesWord")} · {preview.total_size_fmt}</span>
             <div className="row" style={{ gap: 8 }}>
               <button className="btn small ghost" onClick={toggleAll}>
-                {selected.size === preview.items.length ? "Deselect All" : "Select All"}
+                {selected.size === preview.items.length ? t("diskDeselectAll") : t("diskSelectAll")}
               </button>
               <button className="btn small" onClick={doApply} disabled={busy || selected.size === 0}>
-                {busy ? <Spinner /> : `Move ${selected.size} Files`}
+                {busy ? <Spinner /> : `${t("diskMoveBtn")} (${selected.size})`}
               </button>
             </div>
           </div>
@@ -675,21 +689,23 @@ export default function DiskAnalyzer() {
   const [tab, setTab]           = useState<DaTab>("largest");
   const [drives, setDrives]     = useState<Drive[]>([]);
   const [currentRoot, setRoot]  = useState("C:\\");
+  const [driveErr, setDriveErr] = useState("");
 
   useEffect(() => {
     api.diskDrives().then((d: any) => {
       const list: Drive[] = d.drives ?? [];
       setDrives(list);
       if (list.length > 0) setRoot(list[0].root);
-    });
+    }).catch((e: any) => setDriveErr(String(e)));
   }, []);
 
   const path = currentRoot;
 
   return (
     <>
-      <div className="page-title">◉ Disk Analyzer</div>
-      <div className="page-sub">Analyze disk usage, find large files, duplicates, old temp files, and auto-organize.</div>
+      <h1 className="page-title">◉ {t("diskTitle")}</h1>
+      <div className="page-sub">{t("diskSub")}</div>
+      {driveErr && <div style={{ color: "var(--red)", marginBottom: 10 }}>{driveErr}</div>}
 
       {/* Drive picker */}
       {drives.length > 0 && (
@@ -712,7 +728,7 @@ export default function DiskAnalyzer() {
             className={`btn small ${tab === tb ? "" : "ghost"}`}
             onClick={() => setTab(tb)}
           >
-            {{ largest: "📦 Largest Files", duplicates: "🗂 Duplicates", temp: "🌡 Old Temp", organize: "📁 Organize" }[tb]}
+            {tb === "largest" ? `📦 ${t("diskTabLargest")}` : tb === "duplicates" ? `🗂 ${t("diskTabDuplicates")}` : tb === "temp" ? `🌡 ${t("diskTabTemp")}` : `📁 ${t("diskTabOrganize")}`}
           </button>
         ))}
       </div>

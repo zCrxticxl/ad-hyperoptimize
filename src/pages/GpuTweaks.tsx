@@ -134,7 +134,7 @@ export default function GpuTweaks({ admin }: { admin: boolean }) {
 
   return (
     <>
-      <div className="page-title">GPU Tweaks</div>
+      <h1 className="page-title">{t("gpuTitle")}</h1>
       <div className="page-sub">{t("gpuSub")}</div>
       <HwWarnings page="gpu_tweaks" />
 
@@ -175,7 +175,7 @@ export default function GpuTweaks({ admin }: { admin: boolean }) {
                 <div className="muted" style={{ fontSize: 11 }}>{t("gpuActiveCount")}</div>
               </div>
               <button className="btn ghost small" onClick={refresh} disabled={loading}>
-                {loading ? <Spinner /> : "↻ Rescan"}
+                {loading ? <Spinner /> : `↻ ${t("gpuRescan")}`}
               </button>
             </div>
 
@@ -205,19 +205,19 @@ export default function GpuTweaks({ admin }: { admin: boolean }) {
                 <div style={{ flex: 1 }}>
                   <div style={{ fontWeight: 700, fontSize: 13 }}>
                     Resizable BAR (ReBAR / SAM)
-                    {data.rebar.active === true && <span style={{ color: "var(--green)", marginLeft: 8 }}>ACTIVE</span>}
-                    {data.rebar.active === false && <span style={{ color: "var(--orange)", marginLeft: 8 }}>NOT ACTIVE</span>}
+                    {data.rebar.active === true && <span style={{ color: "var(--green)", marginLeft: 8 }}>{t("gpuActive")}</span>}
+                    {data.rebar.active === false && <span style={{ color: "var(--orange)", marginLeft: 8 }}>{t("gpuNotActive")}</span>}
                   </div>
                   <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
                     {data.rebar.note}
                     {data.rebar.active === false && (
-                      <span> Enable in BIOS: <b>Above 4G Decoding</b> + <b>Resizable BAR / SAM</b> → +5–15% FPS in many games.</span>
+                      <span> {t("gpuReBarHint")}</span>
                     )}
                   </div>
                 </div>
                 {data.rebar.bar1Mb && (
                   <div className="muted" style={{ fontSize: 11, textAlign: "right" }}>
-                    BAR1: {data.rebar.bar1Mb} MB<br />VRAM: {data.rebar.vramMb} MB
+                    {t("gpuBar1")} {data.rebar.bar1Mb} MB<br />{t("gpuVram")} {data.rebar.vramMb} MB
                   </div>
                 )}
               </div>
@@ -294,7 +294,7 @@ export default function GpuTweaks({ admin }: { admin: boolean }) {
                             onClick={() => { setPendingApply(tw.id); setOpen(tw.id); }}
                             title="This tweak has a known risk for your detected hardware — review before applying"
                           >
-                            ⚠ Review Risk
+                            {t("gpuReviewRisk")}
                           </button>
                         ) : (
                           <button
@@ -350,7 +350,7 @@ export default function GpuTweaks({ admin }: { admin: boolean }) {
 
           {!data.supported && (
             <div style={{ color: "var(--orange)", fontSize: 13, marginTop: 12, padding: "10px 14px", background: "rgba(255,160,0,0.08)", borderRadius: 6, border: "1px solid var(--orange)" }}>
-              ⚠ No supported GPU detected. These tweaks require an NVIDIA or AMD GPU.
+              ⚠ {t("gpuNoGpu")}
             </div>
           )}
         </>
