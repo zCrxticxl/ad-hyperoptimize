@@ -95,7 +95,7 @@ pub fn generate(
 
     let html = format!(
         r#"<!doctype html><html><head><meta charset="utf-8">
-<title>AD HyperOptimize — System Report</title><style>
+<title>AD HyperOptimize, System Report</title><style>
 body{{font-family:'Segoe UI',system-ui,sans-serif;background:#0d1117;color:#e6edf3;margin:0;padding:40px;max-width:1000px;margin:auto}}
 h1{{font-size:26px}} h2{{font-size:18px;border-bottom:1px solid #21262d;padding-bottom:8px;margin-top:36px}}
 .muted{{color:#8b949e;font-size:13px}}
@@ -105,7 +105,7 @@ td,th{{padding:10px;border-bottom:1px solid #21262d;vertical-align:top;text-alig
 .sev{{padding:3px 10px;border-radius:12px;color:#0d1117;font-weight:700;font-size:11px;white-space:nowrap}}
 @media print{{body{{background:#fff;color:#111}} td,th{{border-color:#ddd}} .muted{{color:#555}}}}
 </style></head><body>
-<h1>AD <span style="color:#4f8cff">Hyper</span>Optimize — System Report</h1>
+<h1>AD <span style="color:#4f8cff">Hyper</span>Optimize, System Report</h1>
 <p class="muted">Generated {generated} · {os} · {cpu}</p>
 <h2>Health Score</h2><div class="score">{score}/100</div><p>{summary}</p>
 <h2>Findings ({nf})</h2><table><tr><th>Severity</th><th>Issue</th><th>Recommendation</th></tr>{rows}</table>

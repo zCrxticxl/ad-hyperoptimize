@@ -51,7 +51,7 @@ export type TweakRisk = {
   message: string;
 };
 
-// module-level cache — survives re-renders, cleared on app restart
+// module-level cache, survives re-renders, cleared on app restart
 let _cached: HwProfile | null = null;
 let _loading = false;
 const _listeners = new Set<(p: HwProfile) => void>();

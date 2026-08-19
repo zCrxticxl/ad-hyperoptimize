@@ -1,11 +1,11 @@
-//! Driver Manager — list, flag, and update installed device drivers.
+//! Driver Manager, list, flag, and update installed device drivers.
 
 use crate::ps;
 use serde_json::{json, Value};
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-/// Windows inbox/system drivers — date is meaningless, they're managed by WU.
+/// Windows inbox/system drivers, date is meaningless, they're managed by WU.
 fn is_inbox(manufacturer: &str, device_name: &str) -> bool {
     let m = manufacturer.to_lowercase();
     let n = device_name.to_lowercase();
@@ -222,10 +222,10 @@ if ($upg -match 'No applicable update|already installed') {{
             // winget "success" exit codes (documented in winget's
             // APPINSTALLER_CLI_ERROR_* constants):
             //   0             = done
-            //   -1978335212   = 0x8A150014 — already installed / no update available
-            //   -1978335189   = 0x8A15002B — package not found on this source
+            //   -1978335212   = 0x8A150014, already installed / no update available
+            //   -1978335189   = 0x8A15002B, package not found on this source
             // Any other code (including 0x8A15000B-class update-blocked states)
-            // is reported as an error — honest over optimistic.
+            // is reported as an error, honest over optimistic.
             let exit_ok = out
                 .lines()
                 .next()

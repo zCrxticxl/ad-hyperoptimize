@@ -1,6 +1,6 @@
 //! Rule-based analysis engine: turns raw scan data into prioritized,
 //! human-readable findings with severity scores and linked tweaks.
-//! Deliberately deterministic & explainable — every finding states its
+//! Deliberately deterministic & explainable, every finding states its
 //! evidence. (An LLM hook could be layered on top; nothing here pretends.)
 //!
 //! Each finding carries a stable `code` + raw `params` alongside the
@@ -56,13 +56,13 @@ fn f(
 pub fn analyze(scan: &Value, security: &Value, cleanup: &Value) -> Value {
     let mut findings: Vec<Finding> = Vec::new();
 
-    // RAM pressure — use *available* memory (Win32_PerfFormattedData_PerfOS_
+    // RAM pressure, use *available* memory (Win32_PerfFormattedData_PerfOS_
     // Memory.AvailableBytes, which includes reclaimable standby cache) instead
     // of FreePhysicalMemory: Windows aggressively caches, so "free" sits near
     // zero on healthy systems and used >85% was a permanent false positive.
     if let Some(total) = scan["os"]["TotalVisibleMemorySize"].as_u64() {
         // AvailableBytes (Win32_PerfFormattedData_PerfOS_Memory) is in bytes;
-        // FreePhysicalMemory (fallback) is in KB — normalize both to KB.
+        // FreePhysicalMemory (fallback) is in KB, normalize both to KB.
         let avail_kb = scan["os"]["AvailableBytes"]
             .as_u64()
             .map(|b| b as f64 / 1024.0)
@@ -102,14 +102,14 @@ pub fn analyze(scan: &Value, security: &Value, cleanup: &Value) -> Value {
     if let Some(disks) = scan["disks"].as_array() {
         if disks.iter().any(|d| d["MediaType"].as_str() == Some("HDD")) {
             findings.push(f(3, "mechanical_hdd", "Mechanical HDD detected",
-                "An HDD is present. If Windows boots from it, this is the single biggest bottleneck — no software tweak comes close to an SSD upgrade.".into(),
+                "An HDD is present. If Windows boots from it, this is the single biggest bottleneck, no software tweak comes close to an SSD upgrade.".into(),
                 "If C: is on the HDD, an SSD migration outperforms every optimization in this app combined. Do NOT disable SysMain on HDD systems.",
                 vec![],
                 json!({})));
         }
     }
 
-    // SMART health — only concrete Warning/Unhealthy states are flagged;
+    // SMART health, only concrete Warning/Unhealthy states are flagged;
     // "Unknown" is the normal value on machines/controllers without SMART
     // exposure (virtual disks, some NVMe) and was a permanent false positive.
     if let Some(disks) = scan["disks"].as_array() {
@@ -223,7 +223,7 @@ pub fn analyze(scan: &Value, security: &Value, cleanup: &Value) -> Value {
                 "temp_processes",
                 "Processes executing from Temp directories",
                 format!(
-                    "{} process(es) run from a Temp folder — unusual for legitimate software.",
+                    "{} process(es) run from a Temp folder, unusual for legitimate software.",
                     arr.len()
                 ),
                 "Investigate these on the Security page; scan with Defender if unrecognized.",
@@ -233,12 +233,12 @@ pub fn analyze(scan: &Value, security: &Value, cleanup: &Value) -> Value {
         }
     }
 
-    // VBS / Memory Integrity — informational FPS tradeoff
+    // VBS / Memory Integrity, informational FPS tradeoff
     if let Some(svcs) = scan["vbs"]["SecurityServicesRunning"].as_array() {
         if svcs.iter().any(|v| v.as_i64() == Some(2)) {
             findings.push(f(1, "hvci_active", "Memory Integrity (HVCI) is active",
-                "Virtualization-based security with HVCI is running. It's a genuine security protection but costs roughly 3–8% performance in CPU-bound games on some systems.".into(),
-                "Informational only — this app will not change security protections. If you want maximum FPS and accept the tradeoff, toggle it yourself: Windows Security → Device Security → Core Isolation. Benchmark before/after.",
+                "Virtualization-based security with HVCI is running. It's a genuine security protection but costs roughly 3-8% performance in CPU-bound games on some systems.".into(),
+                "Informational only, this app will not change security protections. If you want maximum FPS and accept the tradeoff, toggle it yourself: Windows Security → Device Security → Core Isolation. Benchmark before/after.",
                 vec![],
                 json!({})));
         }
@@ -270,7 +270,7 @@ pub fn analyze(scan: &Value, security: &Value, cleanup: &Value) -> Value {
             if hours > 168 {
                 findings.push(f(2, "long_uptime", "System not rebooted in over 7 days",
                     format!("Last reboot was {hours} hours ago. Long uptimes accumulate memory leaks, pending updates, and degraded performance."),
-                    "Reboot regularly — weekly is ideal for a gaming/workstation system.",
+                    "Reboot regularly, weekly is ideal for a gaming/workstation system.",
                     vec![],
                     json!({ "hours": hours })));
             }
@@ -311,7 +311,7 @@ pub fn analyze(scan: &Value, security: &Value, cleanup: &Value) -> Value {
             let read_err = s["ReadErrorsTotal"].as_u64().unwrap_or(0);
             if wear > 90 {
                 findings.push(f(4, "ssd_wear", "SSD nearing end of life",
-                    format!("Drive wear indicator is at {wear}%. NVMe/SSD drives have a limited write endurance — beyond 90% the risk of data loss increases."),
+                    format!("Drive wear indicator is at {wear}%. NVMe/SSD drives have a limited write endurance, beyond 90% the risk of data loss increases."),
                     "Back up critical data immediately and plan drive replacement.",
                     vec![],
                     json!({ "wear": wear })));
@@ -349,7 +349,7 @@ pub fn analyze(scan: &Value, security: &Value, cleanup: &Value) -> Value {
             if avg < 2666 {
                 findings.push(f(2, "low_ram_speed", "RAM running below DDR4 baseline speed",
                     format!("Average configured RAM speed: {avg} MHz. Modern DDR4 should run at >=2666 MHz; lower speeds bottleneck CPU-bound workloads."),
-                    "Check XMP/EXPO is enabled in BIOS — most RAM ships with a default 2133 MHz profile but supports higher speeds.",
+                    "Check XMP/EXPO is enabled in BIOS, most RAM ships with a default 2133 MHz profile but supports higher speeds.",
                     vec![],
                     json!({ "avg": avg })));
             }
@@ -379,7 +379,7 @@ pub fn analyze(scan: &Value, security: &Value, cleanup: &Value) -> Value {
 
     // Thermal zone high (WMI returns tenths of Kelvin). The ACPI sentinel
     // 0xFFFFFFFF (≈42 749 000 000 °C) is returned on machines without a
-    // working sensor — such zones and other physically impossible readings
+    // working sensor, such zones and other physically impossible readings
     // are skipped, never reported as "critical temperature".
     {
         for zone in wmi_arr(&scan["thermal"]) {
@@ -445,7 +445,7 @@ pub fn analyze(scan: &Value, security: &Value, cleanup: &Value) -> Value {
             .sum::<i64>()
             .min(95);
 
-    // English fallback summary — used by report.rs (no i18n there) and as a
+    // English fallback summary, used by report.rs (no i18n there) and as a
     // safety net if the frontend ever fails to localize. The live Dashboard
     // UI builds its own localized summary from `findings[0].code`/`params`
     // instead of using this string (see src/localize.ts::localizeFinding and

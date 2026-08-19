@@ -1,4 +1,4 @@
-//! Auto-Optimizer — scans all modules, surfaces safe unapplied tweaks,
+//! Auto-Optimizer, scans all modules, surfaces safe unapplied tweaks,
 //! applies selected ones in sequence after creating a restore point.
 
 use crate::{debloater, privacy, safety, tweaks};

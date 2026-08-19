@@ -17,7 +17,7 @@ export default function Monitor() {
 
   useEffect(() => {
     let active = true;
-    // Subscribe to metrics FIRST, then start the monitor — otherwise the first
+    // Subscribe to metrics FIRST, then start the monitor, otherwise the first
     // emission (which can lag a few seconds while sysinfo initializes on first
     // start) is missed and the page appears empty on the first open.
     onMetrics((m) => {
@@ -72,12 +72,12 @@ export default function Monitor() {
       )}
 
       <div className="grid grid-4">
-        <Card title={t("monCpu")}><div className="stat-big">{latest?.cpuTotal.toFixed(1) ?? "—"}%</div>
+        <Card title={t("monCpu")}><div className="stat-big">{latest?.cpuTotal.toFixed(1) ?? "-"}%</div>
           <div className="stat-sub">{latest?.freqMhz ? `${latest.freqMhz} MHz` : ""}</div></Card>
-        <Card title={t("monMemory")}><div className="stat-big">{latest ? ((latest.memUsedMb / latest.memTotalMb) * 100).toFixed(0) : "—"}%</div>
+        <Card title={t("monMemory")}><div className="stat-big">{latest ? ((latest.memUsedMb / latest.memTotalMb) * 100).toFixed(0) : "-"}%</div>
           <div className="stat-sub">{latest ? `${(latest.memUsedMb / 1024).toFixed(1)} / ${(latest.memTotalMb / 1024).toFixed(1)} GB` : ""}</div></Card>
-        <Card title={t("monNetDown")}><div className="stat-big">{latest ? fmtRate(latest.netRxKbs) : "—"}</div></Card>
-        <Card title={t("monNetUp")}><div className="stat-big">{latest ? fmtRate(latest.netTxKbs) : "—"}</div></Card>
+        <Card title={t("monNetDown")}><div className="stat-big">{latest ? fmtRate(latest.netRxKbs) : "-"}</div></Card>
+        <Card title={t("monNetUp")}><div className="stat-big">{latest ? fmtRate(latest.netTxKbs) : "-"}</div></Card>
       </div>
 
       <div className="grid grid-2 mt">

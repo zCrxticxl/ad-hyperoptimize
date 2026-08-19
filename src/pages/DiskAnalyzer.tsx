@@ -23,7 +23,7 @@ type Tab         = "largest" | "duplicates" | "temp" | "organizer";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-const ts = (s: number) => s ? new Date(s * 1000).toLocaleDateString("de-DE") : "–";
+const ts = (s: number) => s ? new Date(s * 1000).toLocaleDateString("de-DE") : "-";
 
 function BarMini({ pct, color = "var(--accent)" }: { pct: number; color?: string }) {
   return (
@@ -322,7 +322,7 @@ function LargestTab({ path, drives, currentRoot }: LargestTabProps) {
         </div>
       )}
 
-      {/* Files table — shown during scan too (partial results) */}
+      {/* Files table, shown during scan too (partial results) */}
       {view === "files" && data && (
         <div style={{ overflowY: "auto", maxHeight: 420 }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>

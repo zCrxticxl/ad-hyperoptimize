@@ -2,7 +2,7 @@
 // Bottleneck analysis + PC configurator logic. Pure functions over the
 // existing hw_profile() shape (cpu/gpu/ram/storage + tier fields already
 // computed by hwprofile.rs) and the static catalog in data/hardwareCatalog.ts.
-// No new Rust/backend surface needed — everything here is derived client-side.
+// No new Rust/backend surface needed, everything here is derived client-side.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { CPUS, GPUS, RAM_KITS, MOTHERBOARDS, Cpu, Gpu, RamKit, Motherboard } from "../data/hardwareCatalog";
@@ -17,11 +17,11 @@ export function ratingFromScore(score: number): Rating {
 }
 
 /** GPU scores are TechPowerUp Relative-Performance % (raw throughput vs. the
- * current flagship), not a "gaming adequacy" curve — unlike CPU/RAM/storage,
+ * current flagship), not a "gaming adequacy" curve, unlike CPU/RAM/storage,
  * where the source benchmarks already compress gently enough that the flat
  * 30/55/80 split tracks real-world adequacy. Applying that same flat split to
- * GPU would call a 19%-of-RTX-5090 RTX 3060 — still a perfectly playable
- * 1080p/1440p card — a "bottleneck" purely for not being within ~2 gens of
+ * GPU would call a 19%-of-RTX-5090 RTX 3060, still a perfectly playable
+ * 1080p/1440p card, a "bottleneck" purely for not being within ~2 gens of
  * the flagship. These thresholds are recalibrated against where real-world
  * playability actually falls off (sub-15%: legacy/weak even at 1080p today;
  * 15-25%: fine at 1080p, weak at 1440p+; 25-42%: solid 1440p; 42%+: strong
@@ -34,7 +34,7 @@ export function ratingFromGpuScore(score: number): Rating {
 }
 
 // UI mapping shared by every screen that renders a `Rating` badge (Dashboard's
-// HwProfileCard, PcConfigurator) — keeps badge color/label consistent app-wide.
+// HwProfileCard, PcConfigurator), keeps badge color/label consistent app-wide.
 export const RATING_CLS: Record<Rating, string> = {
   bottleneck: "risk-High",
   needsImprovement: "risk-Medium",
@@ -65,7 +65,7 @@ export function matchCpu(detectedName: string): Cpu | null {
   // Exact normalized match always wins outright. Without this, the
   // longest-match fallback below would let a longer catalog name (e.g.
   // "Ryzen 7 5800X3D") win over a true exact match ("Ryzen 7 5800X") just
-  // because "5800x" is a textual prefix of "5800x3d" — a real bug found
+  // because "5800x" is a textual prefix of "5800x3d", a real bug found
   // while auditing the catalog (same pattern hits RTX/GTX/RX "base" models
   // vs. their Ti/Super/XT/X3D siblings).
   for (const c of CPUS) {
@@ -207,7 +207,7 @@ export function compatibleRam(ramType: "DDR4" | "DDR5"): RamKit[] {
   return RAM_KITS.filter((r) => r.type === ramType);
 }
 
-/** Best-guess current socket from the detected CPU name — used to filter
+/** Best-guess current socket from the detected CPU name, used to filter
  * "drop-in" upgrade candidates without requiring motherboard model lookup. */
 export function currentSocket(hw: HwProfileLike): string | null {
   return matchCpu(hw.cpu?.name ?? "")?.socket ?? null;
@@ -217,7 +217,7 @@ export function currentSocket(hw: HwProfileLike): string | null {
 // Win32_BaseBoard) always embed the chipset code (e.g. "ROG STRIX B650E-F
 // GAMING WIFI", "PRIME Z790-A"), so this generalizes far beyond the ~10
 // placeholder boards in MOTHERBOARDS and is the most authoritative signal
-// we have — it reads the *actual* board, not an inference from the CPU.
+// we have, it reads the *actual* board, not an inference from the CPU.
 const CHIPSET_SOCKET_MAP: { re: RegExp; socket: string }[] = [
   { re: /\b(A620|B650E?|X670E?|X870E?)\b/i, socket: "AM5" },
   { re: /\b(A320|A520|B350|B450|B550|X370|X470|X570)\b/i, socket: "AM4" },
@@ -228,7 +228,7 @@ const CHIPSET_SOCKET_MAP: { re: RegExp; socket: string }[] = [
 ];
 
 /** Derive socket directly from a scanned motherboard product name via its
- * chipset code. Returns null if no known chipset pattern is found — callers
+ * chipset code. Returns null if no known chipset pattern is found, callers
  * must treat null as "compatibility unverifiable", never as "compatible". */
 export function socketFromBoardModel(model: string | undefined | null): string | null {
   if (!model) return null;

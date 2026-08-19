@@ -55,7 +55,7 @@ export default function Hardware({ mode }: { mode: Mode }) {
 
       {scan.error && (
         <div className="warn-banner" style={{ borderColor: "var(--red)", color: "var(--red)", background: "rgba(255,97,125,.08)" }}>
-          <b>⚠ </b>{scan.error} — <button className="btn small ghost" onClick={() => load(true)}>↻ {t("hwRescanNow")}</button>
+          <b>⚠ </b>{scan.error}, <button className="btn small ghost" onClick={() => load(true)}>↻ {t("hwRescanNow")}</button>
         </div>
       )}
 
@@ -66,7 +66,7 @@ export default function Hardware({ mode }: { mode: Mode }) {
               <tr><td className="muted">{t("hwEdition")}</td><td>{os.Caption}</td></tr>
               <tr><td className="muted">{t("hwBuild")}</td><td>{os.Version} ({os.BuildNumber})</td></tr>
               <tr><td className="muted">{t("hwArchitecture")}</td><td>{os.OSArchitecture}</td></tr>
-              <tr><td className="muted">{t("hwRam")}</td><td>{os.TotalVisibleMemorySize ? (os.TotalVisibleMemorySize / 1048576).toFixed(1) + ` GB ${t("hwTotal")}, ` + (os.FreePhysicalMemory / 1048576).toFixed(1) + ` GB ${t("hwFree")}` : "—"}</td></tr>
+              <tr><td className="muted">{t("hwRam")}</td><td>{os.TotalVisibleMemorySize ? (os.TotalVisibleMemorySize / 1048576).toFixed(1) + ` GB ${t("hwTotal")}, ` + (os.FreePhysicalMemory / 1048576).toFixed(1) + ` GB ${t("hwFree")}` : "-"}</td></tr>
             </tbody>
           </table>
         </Card>
@@ -76,8 +76,8 @@ export default function Hardware({ mode }: { mode: Mode }) {
               <tr><td className="muted">{t("hwModel")}</td><td>{cpu.Name}</td></tr>
               <tr><td className="muted">{t("hwCoresThreads")}</td><td>{cpu.NumberOfCores} / {cpu.NumberOfLogicalProcessors}</td></tr>
               <tr><td className="muted">{t("hwClock")}</td><td>{cpu.CurrentClockSpeed} MHz ({t("hwMax")} {cpu.MaxClockSpeed})</td></tr>
-              <tr><td className="muted">{t("hwL3Cache")}</td><td>{cpu.L3CacheSize ? (cpu.L3CacheSize / 1024).toFixed(0) + " MB" : "—"}</td></tr>
-              <tr><td className="muted">{t("hwVirtualization")}</td><td>{String(cpu.VirtualizationFirmwareEnabled ?? "—")}</td></tr>
+              <tr><td className="muted">{t("hwL3Cache")}</td><td>{cpu.L3CacheSize ? (cpu.L3CacheSize / 1024).toFixed(0) + " MB" : "-"}</td></tr>
+              <tr><td className="muted">{t("hwVirtualization")}</td><td>{String(cpu.VirtualizationFirmwareEnabled ?? "-")}</td></tr>
             </tbody>
           </table>
         </Card>
@@ -112,7 +112,7 @@ export default function Hardware({ mode }: { mode: Mode }) {
             {asArr(scan.disks).map((d: any, i: number) => (
               <tr key={i}>
                 <td>{d.FriendlyName}</td><td>{d.MediaType}</td><td>{d.BusType}</td>
-                <td>{d.Size ? fmtBytes(d.Size) : "—"}</td>
+                <td>{d.Size ? fmtBytes(d.Size) : "-"}</td>
                 <td style={{ color: d.HealthStatus === "Healthy" ? "var(--green)" : "var(--red)" }}>{d.HealthStatus}</td>
               </tr>
             ))}

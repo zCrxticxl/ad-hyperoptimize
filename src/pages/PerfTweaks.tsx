@@ -8,7 +8,7 @@ import { useLang } from "../i18n";
 // ─────────────────────────────────────────────────────────────────────────────
 
 function mb(v: number | null | undefined) {
-  if (v == null) return "—";
+  if (v == null) return "-";
   if (v >= 1024) return `${(v / 1024).toFixed(1)} GB`;
   return `${v} MB`;
 }
@@ -71,11 +71,11 @@ function TimerCard({ admin }: { admin: boolean }) {
             <tr>
               <td className="muted">{t("perfCurrent")}</td>
               <td><span style={{ color: currentColor, fontWeight: 700 }}>
-                {data.currentMs != null ? `${data.currentMs} ms` : "—"}
+                {data.currentMs != null ? `${data.currentMs} ms` : "-"}
               </span></td>
             </tr>
-            <tr><td className="muted">{t("perfTimerMinPossible")}</td><td>{data.minMs != null ? `${data.minMs} ms` : "—"}</td></tr>
-            <tr><td className="muted">{t("perfTimerMaxDefault")}</td><td>{data.maxMs != null ? `${data.maxMs} ms` : "—"}</td></tr>
+            <tr><td className="muted">{t("perfTimerMinPossible")}</td><td>{data.minMs != null ? `${data.minMs} ms` : "-"}</td></tr>
+            <tr><td className="muted">{t("perfTimerMaxDefault")}</td><td>{data.maxMs != null ? `${data.maxMs} ms` : "-"}</td></tr>
             <tr>
               <td className="muted">{t("perfTimerPersistent")}</td>
               <td>
@@ -247,7 +247,7 @@ function NetCard({ admin }: { admin: boolean }) {
                       <div style={{ fontSize: 13 }}>{p.label}</div>
                       <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>{p.hint}</div>
                     </div>
-                    <span className="muted" style={{ fontSize: 11, minWidth: 70, textAlign: "right", flexShrink: 0 }}>{raw ?? "—"}</span>
+                    <span className="muted" style={{ fontSize: 11, minWidth: 70, textAlign: "right", flexShrink: 0 }}>{raw ?? "-"}</span>
                     <span style={{ color: off ? "var(--green)" : "var(--muted)", fontWeight: 700, fontSize: 11, minWidth: 24 }}>
                       {off ? "●" : "○"}
                     </span>
@@ -396,7 +396,7 @@ function PagefileCard({ admin }: { admin: boolean }) {
             {files.map((f: any, i: number) => (
               <React.Fragment key={i}>
                 <tr><td className="muted">{t("perfPagefilePath")}</td><td className="mono">{f.path}</td></tr>
-                <tr><td className="muted">{t("perfPagefileSize")}</td><td>{f.initialMb}–{f.maxMb} MB ({t("perfPagefilePeak")}: {f.peakMb} MB)</td></tr>
+                <tr><td className="muted">{t("perfPagefileSize")}</td><td>{f.initialMb}-{f.maxMb} MB ({t("perfPagefilePeak")}: {f.peakMb} MB)</td></tr>
               </React.Fragment>
             ))}
             {files.length === 0 && !data.autoManaged && (

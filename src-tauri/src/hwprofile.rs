@@ -27,7 +27,7 @@ try {
     $g = $gpus | Select-Object -First 1
     if ($g) {
         $vramMb = if ($g.AdapterRAM -gt 0) { [math]::Round($g.AdapterRAM / 1MB) } else { 0 }
-        # Win32_VideoController.AdapterRAM is a 32-bit field in WMI — it caps/wraps
+        # Win32_VideoController.AdapterRAM is a 32-bit field in WMI, it caps/wraps
         # at 4 GB, so any card with >4 GB VRAM (e.g. RX 6800 16GB) misreports as
         # ~4GB or less. The registry's HardwareInformation.qwMemorySize is a real
         # QWORD and is authoritative when it disagrees with the WMI value.
@@ -255,7 +255,7 @@ fn compute_profile(mut data: Value) -> Value {
     }
     if is_older_arch {
         w!("gpu_tweaks", "older_arch_thermal", "warning",
-            "Older GPU Architecture — Thermal Risk",
+            "Older GPU Architecture, Thermal Risk",
             "GTX 900/1000 and RX 400/500 series GPUs can run hot under P-state locks or forced max clocks. Monitor temps closely and ensure airflow is good.");
     }
     if gpu_vram > 0 && gpu_vram < 4096 && !is_integrated {
@@ -265,7 +265,7 @@ fn compute_profile(mut data: Value) -> Value {
     }
     if is_laptop && (is_nvidia || is_amd_gpu) {
         w!("gpu_tweaks", "laptop_power_limit", "info",
-            "Laptop GPU — Power Limited",
+            "Laptop GPU, Power Limited",
             "Laptop GPUs are throttled by TDP limits set by the manufacturer. P-state and frequency tweaks may have limited effect and can increase heat.");
     }
 
@@ -277,18 +277,18 @@ fn compute_profile(mut data: Value) -> Value {
     }
     if is_laptop {
         w!("perf_tweaks", "laptop_timer", "info",
-            "Laptop — Battery Impact",
+            "Laptop, Battery Impact",
             "High-resolution timers (0.5 ms) significantly increase power consumption. Use only while plugged in for gaming sessions.");
     }
     if ram_total > 0 && ram_total < 8192 {
         w!("perf_tweaks", "low_ram_pagefile", "warning",
-            "Low RAM (<8 GB) — Keep Pagefile On",
+            "Low RAM (<8 GB), Keep Pagefile On",
             "With less than 8 GB of RAM, disabling the pagefile risks crashes and out-of-memory errors. Recommended: set pagefile to System Managed.");
     }
     if is_wifi {
         w!("perf_tweaks", "wifi_network", "info",
             "Wi-Fi Connection Detected",
-            "Network tweaks are optimized for wired Ethernet. On Wi-Fi, adapter queue and interrupt tweaks may have less effect — a wired connection is strongly recommended for gaming.");
+            "Network tweaks are optimized for wired Ethernet. On Wi-Fi, adapter queue and interrupt tweaks may have less effect, a wired connection is strongly recommended for gaming.");
     }
 
     // ─── GameBooster ─────────────────────────────────────────────────────────
@@ -304,37 +304,37 @@ fn compute_profile(mut data: Value) -> Value {
     }
     if cpu_tier == "budget" {
         w!("game_booster", "budget_cpu_priority", "info",
-            "Budget CPU — Priority Boost Helps",
+            "Budget CPU, Priority Boost Helps",
             "Setting your game to High priority has a larger impact on low core count CPUs. Make sure to kill all background apps first.");
     }
     if is_laptop {
         w!("game_booster", "laptop_perf", "info",
-            "Laptop — Plug In Before Boosting",
+            "Laptop, Plug In Before Boosting",
             "Ensure your laptop is plugged into power before boosting. Battery saver modes will cap CPU and GPU performance regardless of boost settings.");
     }
 
     // ─── PowerPlan ───────────────────────────────────────────────────────────
     if is_laptop {
         w!("power_plan", "laptop_battery_drain", "warning",
-            "Laptop — High Performance Drains Battery",
-            "High Performance and Ultimate Performance plans disable CPU frequency scaling. This can reduce battery life by 30–60%. Use only while plugged in.");
+            "Laptop, High Performance Drains Battery",
+            "High Performance and Ultimate Performance plans disable CPU frequency scaling. This can reduce battery life by 30-60%. Use only while plugged in.");
     }
     if cpu_tier == "budget" {
         w!("power_plan", "budget_cpu_plan", "info",
-            "Budget CPU — Power Plan is High Impact",
-            "Low-end CPUs downclock aggressively on Balanced plan. Switching to High Performance ensures sustained base clocks — high impact for budget hardware.");
+            "Budget CPU, Power Plan is High Impact",
+            "Low-end CPUs downclock aggressively on Balanced plan. Switching to High Performance ensures sustained base clocks, high impact for budget hardware.");
     }
     if !is_laptop && gpu_tier != "high" {
         w!("power_plan", "desktop_custom_plan_thermal_stack", "warning",
             "Custom/Third-Party Power Plans Can Stack Heat With GPU Tweaks",
-            "Plans created by tools like Winhance unlock hidden Advanced Power Settings (Processor Boost Mode, Core Parking, min processor state) that pin the CPU at max clock 24/7 — the same thing 'Maximum Performance'/'Disable Dynamic P-States' GPU tweaks do for the GPU. On a card below high-tier in an OEM/compact case, running both chips pinned at max simultaneously raises shared case temps and can push the GPU into thermal throttling sooner, lowering FPS instead of raising it. If you're using a custom power plan AND GPU clock-lock tweaks together and saw an FPS regression, test switching back to Balanced first.");
+            "Plans created by tools like Winhance unlock hidden Advanced Power Settings (Processor Boost Mode, Core Parking, min processor state) that pin the CPU at max clock 24/7, the same thing 'Maximum Performance'/'Disable Dynamic P-States' GPU tweaks do for the GPU. On a card below high-tier in an OEM/compact case, running both chips pinned at max simultaneously raises shared case temps and can push the GPU into thermal throttling sooner, lowering FPS instead of raising it. If you're using a custom power plan AND GPU clock-lock tweaks together and saw an FPS regression, test switching back to Balanced first.");
     }
 
     // ─── Dashboard ───────────────────────────────────────────────────────────
     if has_hdd && !has_ssd {
         w!("dashboard", "hdd_only", "warning",
             "No SSD Detected",
-            "An SSD provides 5–10× faster Windows boot and load times. Upgrading to an SSD is the single highest-impact hardware improvement for most systems.");
+            "An SSD provides 5-10× faster Windows boot and load times. Upgrading to an SSD is the single highest-impact hardware improvement for most systems.");
     }
     if ram_total > 0 && ram_total < 8192 {
         w!("dashboard", "low_ram", "warning",
@@ -355,19 +355,19 @@ fn compute_profile(mut data: Value) -> Value {
     // ─── Debloater ───────────────────────────────────────────────────────────
     if ram_total > 0 && ram_total < 16384 {
         w!("debloater", "low_ram_debloat", "info",
-            "RAM Below 16 GB — Debloating Recommended",
+            "RAM Below 16 GB, Debloating Recommended",
             "Removing bloatware frees background RAM and reduces idle CPU usage. High impact on systems with 8 GB or less.");
     }
 
     // ─── Latency ─────────────────────────────────────────────────────────────
     if is_older_nvidia {
         w!("latency", "older_nvidia_dpc", "info",
-            "Older NVIDIA GPU — Check Driver Version",
+            "Older NVIDIA GPU, Check Driver Version",
             "GTX 900/1000-series GPUs can generate elevated DPC latency with outdated drivers. Ensure you're on the latest Game Ready Driver.");
     }
     if is_wifi {
         w!("latency", "wifi_dpc", "warning",
-            "Wi-Fi — High DPC Latency Risk",
+            "Wi-Fi, High DPC Latency Risk",
             "Wi-Fi drivers are a common source of DPC latency spikes. If stalls appear in the Latency Analyzer, try disabling Wi-Fi power saving in Device Manager.");
     }
 
@@ -375,7 +375,7 @@ fn compute_profile(mut data: Value) -> Value {
     // Maps specific tweak IDs (from tweaks.rs + gputweaks.rs catalogs) to a
     // hardware-aware risk verdict. Severity "danger" means: this exact tweak
     // is a known cause of REGRESSION (lower FPS / instability) on this exact
-    // hardware class — frontend must force an explicit "apply anyway" step.
+    // hardware class, frontend must force an explicit "apply anyway" step.
     // "warning" = situational, show badge + let normal confirm flow handle it.
     let mut tweak_risks = serde_json::Map::new();
 
@@ -389,47 +389,47 @@ fn compute_profile(mut data: Value) -> Value {
 
     let gpu_not_high = gpu_tier != "high"; // budget | mid | integrated
 
-    // ── GPU clock/power locks — the #1 real-world regression cause ─────────
+    // ── GPU clock/power locks, the #1 real-world regression cause ─────────
     // Forcing max clock 24/7 only helps if the cooler can sustain it. On any
     // GPU below "high" tier (most laptop GPUs, GTX 16-series and below,
     // OEM/SFF builds) this raises baseline temp until the card hits its
     // thermal limit and boost-clocks DROP below what adaptive boosting
-    // would have given — net result: fewer FPS than stock.
+    // would have given, net result: fewer FPS than stock.
     if is_laptop && (is_nvidia || is_amd_gpu) {
         // Laptop-specific message takes priority over the generic desktop
-        // thermal-throttle one below — laptop GPUs are TDP-capped, which is
+        // thermal-throttle one below, laptop GPUs are TDP-capped, which is
         // the more relevant/specific explanation for this hardware class.
         risk!("nv_power_max_perf", "danger",
-            "Laptop GPU — Power/Thermal Limited",
-            "Laptop GPUs are capped by a manufacturer TDP limit, not just clock speed. Forcing max clock cannot exceed that cap — it only adds heat, which throttles the CPU/GPU pair via shared cooling. Expect no FPS gain and possible loss.");
+            "Laptop GPU, Power/Thermal Limited",
+            "Laptop GPUs are capped by a manufacturer TDP limit, not just clock speed. Forcing max clock cannot exceed that cap, it only adds heat, which throttles the CPU/GPU pair via shared cooling. Expect no FPS gain and possible loss.");
     } else if is_nvidia && gpu_not_high {
         risk!("nv_power_max_perf", "danger",
             "Thermal Throttle Risk on This GPU",
-            "Locks your GPU at maximum clock permanently. On this card/cooling combo this usually raises baseline temperature until the GPU hits its thermal limit mid-game and throttles BELOW stock boost clocks — net result is often lower FPS, not higher. Only beneficial on high-end cards with strong cooling (large air/AIO). Test with a benchmark before/after; revert if FPS drops or temps exceed ~80°C.");
+            "Locks your GPU at maximum clock permanently. On this card/cooling combo this usually raises baseline temperature until the GPU hits its thermal limit mid-game and throttles BELOW stock boost clocks, net result is often lower FPS, not higher. Only beneficial on high-end cards with strong cooling (large air/AIO). Test with a benchmark before/after; revert if FPS drops or temps exceed ~80°C.");
     }
     if is_nvidia && gpu_not_high {
         risk!("nv_dynamic_pstate_off", "danger",
             "Thermal Throttle Risk on This GPU",
-            "Functionally overlaps with 'Maximum Performance' — both force the GPU off its adaptive power curve. Combining them (or even just one, on this GPU tier) is the most common cause of FPS regressions reported on mid/budget cards. Apply only one at a time, monitor temps, revert if FPS drops.");
+            "Functionally overlaps with 'Maximum Performance', both force the GPU off its adaptive power curve. Combining them (or even just one, on this GPU tier) is the most common cause of FPS regressions reported on mid/budget cards. Apply only one at a time, monitor temps, revert if FPS drops.");
     }
 
     // ── Hardware-accelerated GPU scheduling ─────────────────────────────────
     if is_older_arch {
         risk!("hags_on", "warning",
             "HAGS on Older GPU Architecture",
-            "Hardware-Accelerated GPU Scheduling was built for newer schedulers (NVIDIA 10-series+/AMD RDNA+ with current drivers) but real-world stutter/regression reports cluster on older architectures and outdated drivers. Benchmark before/after — revert if frametimes get worse.");
+            "Hardware-Accelerated GPU Scheduling was built for newer schedulers (NVIDIA 10-series+/AMD RDNA+ with current drivers) but real-world stutter/regression reports cluster on older architectures and outdated drivers. Benchmark before/after, revert if frametimes get worse.");
         risk!("amd_compute_preemption_off", "warning",
             "Older AMD Architecture",
             "Disabling compute preemption changes driver scheduling behavior that varies a lot by GPU generation. On older RX 400/500-series cards this can increase stutter instead of reducing it. Test before/after.");
     }
 
-    // ── CPU scheduler tweaks — risk on low core counts ──────────────────────
+    // ── CPU scheduler tweaks, risk on low core counts ──────────────────────
     if cpu_tier == "budget" {
         risk!("priority_separation", "warning",
             "Aggressive Scheduler Bias on Low Core Count",
-            "Win32PrioritySeparation 0x26 gives the foreground app a hard 3:1 quanta bias. On 2-core/4-thread CPUs this can starve background services (audio, anti-cheat helpers, drivers) instead of helping — the opposite of the intended effect. Watch for audio crackle or input stutter after applying.");
+            "Win32PrioritySeparation 0x26 gives the foreground app a hard 3:1 quanta bias. On 2-core/4-thread CPUs this can starve background services (audio, anti-cheat helpers, drivers) instead of helping, the opposite of the intended effect. Watch for audio crackle or input stutter after applying.");
         risk!("net_offload_disable", "warning",
-            "Budget CPU — Offload Disabling Increases CPU Load",
+            "Budget CPU, Offload Disabling Increases CPU Load",
             "Disabling NIC offloads (TCP checksum, LSO, RSS) moves that work from the network card back onto the CPU. On a low core-count CPU under load (game + voice chat + overlay) this can add enough overhead to cost more frame time than the latency it saves. Test before/after with a frame-time graph, not just ping.");
         risk!("mmcss_games_task", "warning",
             "Maximum MMCSS Priority on Low Core Count",
@@ -439,53 +439,53 @@ fn compute_profile(mut data: Value) -> Value {
     // ── Power throttling / heat & battery ───────────────────────────────────
     if is_laptop {
         risk!("power_throttling_off", "warning",
-            "Laptop — Heat & Battery Impact",
-            "Disabling EcoQoS power throttling stops Windows from parking background processes onto efficiency cores. On a laptop this raises sustained power draw and heat, which can trigger CPU thermal throttling under combined CPU+GPU load — possibly netting lower sustained FPS than with throttling enabled. Use only plugged in, monitor CPU temps.");
+            "Laptop, Heat & Battery Impact",
+            "Disabling EcoQoS power throttling stops Windows from parking background processes onto efficiency cores. On a laptop this raises sustained power draw and heat, which can trigger CPU thermal throttling under combined CPU+GPU load, possibly netting lower sustained FPS than with throttling enabled. Use only plugged in, monitor CPU temps.");
     }
 
-    // ── Low RAM — pagefile / RAM-dependent tweaks ───────────────────────────
+    // ── Low RAM, pagefile / RAM-dependent tweaks ───────────────────────────
     if ram_tier == "low" {
         risk!("pagefile_disable", "danger",
-            "Low RAM — Disabling Pagefile Risks Crashes",
-            "With under 8 GB RAM, the pagefile is not optional headroom — it's actively used. Disabling it on this system risks out-of-memory crashes and application instability. Keep at minimum 'System Managed'.");
+            "Low RAM, Disabling Pagefile Risks Crashes",
+            "With under 8 GB RAM, the pagefile is not optional headroom, it's actively used. Disabling it on this system risks out-of-memory crashes and application instability. Keep at minimum 'System Managed'.");
         risk!("disable_paging_executive", "danger",
-            "Low RAM — Keep Kernel in RAM Not Recommended",
-            "This tweak's own rationale only applies to systems with ≥8 GB RAM. On this system it pins kernel/driver pages permanently in RAM, removing headroom you don't have — increases the chance of paging thrash and crashes instead of reducing latency.");
+            "Low RAM, Keep Kernel in RAM Not Recommended",
+            "This tweak's own rationale only applies to systems with ≥8 GB RAM. On this system it pins kernel/driver pages permanently in RAM, removing headroom you don't have, increases the chance of paging thrash and crashes instead of reducing latency.");
     }
 
-    // ── SysMain/Superfetch — helps HDDs, hurts nothing on SSD but is a no-op ─
-    // The tweak's own catalog name says "(SSD systems)" — disabling it on an
+    // ── SysMain/Superfetch, helps HDDs, hurts nothing on SSD but is a no-op ─
+    // The tweak's own catalog name says "(SSD systems)", disabling it on an
     // HDD-only system removes the prefetching that masks slow seek times.
     if has_hdd && !has_ssd {
         risk!("sysmain_off", "danger",
-            "HDD Detected — SysMain/Superfetch Helps You",
+            "HDD Detected, SysMain/Superfetch Helps You",
             "This tweak is intended for SSD systems. Your system drive is a mechanical HDD, where SysMain's prefetching actively hides slow seek/access times. Disabling it on an HDD-only system will make app launches and boot feel slower, not faster.");
     }
 
-    // ── Laptop power-draw tweaks — heat & battery, not 'free' performance ───
+    // ── Laptop power-draw tweaks, heat & battery, not 'free' performance ───
     if is_laptop {
         risk!("core_parking_off", "warning",
-            "Laptop — Battery & Heat Impact",
-            "Keeps every CPU core powered at all times instead of parking idle cores. On a laptop this raises sustained power draw and heat — can shorten battery life noticeably and, under combined CPU+GPU load, contribute to thermal throttling that cancels out the latency gain this tweak aims for.");
+            "Laptop, Battery & Heat Impact",
+            "Keeps every CPU core powered at all times instead of parking idle cores. On a laptop this raises sustained power draw and heat, can shorten battery life noticeably and, under combined CPU+GPU load, contribute to thermal throttling that cancels out the latency gain this tweak aims for.");
         risk!("usb_suspend_off", "warning",
-            "Laptop — Battery Impact",
+            "Laptop, Battery Impact",
             "Keeps all USB devices fully powered, never suspended. Fine on AC power; on battery this is a measurable, continuous drain for the questionable benefit of avoiding mouse/headset micro-stutter most users never notice.");
         risk!("timer_resolution_min", "warning",
-            "Laptop — Battery & Heat Impact",
+            "Laptop, Battery & Heat Impact",
             "Forcing 0.5ms timer resolution wakes the CPU far more often than the Windows default (~15.6ms), increasing power draw and heat. On a laptop this measurably shortens battery life and can add to thermal load under sustained gaming.");
         risk!("power_plan_ultimate", "warning",
-            "Laptop — Ultimate Performance Disables Power Saving",
-            "Ultimate Performance disables nearly all power-saving parking/throttling. On a laptop this raises idle power draw and heat noticeably and shortens battery life — only use it on AC power.");
+            "Laptop, Ultimate Performance Disables Power Saving",
+            "Ultimate Performance disables nearly all power-saving parking/throttling. On a laptop this raises idle power draw and heat noticeably and shortens battery life, only use it on AC power.");
     }
 
     // ── Unknown/third-party power plans (Winhance, OEM-bundled, custom) ────
-    // Not hardware-conditional — flagged unconditionally because we cannot
+    // Not hardware-conditional, flagged unconditionally because we cannot
     // see what Advanced Power Settings the plan actually contains. Always
     // surfaced so the user knows to check before relying on "good FPS" from
     // a plan whose settings weren't reviewed.
     risk!("power_plan_custom_unknown", "warning",
         "Custom/Unknown Power Plan",
-        "This plan wasn't created by Windows or this app — its Advanced Power Settings (min processor state, Core Parking, Boost Mode) are unknown and may already be forcing max CPU clock 24/7. Combined with GPU clock-lock tweaks this can cause unexpected FPS regressions. Check Power Options → Change plan settings → Change advanced power settings before trusting it for gaming.");
+        "This plan wasn't created by Windows or this app, its Advanced Power Settings (min processor state, Core Parking, Boost Mode) are unknown and may already be forcing max CPU clock 24/7. Combined with GPU clock-lock tweaks this can cause unexpected FPS regressions. Check Power Options → Change plan settings → Change advanced power settings before trusting it for gaming.");
 
     // ── attach computed fields ────────────────────────────────────────────────
     data["cpu"]["tier"] = json!(cpu_tier);

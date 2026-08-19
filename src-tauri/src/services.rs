@@ -1,4 +1,4 @@
-//! Windows Services Manager — list, start/stop, change startup type.
+//! Windows Services Manager, list, start/stop, change startup type.
 //! Includes a bloat catalog with known safe-to-disable services.
 
 use crate::ps;

@@ -105,7 +105,7 @@ mod freq {
 
 pub struct MonitorState {
     pub running: Arc<AtomicBool>,
-    /// Join handle of the monitor thread — stop() joins it so a
+    /// Join handle of the monitor thread, stop() joins it so a
     /// stop→start sequence can never leave two loops emitting metrics.
     thread: Mutex<Option<std::thread::JoinHandle<()>>>,
 }
@@ -124,7 +124,7 @@ pub fn start(app: AppHandle, st: &MonitorState) -> Result<(), String> {
         return Ok(()); // already running
     }
     let running = st.running.clone();
-    // Builder::spawn returns io::Result — on failure we must reset the flag,
+    // Builder::spawn returns io::Result, on failure we must reset the flag,
     // otherwise every later start() no-ops and the monitor is dead forever.
     let handle = std::thread::Builder::new().spawn(move || {
         let mut sys = System::new_all();

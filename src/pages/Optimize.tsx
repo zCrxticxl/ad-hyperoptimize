@@ -27,7 +27,7 @@ export default function Optimize({ mode, admin, focusId, onSwitchExpert }: { mod
     if (!focusId || focusHandled.current || !tweaks) return;
     if (!tweaks.some((tw) => tw.id === focusId)) return;
     focusHandled.current = true;
-    // Beginner mode filters out non-Low tweaks — surface an honest hint instead
+    // Beginner mode filters out non-Low tweaks, surface an honest hint instead
     // of a silent no-op when the linked tweak is not visible here.
     if (mode === "beginner" && !tweaks.some((tw) => tw.id === focusId && tw.risk === "Low")) {
       setFocusHidden(true);
@@ -102,7 +102,7 @@ export default function Optimize({ mode, admin, focusId, onSwitchExpert }: { mod
             label={t("optCreateRestorePoint")}
             onRun={async () => {
               try {
-                setRpStatus(await api.createRestorePoint("AD HyperOptimize — before optimization"));
+                setRpStatus(await api.createRestorePoint("AD HyperOptimize, before optimization"));
               } catch (e: any) {
                 setRpStatus(String(e));
               }

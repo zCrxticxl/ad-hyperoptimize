@@ -6,7 +6,7 @@ import { useLang } from "../i18n";
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
 function TempGauge({ tempC, label }: { tempC: number | null; label: string }) {
-  if (tempC == null) return <span className="muted">—</span>;
+  if (tempC == null) return <span className="muted">-</span>;
   const color =
     tempC < 50 ? "var(--green)" :
     tempC < 70 ? "var(--accent)" :
@@ -27,7 +27,7 @@ function TempGauge({ tempC, label }: { tempC: number | null; label: string }) {
 
 function WearBar({ pct }: { pct: number | null }) {
   const { t } = useLang();
-  if (pct == null) return <span className="muted">—</span>;
+  if (pct == null) return <span className="muted">-</span>;
   const color = pct < 50 ? "var(--green)" : pct < 80 ? "var(--orange)" : "var(--red)";
   return (
     <div>
@@ -159,7 +159,7 @@ function SmartCard({ data }: { data: any }) {
                   <div className="muted" style={{ fontSize: 11 }}>{t("hwmonTempLabel")}</div>
                   {d.tempC != null
                     ? <TempGauge tempC={d.tempC} label="" />
-                    : <span className="muted">—</span>}
+                    : <span className="muted">-</span>}
                 </div>
                 <div>
                   <div className="muted" style={{ fontSize: 11 }}>{t("hwmonWearLevel")}</div>
@@ -167,12 +167,12 @@ function SmartCard({ data }: { data: any }) {
                 </div>
                 <div>
                   <div className="muted" style={{ fontSize: 11 }}>{t("hwmonPowerOnHours")}</div>
-                  <span>{d.powerOnHours != null ? `${d.powerOnHours} h` : "—"}</span>
+                  <span>{d.powerOnHours != null ? `${d.powerOnHours} h` : "-"}</span>
                 </div>
                 <div>
                   <div className="muted" style={{ fontSize: 11 }}>{t("hwmonReadErrors")}</div>
                   <span style={{ color: d.uncorrected > 0 ? "var(--red)" : "var(--fg)" }}>
-                    {d.readErrors != null ? d.readErrors : "—"}
+                    {d.readErrors != null ? d.readErrors : "-"}
                     {d.uncorrected > 0 && <span style={{ color: "var(--red)" }}> ({d.uncorrected} {t("hwmonUncorrected")})</span>}
                   </span>
                 </div>
@@ -250,14 +250,14 @@ export default function HwMonitor() {
               {data.fans.fans.map((f: any, i: number) => (
                 <div key={i} className="row" style={{ padding: "4px 0", borderBottom: "1px solid var(--border)" }}>
                   <span style={{ flex: 1 }}>{f.name}</span>
-                  <span>{f.rpm > 0 ? `${f.rpm} RPM` : "—"}</span>
+                  <span>{f.rpm > 0 ? `${f.rpm} RPM` : "-"}</span>
                 </div>
               ))}
             </Card>
           )}
 
           <div className="muted" style={{ fontSize: 11, marginTop: 14 }}>
-            CPU temps via Windows ACPI WMI (may show 0 on some motherboards — install HWiNFO64 for full sensor access).
+            CPU temps via Windows ACPI WMI (may show 0 on some motherboards, install HWiNFO64 for full sensor access).
             GPU data via nvidia-smi (NVIDIA only). S.M.A.R.T. via Windows Storage API.
           </div>
         </>

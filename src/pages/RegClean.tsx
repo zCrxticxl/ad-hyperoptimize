@@ -189,7 +189,7 @@ export default function RegClean({ admin }: { admin: boolean }) {
             ✓ {result.deleted} {t("regCleaned")}
           </span>{" "}
           {t("regBackupAt")}{" "}
-          <span className="mono" style={{ fontSize: 11 }}>{result.backupPath || "—"}</span>
+          <span className="mono" style={{ fontSize: 11 }}>{result.backupPath || "-"}</span>
           {result.backupPath && (
             <button
               className="btn ghost small"

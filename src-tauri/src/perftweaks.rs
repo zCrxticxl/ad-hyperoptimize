@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 // ── Timer Resolution ──────────────────────────────────────────────────────────
 
 pub fn timer_get() -> Value {
-    // Use int (not uint) — PS [ref] binding works more reliably with signed int.
+    // Use int (not uint), PS [ref] binding works more reliably with signed int.
     // Wrap everything in try-catch so we always return valid JSON.
     let script = r#"
 $result = [PSCustomObject]@{
@@ -54,7 +54,7 @@ pub fn timer_set(target_100ns: u32) -> Result<String, String> {
     // 2. Set GlobalTimerResolutionRequests registry key (persists across boots)
     // 3. Write a PS1 helper script to ProgramData
     // 4. Register a logon-trigger scheduled task that runs it as SYSTEM
-    // 5. Start the task immediately — now the process stays alive and holds the resolution
+    // 5. Start the task immediately, now the process stays alive and holds the resolution
     // 6. Sleep 800ms so timer_get() called right after sees the updated value
     let script = format!(
         r#"
@@ -117,7 +117,7 @@ try {
 
 pub fn msi_list() -> Value {
     // Get-PnpDevice gives a normalized Class + InstanceId regardless of how the
-    // driver/INF registered the device — far more reliable than manually
+    // driver/INF registered the device, far more reliable than manually
     // walking Enum\PCI and reading a raw Class string off the instance key.
     // InstanceId -> "HKLM:\SYSTEM\CurrentControlSet\Enum\<InstanceId>" is the
     // standard, documented mapping (same one pnputil/Device Manager use).
@@ -167,12 +167,12 @@ pub fn msi_set(reg_path: String, enabled: bool) -> Result<String, String> {
 $msiKey = Join-Path '{ps_path}' 'Device Parameters\Interrupt Management\MessageSignaledInterruptProperties'
 if (-not (Test-Path $msiKey)) {{ New-Item -Path $msiKey -Force | Out-Null }}
 Set-ItemProperty -Path $msiKey -Name 'MSISupported' -Value {val} -Type DWord -Force
-"OK — reboot required to take effect"
+"OK, reboot required to take effect"
 "#
     );
     ps::run(&script).map(|_| {
         format!(
-            "MSI {} — reboot required",
+            "MSI {}, reboot required",
             if enabled { "enabled" } else { "disabled" }
         )
     })
@@ -181,7 +181,7 @@ Set-ItemProperty -Path $msiKey -Name 'MSISupported' -Value {val} -Type DWord -Fo
 // ── Network Adapter Tweaks ────────────────────────────────────────────────────
 
 pub fn net_adapters() -> Value {
-    // No Status filter — include all adapters regardless of link state.
+    // No Status filter, include all adapters regardless of link state.
     // Plain foreach + hashtable lookups instead of ForEach-Object with a
     // closure-capturing scriptblock ($gv = { ... }; & $gv ...): if any
     // single adapter's advanced-property fetch threw, the old version's
@@ -368,14 +368,14 @@ pub fn pagefile_set_auto() -> Result<String, String> {
 $cs = Get-WmiObject Win32_ComputerSystem
 $cs.AutomaticManagedPagefile = $true
 $cs.Put() | Out-Null
-"Automatic pagefile management enabled — reboot required"
+"Automatic pagefile management enabled, reboot required"
 "#;
     ps::run(script).map(|s| s.trim().to_string())
 }
 
 pub fn pagefile_set_custom(path: String, init_mb: u32, max_mb: u32) -> Result<String, String> {
     // Pagefile paths must be local drive paths and must not contain PS quote
-    // characters or wildcards — the value is embedded in single-quoted PS
+    // characters or wildcards, the value is embedded in single-quoted PS
     // strings and used in a `-like '{path}*'` comparison.
     let path = path.trim().to_string();
     let is_local = path.len() >= 3
@@ -407,7 +407,7 @@ $pf.Put() | Out-Null
 Get-WmiObject Win32_PageFileSetting -ErrorAction SilentlyContinue |
     Where-Object {{ $_.Name -like '{path}*' -and $_.Name -ne '{path}' }} |
     ForEach-Object {{ $_.Delete() }}
-"Pagefile: {path} {init_mb}MB–{max_mb}MB — reboot required"
+"Pagefile: {path} {init_mb}MB-{max_mb}MB, reboot required"
 "#
     );
     ps::run(&script).map(|s| s.trim().to_string())
@@ -419,7 +419,7 @@ $cs = Get-WmiObject Win32_ComputerSystem
 $cs.AutomaticManagedPagefile = $false
 $cs.Put() | Out-Null
 Get-WmiObject Win32_PageFileSetting -ErrorAction SilentlyContinue | ForEach-Object { $_.Delete() }
-"Pagefile disabled — reboot required (only recommended with 32 GB+ RAM)"
+"Pagefile disabled, reboot required (only recommended with 32 GB+ RAM)"
 "#;
     ps::run(script).map(|s| s.trim().to_string())
 }

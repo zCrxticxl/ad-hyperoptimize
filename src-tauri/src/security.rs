@@ -53,7 +53,7 @@ pub fn scan() -> Value {
         "autoruns": autoruns(),
         "hosts": hosts_entries(),
         "suspicious_processes": sec(
-            // Userland processes running from Temp/AppData\\Local\\Temp — classic persistence red flag.
+            // Userland processes running from Temp/AppData\\Local\\Temp, classic persistence red flag.
             "Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -match '\\\\Temp\\\\|\\\\AppData\\\\Local\\\\Temp' } | Select-Object Name,ProcessId,ExecutablePath"
         ),
         "uac": sec(
@@ -68,7 +68,7 @@ pub fn scan() -> Value {
 
 fn unsigned_drivers() -> Value {
     // Win32_PnPSignedDriver.DeviceID is the PnP *device instance ID* (e.g.
-    // "PCI\VEN_10DE&DEV_...\4&1a2b3c4d&0&0008") — unlike driverquery's
+    // "PCI\VEN_10DE&DEV_...\4&1a2b3c4d&0&0008"), unlike driverquery's
     // DeviceName, this uniquely identifies one physical/virtual device, which
     // is required to safely target disable/remove actions at exactly the
     // flagged device and nothing else.
@@ -97,7 +97,7 @@ Get-CimInstance Win32_PnPSignedDriver -ErrorAction SilentlyContinue |
     }
 }
 
-/// Run pnputil.exe directly (no shell/string interpolation — args go straight
+/// Run pnputil.exe directly (no shell/string interpolation, args go straight
 /// to argv, so a device ID containing `&`/`\`/spaces can't break out or
 /// inject anything). Treats reboot-pending exit codes as success.
 fn pnputil(args: &[&str]) -> Result<String, String> {
@@ -138,7 +138,7 @@ fn require_device_id(device_id: &str) -> Result<(), String> {
 }
 
 /// Reversible: device stays installed but stops loading/binding. Safe first
-/// step — can be undone with enable_unsigned_driver.
+/// step, can be undone with enable_unsigned_driver.
 pub fn disable_unsigned_driver(device_id: String) -> Result<String, String> {
     require_device_id(&device_id)?;
     pnputil(&["/disable-device", &device_id])
@@ -152,7 +152,7 @@ pub fn enable_unsigned_driver(device_id: String) -> Result<String, String> {
 
 /// Uninstalls the device + driver package. If the hardware is still
 /// physically/logically present, Windows PnP will typically re-enumerate and
-/// reinstall a driver for it (on its own or after a rescan/reboot) — this is
+/// reinstall a driver for it (on its own or after a rescan/reboot), this is
 /// the same "repair by reinstall" path Device Manager's own Uninstall-device
 /// button uses, not a guaranteed permanent removal.
 pub fn remove_unsigned_driver(device_id: String) -> Result<String, String> {
@@ -165,7 +165,7 @@ pub fn defender_quick_scan() -> Result<String, String> {
     ps::run(
         "Start-Process powershell -WindowStyle Hidden -ArgumentList '-NoProfile','-Command','Start-MpScan -ScanType QuickScan'; 'OK'",
     )
-    .map(|_| "Defender Quick Scan started — result will appear in Windows Security Center.".into())
+    .map(|_| "Defender Quick Scan started, result will appear in Windows Security Center.".into())
 }
 
 fn autoruns() -> Value {
@@ -269,7 +269,7 @@ pub fn enable_scheduled_task(task_path: String, task_name: String) -> Result<Str
     toggle_scheduled_task(task_path, task_name, true)
 }
 
-/// Shared, validated implementation — task path/name come from the renderer
+/// Shared, validated implementation, task path/name come from the renderer
 /// and are embedded in single-quoted PS strings.
 fn toggle_scheduled_task(
     task_path: String,
@@ -294,7 +294,7 @@ fn toggle_scheduled_task(
 
 /// Tamper Protection locks Defender settings: Set-MpPreference then fails
 /// with an obscure Win32 error. Detect it up front so the user gets an
-/// actionable message instead. A failed probe is treated as "not locked" —
+/// actionable message instead. A failed probe is treated as "not locked" -
 /// the subsequent Set-MpPreference error still surfaces honestly.
 fn tamper_protection_active() -> bool {
     ps::run("(Get-MpComputerStatus -ErrorAction Stop).IsTamperProtected")
@@ -305,7 +305,7 @@ fn tamper_protection_active() -> bool {
 fn ensure_defender_unlocked() -> Result<(), String> {
     if tamper_protection_active() {
         return Err(
-            "Tamper Protection is enabled — Defender settings are locked. \
+            "Tamper Protection is enabled, Defender settings are locked. \
                     Disable \"Tamper Protection\" in Windows Security → Virus & threat \
                     protection → Manage settings first."
                 .into(),

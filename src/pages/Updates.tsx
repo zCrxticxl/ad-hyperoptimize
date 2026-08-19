@@ -43,7 +43,7 @@ function SelfUpdateCard() {
         msg.includes("404") || msg.includes("network") ||
         msg.includes("connect") || msg.includes("ENOTFOUND");
       setErrMsg(isNoServer
-        ? "No update server reachable — you are on the latest available build."
+        ? "No update server reachable, you are on the latest available build."
         : msg);
       setStatus("error");
     }
@@ -82,7 +82,7 @@ function SelfUpdateCard() {
   };
 
   return (
-    <Card title="⟳ AD HyperOptimize — App Update">
+    <Card title="⟳ AD HyperOptimize, App Update">
       <div className="row" style={{ alignItems: "center", gap: 16, marginBottom: 10 }}>
         <div>
           <span className="muted" style={{ fontSize: 12 }}>{t("updCurrentVersion")} </span>
@@ -263,7 +263,7 @@ export default function Updates({ admin }: { admin: boolean }) {
                       </td>
                       <td className="muted">{a.version}</td>
                       <td style={{ color: "var(--cyan)", fontWeight: 600 }}>{a.available}</td>
-                      <td className="muted">{a.source || "—"}</td>
+                      <td className="muted">{a.source || "-"}</td>
                       <td style={{ maxWidth: 180 }}>
                         {a.location ? (
                           <span
@@ -276,7 +276,7 @@ export default function Updates({ admin }: { admin: boolean }) {
                           </span>
                         ) : (
                           <span className="muted" style={{ fontSize: 11 }}>
-                            {a.source === "msstore" ? "Store" : "—"}
+                            {a.source === "msstore" ? "Store" : "-"}
                           </span>
                         )}
                       </td>
@@ -386,7 +386,7 @@ export default function Updates({ admin }: { admin: boolean }) {
           )}
           {drvResult && !drvResult.error && (
             <div style={{ marginTop: 10 }}>
-              <div style={{ color: "var(--green)", fontWeight: 600 }}>✔ {drvResult.overall} — {drvResult.installed} drivers</div>
+              <div style={{ color: "var(--green)", fontWeight: 600 }}>✔ {drvResult.overall}, {drvResult.installed} drivers</div>
               {(drvResult.results ?? []).map((r: any, i: number) => (
                 <div key={i} className="mono muted" style={{ fontSize: 11 }}>{r.result} · {r.title}</div>
               ))}

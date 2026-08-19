@@ -12,7 +12,7 @@ fn bloat_catalog() -> HashMap<(String, String), &'static str> {
         ("\\microsoft\\windows\\application experience\\", "microsoft compatibility appraiser",
             "Sends app compatibility telemetry to Microsoft. Runs daily and generates disk I/O."),
         ("\\microsoft\\windows\\application experience\\", "programdataupdater",
-            "Updates the appcompat telemetry database — pure data collection for Microsoft."),
+            "Updates the appcompat telemetry database, pure data collection for Microsoft."),
         ("\\microsoft\\windows\\application experience\\", "startupapptask",
             "Scans startup programs for Microsoft analysis after login."),
         // Autochk
@@ -27,10 +27,10 @@ fn bloat_catalog() -> HashMap<(String, String), &'static str> {
         ("\\microsoft\\windows\\diskdiagnostic\\", "microsoft-windows-diskdiagnosticdatacollector",
             "Collects disk diagnostic data and forwards it to Microsoft."),
         ("\\microsoft\\windows\\diskfootprint\\", "diagnostics",
-            "Profiles disk I/O patterns in the background — generates load with no user benefit."),
+            "Profiles disk I/O patterns in the background, generates load with no user benefit."),
         // WinSAT
         ("\\microsoft\\windows\\maintenance\\", "winsat",
-            "Windows System Assessment Tool — runs benchmarks in the background and generates CPU/disk load."),
+            "Windows System Assessment Tool, runs benchmarks in the background and generates CPU/disk load."),
         // Maps
         ("\\microsoft\\windows\\maps\\", "mapsupdatetask",
             "Automatically downloads offline map updates for the Windows Maps app."),
@@ -38,7 +38,7 @@ fn bloat_catalog() -> HashMap<(String, String), &'static str> {
             "Sends notifications from the Windows Maps app."),
         // NetTrace
         ("\\microsoft\\windows\\nettrace\\", "gathernetworkinfo",
-            "Collects detailed network diagnostic data — background overhead with no discernible benefit."),
+            "Collects detailed network diagnostic data, background overhead with no discernible benefit."),
         // Power Efficiency
         ("\\microsoft\\windows\\power efficiency diagnostics\\", "analyzesystem",
             "Runs power efficiency analysis and sends results to Microsoft."),
@@ -50,7 +50,7 @@ fn bloat_catalog() -> HashMap<(String, String), &'static str> {
             "Sends queued error reports to Microsoft. Unnecessary when Windows Error Reporting is disabled."),
         // Windows Update
         ("\\microsoft\\windows\\windowsupdate\\", "automatic app update",
-            "Automatically updates Store apps in the background — separate from normal Windows Update."),
+            "Automatically updates Store apps in the background, separate from normal Windows Update."),
         ("\\microsoft\\windows\\windowsupdate\\", "scheduled start",
             "Starts Windows Update scans on a fixed schedule."),
         // Workplace Join
@@ -58,15 +58,15 @@ fn bloat_catalog() -> HashMap<(String, String), &'static str> {
             "Automatically registers the device in Azure AD / Workplace Join (enterprise feature)."),
         // PushToInstall
         ("\\microsoft\\windows\\pushtoinstall\\", "logincheck",
-            "Checks Push-to-Install Store tasks at login — irrelevant for non-enterprise."),
+            "Checks Push-to-Install Store tasks at login, irrelevant for non-enterprise."),
         // MUI language packs
         ("\\microsoft\\windows\\mui\\", "lpremove",
-            "Automatically removes unused language packs — may unintentionally delete language packs."),
+            "Automatically removes unused language packs, may unintentionally delete language packs."),
         // Subscription / license
         ("\\microsoft\\windows\\subscription\\", "enablelicenseacquisition",
             "Attempts to reload Windows activation licenses in the background."),
         ("\\microsoft\\windows\\subscription\\", "licenseacquisition",
-            "License reload task — unnecessary on correctly activated systems."),
+            "License reload task, unnecessary on correctly activated systems."),
         // Device Census
         ("\\microsoft\\windows\\device information\\", "device",
             "Sends detailed device inventory data to Microsoft (Device Census)."),
@@ -79,7 +79,7 @@ fn bloat_catalog() -> HashMap<(String, String), &'static str> {
             "Feedback Hub background task for non-Insiders."),
         // Clip
         ("\\microsoft\\windows\\clip\\", "license validation",
-            "Microsoft Store license validation — runs periodically in the background."),
+            "Microsoft Store license validation, runs periodically in the background."),
     ];
 
     entries
@@ -151,7 +151,7 @@ pub fn toggle(path: String, name: String, enable: bool) -> Result<Value, String>
         return Err("Scheduled Tasks ändern benötigt Adminrechte.".into());
     }
     // Path/name are embedded in single-quoted PS strings and come from the
-    // renderer — reject anything that could terminate the quotes.
+    // renderer, reject anything that could terminate the quotes.
     if !crate::ps::is_safe_ident(&path) || !crate::ps::is_safe_ident(&name) {
         return Err("Invalid task path or name".into());
     }

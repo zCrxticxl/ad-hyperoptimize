@@ -38,7 +38,7 @@ export default function GameProfiles() {
     const unSub1 = listen("game-detected", (e: any) => {
       setActiveEvt(e.payload);
       setStatus((s: any) => ({ ...s, activeGame: e.payload.id }));
-      showToast(`🎮 ${e.payload.name} ${t("gameprofToastDetected")} — ${e.payload.preset} ${t("gameprofToastProfileApplied")}`);
+      showToast(`🎮 ${e.payload.name} ${t("gameprofToastDetected")}, ${e.payload.preset} ${t("gameprofToastProfileApplied")}`);
     });
     const unSub2 = listen("game-exited", (e: any) => {
       setActiveEvt(null);
@@ -81,7 +81,7 @@ export default function GameProfiles() {
     setBusy(true);
     try {
       const res = await api.gameApplyPreset(game.id, p);
-      if (res.ok) showToast(`⚡ ${t("gameprofToastApplied")} ${p} ${t("gameprofToastPresetFor")} ${game.name} — ${t("gameprofToastPowerPlan")}: ${PLAN_LABELS[res.powerPlan] ?? res.powerPlan}`);
+      if (res.ok) showToast(`⚡ ${t("gameprofToastApplied")} ${p} ${t("gameprofToastPresetFor")} ${game.name}, ${t("gameprofToastPowerPlan")}: ${PLAN_LABELS[res.powerPlan] ?? res.powerPlan}`);
       else showToast(`${t("gameprofToastError")}: ${res.error}`);
     } catch (e: any) { showToast(`${t("gameprofToastError")}: ${String(e)}`); }
     finally { setBusy(false); }
@@ -271,7 +271,7 @@ export default function GameProfiles() {
                 fontSize:11, color:"#475569", textTransform:"uppercase",
                 letterSpacing:1, marginBottom:12,
               }}>
-                {t("gameprofRecommendedSettings")} — {PRESET_LABELS[preset].label}
+                {t("gameprofRecommendedSettings")}, {PRESET_LABELS[preset].label}
               </div>
 
               {/* Group by category */}

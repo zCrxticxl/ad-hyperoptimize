@@ -2,11 +2,11 @@
 //!
 //! Three real measurement layers:
 //! 1. Per-core DPC / interrupt pressure via WMI formatted perf counters
-//!    (`Win32_PerfFormattedData_Counters_ProcessorInformation`) — class and
+//!    (`Win32_PerfFormattedData_Counters_ProcessorInformation`), class and
 //!    property names are locale-independent, unlike `Get-Counter` paths.
 //! 2. Execution-stall probe: a pinned spinning thread timestamps continuously;
 //!    any gap between consecutive reads is time the thread was preempted by
-//!    DPCs/ISRs/scheduler — the same signal LatencyMon's "highest measured
+//!    DPCs/ISRs/scheduler, the same signal LatencyMon's "highest measured
 //!    interrupt to process latency" reflects.
 //! 3. Deep trace: drives the built-in `wpr.exe` (Windows Performance
 //!    Recorder) CPU profile for per-driver DPC attribution in WPA.
@@ -68,12 +68,12 @@ pub fn stall_probe(seconds: u32) -> Value {
     } else if max < 1000.0 {
         (
             "good",
-            "Minor stalls under 1ms — normal Windows background behavior, imperceptible in games.",
+            "Minor stalls under 1ms, normal Windows background behavior, imperceptible in games.",
         )
     } else if max < 4000.0 {
-        ("fair", "Stalls of 1–4ms detected. Can cause occasional frametime spikes or audio crackle under load. Run a deep trace to identify the driver.")
+        ("fair", "Stalls of 1-4ms detected. Can cause occasional frametime spikes or audio crackle under load. Run a deep trace to identify the driver.")
     } else {
-        ("poor", "Stalls above 4ms detected — a driver is hogging DPC/ISR time. Typical culprits: Wi-Fi/LAN drivers, audio stacks, storage drivers, GPU driver during clock changes. Run a deep trace and check the worst DPC in WPA.")
+        ("poor", "Stalls above 4ms detected, a driver is hogging DPC/ISR time. Typical culprits: Wi-Fi/LAN drivers, audio stacks, storage drivers, GPU driver during clock changes. Run a deep trace and check the worst DPC in WPA.")
     };
 
     json!({
@@ -96,10 +96,10 @@ pub fn wpr_start() -> Result<String, String> {
         return Err("Deep tracing needs administrator rights.".into());
     }
     ps::exec("wpr.exe", &["-start", "CPU", "-filemode"])
-        .map(|_| "Recording kernel CPU/DPC/ISR trace… Reproduce the stutter now (keep it under ~30s — traces grow fast), then press Stop.".into())
+        .map(|_| "Recording kernel CPU/DPC/ISR trace… Reproduce the stutter now (keep it under ~30s, traces grow fast), then press Stop.".into())
         .map_err(|e| {
             if e.contains("already") {
-                "A WPR trace is already running — press Stop to finish it.".into()
+                "A WPR trace is already running, press Stop to finish it.".into()
             } else {
                 e
             }
@@ -117,7 +117,7 @@ pub fn wpr_stop() -> Result<Value, String> {
     )?;
     Ok(json!({
         "etlPath": path.to_string_lossy(),
-        "next": "Open this .etl in Windows Performance Analyzer (Microsoft Store: 'Windows Performance Analyzer'), add the 'DPC/ISR Duration by Module' graph — the top module is your latency offender."
+        "next": "Open this .etl in Windows Performance Analyzer (Microsoft Store: 'Windows Performance Analyzer'), add the 'DPC/ISR Duration by Module' graph, the top module is your latency offender."
     }))
 }
 

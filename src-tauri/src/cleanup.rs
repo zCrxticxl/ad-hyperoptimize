@@ -18,19 +18,19 @@ const CATS: &[Category] = &[
     Category {
         id: "win_temp",
         name: "Windows Temp",
-        note: "C:\\Windows\\Temp — safe to clear; in-use files are skipped automatically.",
+        note: "C:\\Windows\\Temp, safe to clear; in-use files are skipped automatically.",
         min_age_hours: 24,
     },
     Category {
         id: "user_temp",
         name: "User Temp",
-        note: "%TEMP% — safe to clear; in-use files are skipped automatically.",
+        note: "%TEMP%, safe to clear; in-use files are skipped automatically.",
         min_age_hours: 24,
     },
     Category {
         id: "wu_cache",
         name: "Windows Update download cache",
-        note: "SoftwareDistribution\\Download — already-installed update payloads.",
+        note: "SoftwareDistribution\\Download, already-installed update payloads.",
         min_age_hours: 72,
     },
     Category {
@@ -154,7 +154,7 @@ pub fn clean(category_ids: Vec<String>) -> Value {
                     freed += size;
                     deleted += 1;
                 }
-                Err(_) => skipped += 1, // locked or permission — never force
+                Err(_) => skipped += 1, // locked or permission, never force
             }
         }
         // Sweep now-empty subdirectories (ignore failures).

@@ -1,4 +1,4 @@
-//! Game Booster — one-click system tuning when launching a game.
+//! Game Booster, one-click system tuning when launching a game.
 //! Kills background bloat, boosts target process, reverts everything after.
 
 use crate::gameprofile::{get_active_plan_guid, PLAN_BALANCED, PLAN_HIGH_PERFORMANCE};
@@ -209,7 +209,7 @@ pub fn boost_stop() -> Result<String, String> {
     let (prev_plan, prev_toast) =
         read_boost_state().unwrap_or_else(|| (PLAN_BALANCED.to_string(), None));
 
-    // The plan guid is embedded in a PowerShell script — only ever a real
+    // The plan guid is embedded in a PowerShell script, only ever a real
     // GUID (or the hardcoded Balanced fallback). A corrupted state file must
     // not be able to inject script, so anything else degrades to Balanced.
     let prev_plan = if crate::ps::is_guid(&prev_plan) {
@@ -220,7 +220,7 @@ pub fn boost_stop() -> Result<String, String> {
 
     // Restoring a value we previously changed must succeed; a failure is
     // reported honestly instead of printing "settings restored" anyway.
-    // A captured DWORD value is a plain number — anything else is rejected so
+    // A captured DWORD value is a plain number, anything else is rejected so
     // a tampered registry value can never inject script; we fall back to
     // ensuring the property is absent.
     let toast_restore = match prev_toast.as_deref() {
@@ -236,7 +236,7 @@ $errs = @()
 powercfg /setactive {prev_plan} 2>&1 | Out-Null
 if ($LASTEXITCODE -ne 0) {{ $errs += 'power plan restore failed (exit ' + $LASTEXITCODE + ')' }}
 try {{ {toast_restore} }} catch {{ $errs += ('toast restore failed: ' + $_.Exception.Message) }}
-if ($errs.Count) {{ Write-Error ('Game boost stopped, but: ' + ($errs -join '; ')) }} else {{ 'Game boost stopped — settings restored' }}
+if ($errs.Count) {{ Write-Error ('Game boost stopped, but: ' + ($errs -join '; ')) }} else {{ 'Game boost stopped, settings restored' }}
 "#
     );
     match ps::run(&script) {
@@ -262,7 +262,7 @@ Set-ItemProperty $path HwSchMode {val} -Type DWord -EA SilentlyContinue
     ps::run(&script).map(|s| s.trim().to_string())
 }
 
-// ── Quick Boost — one-click safe combo with journal-backed undo ─────────────
+// ── Quick Boost, one-click safe combo with journal-backed undo ─────────────
 // Unlike boost_start/boost_stop above (one-way apply, hardcoded global
 // revert), every change Quick Boost makes is captured as a ChangeItem before
 // it is applied, written to the same write-ahead journal the rest of the app
@@ -273,7 +273,7 @@ Set-ItemProperty $path HwSchMode {val} -Type DWord -EA SilentlyContinue
 
 const HAGS_PATH: &str = "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\GraphicsDrivers";
 
-/// Wrap a PowerShell expression so it runs as an executable command line —
+/// Wrap a PowerShell expression so it runs as an executable command line -
 /// `tweaks::apply_item` executes Command items via run_cmdline. run_cmdline
 /// detects the `powershell … -Command <expr>` form and runs `<expr>` as a
 /// single `-Command` argument (via ps::run), so `$`/quotes/spacing inside
@@ -285,7 +285,7 @@ fn ps_expr(expr: String) -> String {
 /// Resolve a process name (with or without ".exe") to a live PID.
 fn find_pid_by_name(name: &str) -> Result<u32, String> {
     let base = name.trim_end_matches(".exe").trim_end_matches(".EXE");
-    // Embedded in a single-quoted PS string — reject anything that could
+    // Embedded in a single-quoted PS string, reject anything that could
     // terminate the quote (process names are plain file names in practice).
     if !crate::ps::is_safe_ident(base) {
         return Err(format!("invalid process name '{name}'"));
@@ -310,7 +310,7 @@ fn perf_core_mask(core_count: usize) -> u64 {
 
 /// Best-effort, non-reversible cleanup of known overlay/background bloat.
 /// Returns the names of whatever got killed so the UI can tell the user
-/// (these are ordinary user apps — Discord, Spotify, browsers — relaunching
+/// (these are ordinary user apps, Discord, Spotify, browsers, relaunching
 /// them is on the user, which is the accepted trade-off for "low risk").
 fn kill_known_overlays() -> Vec<String> {
     let procs = list_background_procs();
@@ -371,7 +371,7 @@ pub fn quick_boost_start(process_name: String) -> Result<Value, String> {
     // expressions must therefore be wrapped in a powershell.exe invocation
     // (the expression is one -Command argument, so quotes/$ stay literal).
     //
-    // The HAGS item writes to HKLM — only ever plan it when elevated, so an
+    // The HAGS item writes to HKLM, only ever plan it when elevated, so an
     // unelevated Quick Boost doesn't journal a change it cannot make. All
     // items use -EA Stop: a step that cannot actually be performed fails the
     // boost with rollback instead of silently recording "applied".

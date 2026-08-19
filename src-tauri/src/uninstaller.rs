@@ -1,4 +1,4 @@
-//! App Uninstaller — list installed programs, launch uninstaller, scan/clean leftovers.
+//! App Uninstaller, list installed programs, launch uninstaller, scan/clean leftovers.
 
 use crate::ps;
 use serde_json::{json, Value};
@@ -55,7 +55,7 @@ if ($us -imatch '^MsiExec') {{
     $args = $args -ireplace '^/I','/X'
     Start-Process 'MsiExec.exe' -ArgumentList $args
 }} else {{
-    # EXE uninstaller — parse quoted path + args
+    # EXE uninstaller, parse quoted path + args
     if ($us -match '^"(.+?)"\s*(.*)$') {{
         $exe  = $Matches[1]
         $rest = $Matches[2]
@@ -122,7 +122,7 @@ if ($found.Count -eq 0) {{ '[]' }} else {{ @($found) | ConvertTo-Json -Compress 
     );
     match ps::run_json(&script) {
         // Drop anything clean_leftovers would refuse so the UI only ever
-        // offers cleanable leftovers — never a dead-end. The filter mirrors
+        // offers cleanable leftovers, never a dead-end. The filter mirrors
         // the cleaner's predicate exactly (under-base AND not protected).
         Ok(v @ Value::Array(_)) => {
             let cleanable: Vec<Value> = v
@@ -236,7 +236,7 @@ pub fn clean_leftovers(paths: Vec<String>) -> Result<String, String> {
     for path in &paths {
         let is_reg = path.starts_with("HKCU:") || path.starts_with("HKLM:");
         if is_reg {
-            // Renderer input — structural allowlist before Remove-Item:
+            // Renderer input, structural allowlist before Remove-Item:
             // only keys the leftover scanner itself could have found.
             if !leftover_reg_is_safe(path) {
                 errors.push(format!("{path}: refusing unsafe registry path"));
@@ -250,7 +250,7 @@ pub fn clean_leftovers(paths: Vec<String>) -> Result<String, String> {
                 Err(e) => errors.push(format!("{path}: {e}")),
             }
         } else {
-            // Filesystem — same allowlist: must live under a scanned base
+            // Filesystem, same allowlist: must live under a scanned base
             // dir, must not be a protected system location, no traversal.
             if !leftover_is_under_base(path)
                 || crate::diskanalyzer::is_protected(std::path::Path::new(path))
@@ -294,7 +294,7 @@ mod tests {
         assert!(leftover_reg_is_safe(r"HKCU:\Software\MyApp\Sub"));
         assert!(leftover_reg_is_safe(r"HKLM:\Software\MyApp"));
         assert!(leftover_reg_is_safe(r"HKLM:\Software\WOW6432Node\MyApp"));
-        // bases themselves — never deletable
+        // bases themselves, never deletable
         assert!(!leftover_reg_is_safe(r"HKCU:\Software"));
         assert!(!leftover_reg_is_safe(r"HKLM:\Software"));
         assert!(!leftover_reg_is_safe(r"HKLM:\Software\WOW6432Node"));

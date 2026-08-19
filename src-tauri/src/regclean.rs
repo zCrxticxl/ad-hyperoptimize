@@ -51,7 +51,7 @@ fn is_valid_root(root: &str) -> bool {
     root == "HKLM" || root == "HKCU"
 }
 
-/// Structural check for a single scan entry — runs on every platform so the
+/// Structural check for a single scan entry, runs on every platform so the
 /// same validation guards the Windows deletion path and stays unit-testable.
 fn entry_is_valid(entry: &Value) -> Result<(), String> {
     let root = entry["root"].as_str().unwrap_or("");
@@ -174,7 +174,7 @@ fn hive(root: &str) -> RegKey {
 
 // ── Category scanners ───────────────────────────────────────────────────────
 
-/// MUI Cache — HKCU values whose exe path no longer exists.
+/// MUI Cache, HKCU values whose exe path no longer exists.
 /// Groups by base exe so one orphan covers all related value names.
 #[cfg(windows)]
 fn scan_mui_cache(out: &mut Vec<Value>) {
@@ -491,7 +491,7 @@ pub fn clean(entries: Vec<Value>) -> Result<Value, String> {
         std::fs::create_dir_all(&reg_dir).map_err(|e| format!("backup dir: {e}"))?;
         let backup_path = backup_dir.join(format!("backup_{ts}.json"));
 
-        // 2. Delete — but ONLY after a real .reg export of the affected key
+        // 2. Delete, but ONLY after a real .reg export of the affected key
         //    succeeded, so every deletion is genuinely restorable.
         let mut deleted: u32 = 0;
         let mut manifest: Vec<Value> = Vec::new();
@@ -513,7 +513,7 @@ pub fn clean(entries: Vec<Value>) -> Result<Value, String> {
                 .unwrap_or_default();
 
             // Export the affected key to a .reg file BEFORE deleting. If the
-            // export fails we skip the deletion entirely — better to leave an
+            // export fails we skip the deletion entirely, better to leave an
             // orphan than to delete something we can't put back.
             let reg_file = reg_dir.join(format!("{}.reg", manifest.len()));
             let full = format!("{root}\\{key_path}");
@@ -618,7 +618,7 @@ fn reg_export(full_key: &str, file: &std::path::Path) -> Result<(), String> {
 /// exported .reg file. Returns { restored, errors }.
 ///
 /// Only manifests inside the app's own `PCOptSuite/regclean` folder are
-/// accepted, and every referenced `.reg` file must live there too — otherwise
+/// accepted, and every referenced `.reg` file must live there too, otherwise
 /// this command would be an arbitrary registry-import primitive.
 pub fn restore(backup_path: String) -> Result<Value, String> {
     #[cfg(windows)]

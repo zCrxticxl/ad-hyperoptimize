@@ -38,7 +38,7 @@ pub fn run(kind: String) -> Result<Value, String> {
 
     // Run via cmd to capture output properly (SFC writes Unicode via kernel)
     let script = if kind == "sfc" {
-        // SFC needs special handling — its output is UTF-16 via kernel driver.
+        // SFC needs special handling, its output is UTF-16 via kernel driver.
         // Reading CBS.log gives the actual result.
         r#"
 $job = Start-Process -FilePath 'sfc.exe' -ArgumentList '/scannow' -Wait -PassThru -NoNewWindow 2>$null
@@ -54,7 +54,7 @@ if ($summary) { $summary } else { "SFC abgeschlossen (Exit: $($job.ExitCode)). L
         format!("& {} 2>&1 | Out-String", args.join(" "))
     };
 
-    // SFC /scannow and DISM checks/repairs legitimately take minutes — the
+    // SFC /scannow and DISM checks/repairs legitimately take minutes, the
     // short 30s command timeout would kill them mid-operation, so use the
     // long (20 min) timeout here.
     let output = ps::run_long(&script)?;

@@ -1,4 +1,4 @@
-//! Software Installer — curated winget catalog with streaming install progress.
+//! Software Installer, curated winget catalog with streaming install progress.
 
 use serde_json::{json, Value};
 use tauri::AppHandle;
@@ -9,14 +9,14 @@ use tauri::Emitter;
 pub fn catalog() -> Value {
     json!([
         // ── Gaming ────────────────────────────────────────────────────────────
-        { "id": "steam",             "name": "Steam",                      "category": "gaming",    "desc": "PC gaming platform — library, multiplayer, workshop",          "wingetId": "Valve.Steam",                                    "icon": "🎮", "recommended": true  },
+        { "id": "steam",             "name": "Steam",                      "category": "gaming",    "desc": "PC gaming platform, library, multiplayer, workshop",          "wingetId": "Valve.Steam",                                    "icon": "🎮", "recommended": true  },
         { "id": "discord",           "name": "Discord",                    "category": "gaming",    "desc": "Voice, video & text chat for gaming communities",             "wingetId": "Discord.Discord",                                "icon": "💬", "recommended": true  },
         { "id": "geforce-exp",       "name": "NVIDIA GeForce Experience",  "category": "gaming",    "desc": "NVIDIA driver updater, Game Ready drivers & overlay",         "wingetId": "Nvidia.GeForceExperience",                       "icon": "🟢", "recommended": false },
         { "id": "amd-adrenalin",     "name": "AMD Software: Adrenalin",    "category": "gaming",    "desc": "AMD GPU driver suite, Radeon overlay & performance tuning",   "wingetId": "AdvancedMicroDevices.AMDSoftware.Adrenalin",      "icon": "🔴", "recommended": false },
         { "id": "intel-arc",         "name": "Intel Arc Control",          "category": "gaming",    "desc": "Intel GPU driver & performance overlay",                      "wingetId": "Intel.ArcControl",                               "icon": "🔵", "recommended": false },
         { "id": "ea-app",            "name": "EA App",                     "category": "gaming",    "desc": "Electronic Arts game launcher (replaces Origin)",             "wingetId": "ElectronicArts.EADesktop",                       "icon": "🎯", "recommended": false },
-        { "id": "battlenet",         "name": "Battle.net",                 "category": "gaming",    "desc": "Blizzard launcher — WoW, Overwatch 2, Diablo IV",            "wingetId": "Blizzard.BattleNet",                             "icon": "⚔",  "recommended": false },
-        { "id": "epic",              "name": "Epic Games Launcher",        "category": "gaming",    "desc": "Epic Games store — free games every week",                   "wingetId": "EpicGames.EpicGamesLauncher",                    "icon": "🚀", "recommended": false },
+        { "id": "battlenet",         "name": "Battle.net",                 "category": "gaming",    "desc": "Blizzard launcher, WoW, Overwatch 2, Diablo IV",            "wingetId": "Blizzard.BattleNet",                             "icon": "⚔",  "recommended": false },
+        { "id": "epic",              "name": "Epic Games Launcher",        "category": "gaming",    "desc": "Epic Games store, free games every week",                   "wingetId": "EpicGames.EpicGamesLauncher",                    "icon": "🚀", "recommended": false },
         { "id": "gog",               "name": "GOG Galaxy",                 "category": "gaming",    "desc": "DRM-free game platform, unified library",                    "wingetId": "GOG.Galaxy",                                     "icon": "🌌", "recommended": false },
         { "id": "xbox",              "name": "Xbox App",                   "category": "gaming",    "desc": "Game Pass, cloud gaming & Xbox social features",              "wingetId": "Microsoft.GamingApp",                            "icon": "🕹", "recommended": false },
         { "id": "ubisoft",           "name": "Ubisoft Connect",            "category": "gaming",    "desc": "Ubisoft game launcher",                                       "wingetId": "Ubisoft.Connect",                                "icon": "🔶", "recommended": false },
@@ -31,17 +31,17 @@ pub fn catalog() -> Value {
         { "id": "brave",             "name": "Brave",                      "category": "browsers",  "desc": "Built-in ad & tracker blocker, Chromium-based",              "wingetId": "Brave.Brave",                                    "icon": "🦁", "recommended": false },
 
         // ── Utilities ─────────────────────────────────────────────────────────
-        { "id": "7zip",              "name": "7-Zip",                      "category": "utilities", "desc": "Free file archiver — zip, rar, 7z and more",                 "wingetId": "7zip.7zip",                                      "icon": "📦", "recommended": true  },
-        { "id": "vlc",               "name": "VLC Media Player",           "category": "utilities", "desc": "Plays anything — every video & audio format",                "wingetId": "VideoLAN.VLC",                                   "icon": "📺", "recommended": true  },
-        { "id": "obs",               "name": "OBS Studio",                 "category": "utilities", "desc": "Free streaming & recording — Twitch, YouTube",               "wingetId": "OBSProject.OBSStudio",                           "icon": "🎥", "recommended": false },
+        { "id": "7zip",              "name": "7-Zip",                      "category": "utilities", "desc": "Free file archiver, zip, rar, 7z and more",                 "wingetId": "7zip.7zip",                                      "icon": "📦", "recommended": true  },
+        { "id": "vlc",               "name": "VLC Media Player",           "category": "utilities", "desc": "Plays anything, every video & audio format",                "wingetId": "VideoLAN.VLC",                                   "icon": "📺", "recommended": true  },
+        { "id": "obs",               "name": "OBS Studio",                 "category": "utilities", "desc": "Free streaming & recording, Twitch, YouTube",               "wingetId": "OBSProject.OBSStudio",                           "icon": "🎥", "recommended": false },
         { "id": "sharex",            "name": "ShareX",                     "category": "utilities", "desc": "Screenshot & screen recorder with annotation tools",         "wingetId": "ShareX.ShareX",                                  "icon": "📸", "recommended": false },
         { "id": "notepadpp",         "name": "Notepad++",                  "category": "utilities", "desc": "Advanced text/code editor",                                  "wingetId": "Notepad++.Notepad++",                            "icon": "📝", "recommended": false },
-        { "id": "everything",        "name": "Everything",                 "category": "utilities", "desc": "Instant file search — finds files in milliseconds",          "wingetId": "voidtools.Everything",                           "icon": "🔍", "recommended": true  },
+        { "id": "everything",        "name": "Everything",                 "category": "utilities", "desc": "Instant file search, finds files in milliseconds",          "wingetId": "voidtools.Everything",                           "icon": "🔍", "recommended": true  },
         { "id": "winrar",            "name": "WinRAR",                     "category": "utilities", "desc": "RAR & ZIP archiver",                                         "wingetId": "RARLab.WinRAR",                                  "icon": "🗜", "recommended": false },
 
         // ── Monitoring & Tools ────────────────────────────────────────────────
         { "id": "msi-afterburner",   "name": "MSI Afterburner",            "category": "tools",     "desc": "GPU overclocking, fan curves & in-game overlay",             "wingetId": "Guru3D.MSIAfterburner",                          "icon": "🔥", "recommended": true  },
-        { "id": "hwinfo",            "name": "HWiNFO64",                   "category": "tools",     "desc": "Deep hardware monitoring — sensors, voltages, clocks",        "wingetId": "REALiX.HWiNFO",                                  "icon": "📊", "recommended": false },
+        { "id": "hwinfo",            "name": "HWiNFO64",                   "category": "tools",     "desc": "Deep hardware monitoring, sensors, voltages, clocks",        "wingetId": "REALiX.HWiNFO",                                  "icon": "📊", "recommended": false },
         { "id": "cpuz",              "name": "CPU-Z",                      "category": "tools",     "desc": "CPU, RAM & motherboard info",                                "wingetId": "CPUID.CPU-Z",                                    "icon": "💻", "recommended": false },
         { "id": "gpuz",              "name": "GPU-Z",                      "category": "tools",     "desc": "Detailed GPU specifications & sensor monitoring",             "wingetId": "TechPowerUp.GPU-Z",                              "icon": "🖥", "recommended": false },
         { "id": "crystaldisk",       "name": "CrystalDiskMark",            "category": "tools",     "desc": "SSD & HDD speed benchmark",                                  "wingetId": "CrystalDewWorld.CrystalDiskMark",                "icon": "💾", "recommended": false },
@@ -127,7 +127,7 @@ pub fn install_apps(winget_ids: Vec<String>, app: AppHandle) {
 
             match crate::ps::run_long(&script) {
                 Ok(out) => {
-                    // Use exit code as primary indicator — language-agnostic
+                    // Use exit code as primary indicator, language-agnostic
                     // -1978335212 = already installed, -1978335189 = no applicable upgrade
                     let first = out.lines().next().unwrap_or("");
                     let exit_ok = first == "EXIT:0"

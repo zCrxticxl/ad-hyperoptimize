@@ -855,7 +855,7 @@ async fn cmd_disk_organize_apply(items: Vec<Value>) -> Value {
 #[tauri::command(async)]
 async fn cmd_analyze(force: bool) -> Value {
     // v2: findings now carry `code`+`params` for i18n (old cached "analysis"
-    // entries lack these fields and crash the localizer) — bump the cache key
+    // entries lack these fields and crash the localizer), bump the cache key
     // so stale pre-v2 files on disk are ignored instead of served.
     tauri::async_runtime::spawn_blocking(move || {
         cache::get_or("analysis_v2", force, || {
@@ -932,7 +932,7 @@ fn cmd_clear_cache() -> Result<String, String> {
 fn cmd_open_path(path: String) -> Result<(), String> {
     // Start-Process opens URLs, files and folders via their default handler
     // (browser / file association / Explorer). It is spawned with the value as
-    // a single single-quoted argument through ps::run — PowerShell performs no
+    // a single single-quoted argument through ps::run, PowerShell performs no
     // cmd-style percent/operator expansion inside single quotes, so
     // percent-encoded URLs (&, %, =, ?) pass through verbatim and the
     // renderer-supplied value cannot break out of the argument.
@@ -1305,12 +1305,12 @@ fn ensure_admin() {
             // Watch for the elevated sibling in the background. The moment it
             // shows up (user approved UAC) this unelevated instance exits and
             // the elevated one takes over. If the user cancels UAC no sibling
-            // ever appears — the app keeps running unelevated instead of
+            // ever appears, the app keeps running unelevated instead of
             // silently vanishing, and the UI shows the admin hint.
             // Note: the check must exclude THIS process (its own PID), not
             // the PowerShell child's PID. Polling is bounded (5 min) so the
             // watchdog never spins forever if the user neither approves nor
-            // cancels — the unelevated instance simply keeps running.
+            // cancels, the unelevated instance simply keeps running.
             let needle = exe.to_string_lossy().to_lowercase().replace('\'', "''");
             let own_pid = std::process::id();
             let exe_name = exe

@@ -52,7 +52,7 @@ Game {
     presets: Presets {
         performance: Preset {
             power_plan: "ultimate",
-            description: "Minimum input lag, maximum FPS — the only mode for ranked play.",
+            description: "Minimum input lag, maximum FPS, the only mode for ranked play.",
             settings: &[
                 s("Display",  "Resolution",              "1920×1080 or 1280×960 stretched"),
                 s("Display",  "Display Mode",            "Fullscreen (not Borderless)"),
@@ -99,9 +99,9 @@ Game {
         },
     },
     tips: &[
-        "Disable GeForce / Radeon overlay — adds measurable latency",
+        "Disable GeForce / Radeon overlay, adds measurable latency",
         "cl_interp_ratio 1  |  rate 786432  for 128-tick",
-        "Disable Windows Game Mode — it adds scheduler latency",
+        "Disable Windows Game Mode, it adds scheduler latency",
         "Set Windows power plan to Ultimate Performance before launching",
     ],
 },
@@ -113,7 +113,7 @@ Game {
     presets: Presets {
         performance: Preset {
             power_plan: "high_performance", // Ultimate can cause Vanguard issues
-            description: "Lowest input lag — all visual fluff off.",
+            description: "Lowest input lag, all visual fluff off.",
             settings: &[
                 s("Display",  "Resolution",         "1920×1080 (native recommended)"),
                 s("Display",  "Display Mode",       "Fullscreen"),
@@ -147,7 +147,7 @@ Game {
         },
         quality: Preset {
             power_plan: "high_performance",
-            description: "Maximum visuals — not recommended for ranked.",
+            description: "Maximum visuals, not recommended for ranked.",
             settings: &[
                 s("Graphics", "Material Quality",   "High"),
                 s("Graphics", "Texture Quality",    "High"),
@@ -159,10 +159,10 @@ Game {
         },
     },
     tips: &[
-        "Do NOT use Ultimate Performance — can trigger Vanguard false flags",
-        "Close all overlays (Discord, Steam, GeForce) — Vanguard scans them",
+        "Do NOT use Ultimate Performance, can trigger Vanguard false flags",
+        "Close all overlays (Discord, Steam, GeForce), Vanguard scans them",
         "Cap FPS at monitor refresh + 10% to reduce GPU heat and coil whine",
-        "Use Fullscreen, not Borderless — lower input lag",
+        "Use Fullscreen, not Borderless, lower input lag",
     ],
 },
 
@@ -173,14 +173,14 @@ Game {
     presets: Presets {
         performance: Preset {
             power_plan: "ultimate",
-            description: "Max FPS — critical for tracking fast-moving targets.",
+            description: "Max FPS, critical for tracking fast-moving targets.",
             settings: &[
                 s("Display",  "Display Mode",              "Full Screen"),
                 s("Display",  "Resolution",                "1920×1080"),
                 s("Display",  "Field of View",             "110 (personal preference)"),
                 s("Display",  "V-Sync",                    "Disabled"),
                 s("Display",  "Adaptive Resolution FPS",   "0 (disabled)"),
-                s("Video",    "Texture Streaming Budget",  "Medium (2–4 GB)"),
+                s("Video",    "Texture Streaming Budget",  "Medium (2-4 GB)"),
                 s("Video",    "Texture Filtering",         "Anisotropic 2x"),
                 s("Video",    "Ambient Occlusion Quality", "Disabled"),
                 s("Video",    "Sun Shadow Coverage",       "Low"),
@@ -211,7 +211,7 @@ Game {
         },
         quality: Preset {
             power_plan: "high_performance",
-            description: "Maximum visuals — for content creation.",
+            description: "Maximum visuals, for content creation.",
             settings: &[
                 s("Video", "Texture Streaming Budget",  "Very High"),
                 s("Video", "Ambient Occlusion Quality", "High"),
@@ -226,8 +226,8 @@ Game {
     tips: &[
         "+fps_max unlimited in launch options (Origin/EA App)",
         "Adaptive Resolution FPS = 0 disables dynamic resolution which tanks clarity",
-        "Medium Ragdolls — High ragdolls visible performance hit in late-game fights",
-        "TSAA is the only AA option that doesn't look terrible — None only if FPS-starved",
+        "Medium Ragdolls, High ragdolls visible performance hit in late-game fights",
+        "TSAA is the only AA option that doesn't look terrible, None only if FPS-starved",
     ],
 },
 
@@ -238,9 +238,9 @@ Game {
     presets: Presets {
         performance: Preset {
             power_plan: "ultimate",
-            description: "Performance Mode (DX11) — maximizes FPS for competitive.",
+            description: "Performance Mode (DX11), maximizes FPS for competitive.",
             settings: &[
-                s("Display",  "Rendering Mode",       "Performance (Alpha) — DX11"),
+                s("Display",  "Rendering Mode",       "Performance (Alpha), DX11"),
                 s("Display",  "Resolution",           "1920×1080"),
                 s("Display",  "Window Mode",          "Fullscreen"),
                 s("Display",  "Frame Rate Limit",     "Uncapped or monitor Hz"),
@@ -259,7 +259,7 @@ Game {
         },
         balanced: Preset {
             power_plan: "high_performance",
-            description: "DX12 with medium settings — better visuals, still smooth.",
+            description: "DX12 with medium settings, better visuals, still smooth.",
             settings: &[
                 s("Display",  "Rendering Mode",  "DirectX 12"),
                 s("Graphics", "Shadows",         "Medium"),
@@ -272,7 +272,7 @@ Game {
         },
         quality: Preset {
             power_plan: "high_performance",
-            description: "Nanite + Lumen visuals — Unreal Engine 5 showcase.",
+            description: "Nanite + Lumen visuals, Unreal Engine 5 showcase.",
             settings: &[
                 s("Display",  "Rendering Mode",          "Unreal Engine 5 (Nanite + Lumen)"),
                 s("Graphics", "Shadows",                 "High"),
@@ -287,8 +287,8 @@ Game {
     },
     tips: &[
         "Performance Mode (DX11) gives massive FPS uplift on mid-range GPUs",
-        "View Distance Near — bush/tree density doesn't affect enemy player rendering",
-        "Disable Motion Blur — obscures targets during builds",
+        "View Distance Near, bush/tree density doesn't affect enemy player rendering",
+        "Disable Motion Blur, obscures targets during builds",
         "Add -NOTEXTURESTREAMING to launch args for sharper textures in Perf Mode",
     ],
 },
@@ -350,9 +350,9 @@ Game {
     },
     tips: &[
         "All 3 V-Sync options must be Off for lowest input lag",
-        "Texture Resolution Normal vs High — minimal FPS difference, significant VRAM delta",
-        "Depth of Field Off — blurs critical threat distances",
-        "Film Grain 0.00 — improves visual clarity significantly",
+        "Texture Resolution Normal vs High, minimal FPS difference, significant VRAM delta",
+        "Depth of Field Off, blurs critical threat distances",
+        "Film Grain 0.00, improves visual clarity significantly",
     ],
 },
 
@@ -363,13 +363,13 @@ Game {
     presets: Presets {
         performance: Preset {
             power_plan: "ultimate",
-            description: "Highest FPS — crucial for tracking fast heroes.",
+            description: "Highest FPS, crucial for tracking fast heroes.",
             settings: &[
                 s("Display",  "Display Mode",      "Fullscreen"),
                 s("Display",  "V-Sync",            "Off"),
                 s("Display",  "Triple Buffering",  "Off"),
                 s("Display",  "Reduce Buffering",  "On"),
-                s("Display",  "Frame Rate Cap",    "Custom — monitor Hz or 300"),
+                s("Display",  "Frame Rate Cap",    "Custom, monitor Hz or 300"),
                 s("Graphics", "Render Scale",      "100%"),
                 s("Graphics", "Graphics Quality",  "Low"),
                 s("Graphics", "High Quality Upsampling", "Auto (or DLAA for 4K)"),
@@ -415,10 +415,10 @@ Game {
         },
     },
     tips: &[
-        "Reduce Buffering ON — significantly lowers input lag",
-        "High Frame Rate cap > 300 — Overwatch engine benefits from very high FPS even on 144Hz",
-        "Texture Quality Medium vs High — nearly zero FPS difference",
-        "Damage FX Low — reduces visual clutter during fights",
+        "Reduce Buffering ON, significantly lowers input lag",
+        "High Frame Rate cap > 300, Overwatch engine benefits from very high FPS even on 144Hz",
+        "Texture Quality Medium vs High, nearly zero FPS difference",
+        "Damage FX Low, reduces visual clutter during fights",
     ],
 },
 
@@ -429,7 +429,7 @@ Game {
     presets: Presets {
         performance: Preset {
             power_plan: "ultimate",
-            description: "Lowest input lag — operator/gadget clarity maintained.",
+            description: "Lowest input lag, operator/gadget clarity maintained.",
             settings: &[
                 s("Display",  "Display Mode",          "Fullscreen"),
                 s("Display",  "V-Sync",                "Off"),
@@ -473,8 +473,8 @@ Game {
         },
     },
     tips: &[
-        "Texture Quality High — directly affects how clearly you read opponents through doors/windows",
-        "LOD Quality High — ensures distant operators don't pop in",
+        "Texture Quality High, directly affects how clearly you read opponents through doors/windows",
+        "LOD Quality High, ensures distant operators don't pop in",
         "T-AA recommended: removes aliasing that can obscure targets at distance",
         "Vulkan renderer (launch option) can improve FPS on some AMD/NVIDIA configs",
     ],
@@ -491,7 +491,7 @@ Game {
     presets: Presets {
         performance: Preset {
             power_plan: "high_performance",
-            description: "Stable high FPS — LoL is CPU-limited on most PCs.",
+            description: "Stable high FPS, LoL is CPU-limited on most PCs.",
             settings: &[
                 s("Video", "Resolution",           "1920×1080"),
                 s("Video", "Window Mode",          "Fullscreen"),
@@ -529,9 +529,9 @@ Game {
         },
     },
     tips: &[
-        "Character Quality affects spell hit-box visibility — never lower than Medium",
+        "Character Quality affects spell hit-box visibility, never lower than Medium",
         "Frame rate cap above your monitor Hz reduces GPU usage while maintaining performance",
-        "LoL is primarily single-threaded — CPU clock speed matters more than core count",
+        "LoL is primarily single-threaded, CPU clock speed matters more than core count",
     ],
 },
 
@@ -584,8 +584,8 @@ Game {
         },
     },
     tips: &[
-        "Vulkan API typically outperforms DX11/DX9 on Dota 2 by 10–20%",
-        "Game Screen Render Quality 100% — reducing it makes heroes hard to identify",
+        "Vulkan API typically outperforms DX11/DX9 on Dota 2 by 10-20%",
+        "Game Screen Render Quality 100%, reducing it makes heroes hard to identify",
     ],
 },
 
@@ -600,7 +600,7 @@ Game {
     presets: Presets {
         performance: Preset {
             power_plan: "ultimate",
-            description: "Stable 60+ FPS — no ray tracing, DLSS Performance.",
+            description: "Stable 60+ FPS, no ray tracing, DLSS Performance.",
             settings: &[
                 s("Display",   "Resolution",                "Native or DLSS/FSR output"),
                 s("Display",   "V-Sync",                   "Off"),
@@ -635,7 +635,7 @@ Game {
         },
         quality: Preset {
             power_plan: "ultimate",
-            description: "Path Tracing (Overdrive) — RTX 4080+ / RTX 3090 only.",
+            description: "Path Tracing (Overdrive), RTX 4080+ / RTX 3090 only.",
             settings: &[
                 s("Graphics",  "Ray Tracing",          "Overdrive (Path Tracing)"),
                 s("Graphics",  "Texture Quality",      "Ultra"),
@@ -649,9 +649,9 @@ Game {
         },
     },
     tips: &[
-        "Film Grain / Chromatic Aberration / DOF off — massive clarity improvement with zero FPS cost",
+        "Film Grain / Chromatic Aberration / DOF off, massive clarity improvement with zero FPS cost",
         "Frame Generation requires RTX 4000 (DLSS3) or RX 7000 / RTX 3000+ (FSR3)",
-        "Texture Quality High vs Ultra — minimal FPS delta, big VRAM delta (use High on <12 GB)",
+        "Texture Quality High vs Ultra, minimal FPS delta, big VRAM delta (use High on <12 GB)",
         "Disable HDD-based city streaming stutter: enable ReBAR / Smart Access Memory in BIOS",
     ],
 },
@@ -663,7 +663,7 @@ Game {
     presets: Presets {
         performance: Preset {
             power_plan: "ultimate",
-            description: "Stable 60 FPS — game engine caps at 60 natively.",
+            description: "Stable 60 FPS, game engine caps at 60 natively.",
             settings: &[
                 s("Graphics", "Texture Quality",  "Maximum"),
                 s("Graphics", "Anti-Aliasing",    "High"),
@@ -703,8 +703,8 @@ Game {
         },
     },
     tips: &[
-        "Texture Quality Maximum — negligible performance impact, huge visual improvement",
-        "Motion Blur Off — essential: obscures parry timing windows",
+        "Texture Quality Maximum, negligible performance impact, huge visual improvement",
+        "Motion Blur Off, essential: obscures parry timing windows",
         "Use the community FPS Unlocker mod to break the 60 FPS cap (120 FPS gameplay at higher Hz)",
         "Depth of Field on Medium: the game uses DOF as a gameplay cue for item highlights",
     ],
@@ -717,7 +717,7 @@ Game {
     presets: Presets {
         performance: Preset {
             power_plan: "high_performance",
-            description: "Stable 60+ FPS in Online — avoids memory leak stutter.",
+            description: "Stable 60+ FPS in Online, avoids memory leak stutter.",
             settings: &[
                 s("Graphics", "DirectX Version",            "DX11"),
                 s("Graphics", "Screen Type",                "Fullscreen"),
@@ -768,7 +768,7 @@ Game {
         },
     },
     tips: &[
-        "Texture Quality Very High requires 6+ GB VRAM — use Normal/High on <8 GB",
+        "Texture Quality Very High requires 6+ GB VRAM, use Normal/High on <8 GB",
         "GTA Online stutter: disable cloud saves and set texture quality to Normal/High (not Very High)",
         "Population Density above 75% significantly increases CPU load in Online sessions",
     ],
@@ -781,7 +781,7 @@ Game {
     presets: Presets {
         performance: Preset {
             power_plan: "ultimate",
-            description: "Stable FPS during raids — stutter costs lives in EFT.",
+            description: "Stable FPS during raids, stutter costs lives in EFT.",
             settings: &[
                 s("Graphics", "Screen Resolution",      "1920×1080"),
                 s("Graphics", "Screen Mode",            "Fullscreen"),
@@ -793,7 +793,7 @@ Game {
                 s("Graphics", "Overall Visibility",     "1000"),
                 s("Graphics", "Shadow Quality",         "Low"),
                 s("Graphics", "Texture Quality",        "High (enemy visibility)"),
-                s("Graphics", "Sharpness",              "1.3–1.6"),
+                s("Graphics", "Sharpness",              "1.3-1.6"),
                 s("Graphics", "Anisotropic Filtering",  "Per Texture"),
                 s("Graphics", "SSAO",                   "Disabled"),
                 s("Graphics", "Contact Shadows",        "Disabled"),
@@ -825,11 +825,11 @@ Game {
         },
     },
     tips: &[
-        "Clear shader cache folder before major updates — eliminates first-raid stutter",
-        "Texture Quality High regardless of preset — affects enemy/loot identification",
+        "Clear shader cache folder before major updates, eliminates first-raid stutter",
+        "Texture Quality High regardless of preset, affects enemy/loot identification",
         "Shadow Visibility 40m is optimal: further shadows add CPU cost with no gameplay benefit",
         "Disable GeForce overlay, Discord overlay, and all background recording during raids",
-        "LOD 2 is sweet spot — LOD 1 causes visible pop-in on scoped shots",
+        "LOD 2 is sweet spot, LOD 1 causes visible pop-in on scoped shots",
     ],
 },
 
@@ -842,7 +842,7 @@ Game {
             power_plan: "ultimate",
             description: "Stable FPS in large bases and combat zones.",
             settings: &[
-                s("Graphics", "Graphics Quality",  "0–1"),
+                s("Graphics", "Graphics Quality",  "0-1"),
                 s("Graphics", "Shadow Quality",    "0"),
                 s("Graphics", "Shadow Cascades",   "0"),
                 s("Graphics", "Shadow Distance",   "0"),
@@ -889,7 +889,7 @@ Game {
         },
     },
     tips: &[
-        "Grass Quality 0 is contentious — provides visibility advantage but not bannable",
+        "Grass Quality 0 is contentious, provides visibility advantage but not bannable",
         "Max Gibs 0 eliminates the GPU spike from explosive/death effects",
         "Object Quality 100 is minimum to see player models clearly at distance",
         "Use F2 console: gfx.ssaa false, gfx.taa true for cleaner AA with less performance cost",
@@ -903,9 +903,9 @@ Game {
     presets: Presets {
         performance: Preset {
             power_plan: "high_performance",
-            description: "High FPS with Sodium/OptiFine — smooth multiplayer and redstone.",
+            description: "High FPS with Sodium/OptiFine, smooth multiplayer and redstone.",
             settings: &[
-                s("Video",  "Render Distance",          "8–12 chunks"),
+                s("Video",  "Render Distance",          "8-12 chunks"),
                 s("Video",  "Simulation Distance",      "8 chunks"),
                 s("Video",  "Max Framerate",            "Uncapped or 2× monitor Hz"),
                 s("Video",  "Smooth Lighting",          "Off"),
@@ -925,7 +925,7 @@ Game {
             power_plan: "high_performance",
             description: "Good performance with Optifine-level shaders.",
             settings: &[
-                s("Video",  "Render Distance",    "12–16 chunks"),
+                s("Video",  "Render Distance",    "12-16 chunks"),
                 s("Video",  "Smooth Lighting",    "On"),
                 s("Video",  "Clouds",             "Fancy"),
                 s("Video",  "Mipmap Levels",      "4"),
@@ -935,9 +935,9 @@ Game {
         },
         quality: Preset {
             power_plan: "balanced",
-            description: "Cinematic shaders — screenshot and video quality.",
+            description: "Cinematic shaders, screenshot and video quality.",
             settings: &[
-                s("Video",  "Render Distance",    "20–32 chunks"),
+                s("Video",  "Render Distance",    "20-32 chunks"),
                 s("Shaders","Shader Pack",        "BSL or Complementary (high preset)"),
                 s("Shaders","Shadows",            "2048+ resolution"),
                 s("JVM",    "RAM Allocation",     "-Xmx10G"),
@@ -945,10 +945,10 @@ Game {
         },
     },
     tips: &[
-        "Sodium (Fabric) outperforms OptiFine on modern Java — 2–3× FPS improvement",
-        "Allocate 6 GB RAM max — over-allocation causes GC pauses (worse than too little)",
+        "Sodium (Fabric) outperforms OptiFine on modern Java, 2-3× FPS improvement",
+        "Allocate 6 GB RAM max, over-allocation causes GC pauses (worse than too little)",
         "-XX:+UseG1GC -XX:G1NewSizePercent=20 -XX:G1ReservePercent=20 JVM flags for smoother GC",
-        "Simulation Distance separate from Render Distance — keep simulation lower than render",
+        "Simulation Distance separate from Render Distance, keep simulation lower than render",
     ],
 },
 
@@ -959,7 +959,7 @@ Game {
     presets: Presets {
         performance: Preset {
             power_plan: "ultimate",
-            description: "Maximum FPS — enemy visibility is paramount.",
+            description: "Maximum FPS, enemy visibility is paramount.",
             settings: &[
                 s("Display",  "Screen Mode",               "Fullscreen"),
                 s("Display",  "Display Resolution",        "1920×1080"),
@@ -1004,10 +1004,10 @@ Game {
         },
     },
     tips: &[
-        "Textures Ultra + View Distance Ultra — these two have the biggest gameplay impact regardless of preset",
+        "Textures Ultra + View Distance Ultra, these two have the biggest gameplay impact regardless of preset",
         "Anti-Aliasing Ultra in PUBG actually runs faster than lower settings due to UE4 implementation",
         "Foliage Very Low: significant FPS gain, reduces hiding spots (not bannable, server-side)",
-        "Motion Blur Off — reduces target tracking clarity significantly",
+        "Motion Blur Off, reduces target tracking clarity significantly",
     ],
 },
 
@@ -1018,7 +1018,7 @@ Game {
     presets: Presets {
         performance: Preset {
             power_plan: "ultimate",
-            description: "Stable 60 FPS — RDR2 is CPU-limited in towns.",
+            description: "Stable 60 FPS, RDR2 is CPU-limited in towns.",
             settings: &[
                 s("Display",  "VSync",                    "Off"),
                 s("Display",  "Triple Buffering",         "Off"),
@@ -1068,10 +1068,10 @@ Game {
         },
     },
     tips: &[
-        "Texture Quality Ultra — uses VRAM but no performance hit on 8+ GB",
-        "Frame Rate Cap 60 — game engine is optimized for 60; uncapped causes physics quirks",
+        "Texture Quality Ultra, uses VRAM but no performance hit on 8+ GB",
+        "Frame Rate Cap 60, game engine is optimized for 60; uncapped causes physics quirks",
         "Vulkan API generally outperforms DX12 on NVIDIA hardware",
-        "Towns like Saint Denis are CPU-bound — no GPU setting will help there",
+        "Towns like Saint Denis are CPU-bound, no GPU setting will help there",
     ],
 },
 
@@ -1133,9 +1133,9 @@ Game {
         },
     },
     tips: &[
-        "Future Frame Rendering On — reduces CPU-bottleneck stutter in large battles",
-        "Film Grain / Chromatic Aberration / Vignette all Off — increases visual clarity with no FPS cost",
-        "Undergrowth Quality Low — biggest single FPS gain setting in BF2042",
+        "Future Frame Rendering On, reduces CPU-bottleneck stutter in large battles",
+        "Film Grain / Chromatic Aberration / Vignette all Off, increases visual clarity with no FPS cost",
+        "Undergrowth Quality Low, biggest single FPS gain setting in BF2042",
     ],
 },
 

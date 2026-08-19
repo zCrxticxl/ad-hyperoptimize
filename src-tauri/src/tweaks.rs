@@ -39,12 +39,12 @@ pub enum Action {
 /// How a `Cmd` action captures its pre-apply state to build an exact revert.
 #[derive(Clone, Serialize)]
 pub enum ShowCapture {
-    /// `powercfg /getactivescheme` — revert reactivates the captured scheme.
+    /// `powercfg /getactivescheme`, revert reactivates the captured scheme.
     PowerScheme,
-    /// `Get-NetTCPSetting AutoTuningLevelLocal` — revert maps the enum value
+    /// `Get-NetTCPSetting AutoTuningLevelLocal`, revert maps the enum value
     /// (English on every locale) back to the netsh token.
     TcpAutotuning,
-    /// Registry `HibernateEnabled` — revert restores hibernation exactly.
+    /// Registry `HibernateEnabled`, revert restores hibernation exactly.
     HibernateState,
 }
 
@@ -80,7 +80,7 @@ fn capture_revert(cap: &ShowCapture) -> Option<String> {
             parse_power_scheme(&out)
         }
         ShowCapture::TcpAutotuning => {
-            // Get-NetTCPSetting is a PowerShell cmdlet, not an executable —
+            // Get-NetTCPSetting is a PowerShell cmdlet, not an executable -
             // it must run through ps::run (run_cmdline would try to spawn it
             // directly and fail).
             let out = crate::ps::run(
@@ -250,7 +250,7 @@ pub fn catalog() -> Vec<Tweak> {
             name: "Faster menu response",
             category: "Responsiveness",
             description: "Reduces MenuShowDelay from 400ms to 100ms.",
-            rationale: "Pure artificial delay before menus open; lowering it makes the shell feel faster at zero cost. (Don't set 0 — hover menus become twitchy.)",
+            rationale: "Pure artificial delay before menus open; lowering it makes the shell feel faster at zero cost. (Don't set 0, hover menus become twitchy.)",
             impact: "UI feels snappier.",
             risk: "Low",
             requires_admin: false,
@@ -289,7 +289,7 @@ pub fn catalog() -> Vec<Tweak> {
             name: "Disable mouse acceleration (Enhance Pointer Precision)",
             category: "Gaming",
             description: "Sets MouseSpeed/Threshold1/Threshold2 to 0.",
-            rationale: "Acceleration makes cursor distance depend on speed — bad for aim consistency. Esports-standard tweak.",
+            rationale: "Acceleration makes cursor distance depend on speed, bad for aim consistency. Esports-standard tweak.",
             impact: "1:1 mouse input. Cursor feel changes; takes adjustment.",
             risk: "Low",
             requires_admin: false,
@@ -337,8 +337,8 @@ pub fn catalog() -> Vec<Tweak> {
             name: "Hardware-Accelerated GPU Scheduling (HAGS)",
             category: "Gaming",
             description: "Sets HwSchMode=2, letting the GPU manage its own scheduling queue. REBOOT REQUIRED.",
-            rationale: "Offloads frame scheduling from CPU to a dedicated GPU scheduler — reduces latency on modern GPUs (NVIDIA 10-series+/AMD RDNA+), and is required for DLSS 3 Frame Generation.",
-            impact: "Slightly lower latency on modern GPUs. Requires reboot. On very old GPUs/drivers it can hurt — benchmark before/after.",
+            rationale: "Offloads frame scheduling from CPU to a dedicated GPU scheduler, reduces latency on modern GPUs (NVIDIA 10-series+/AMD RDNA+), and is required for DLSS 3 Frame Generation.",
+            impact: "Slightly lower latency on modern GPUs. Requires reboot. On very old GPUs/drivers it can hurt, benchmark before/after.",
             risk: "Medium",
             requires_admin: true,
             reversible: true,
@@ -349,7 +349,7 @@ pub fn catalog() -> Vec<Tweak> {
             name: "Foreground priority boost (Win32PrioritySeparation 0x26)",
             category: "Gaming",
             description: "Sets scheduler quanta to short, fixed, 3:1 foreground boost.",
-            rationale: "Default Windows gives the foreground app a variable boost; 0x26 makes quanta short and fixed with maximum foreground bias — the classic esports scheduler tweak, keeping the game responsive when background tasks fire.",
+            rationale: "Default Windows gives the foreground app a variable boost; 0x26 makes quanta short and fixed with maximum foreground bias, the classic esports scheduler tweak, keeping the game responsive when background tasks fire.",
             impact: "More consistent foreground frametimes under background load.",
             risk: "Medium",
             requires_admin: true,
@@ -362,7 +362,7 @@ pub fn catalog() -> Vec<Tweak> {
             category: "Gaming",
             description: "Globally disables Windows power throttling of background processes. REBOOT RECOMMENDED.",
             rationale: "EcoQoS forces processes onto efficiency states/E-cores; it sometimes misclassifies game launchers, overlays, OBS or anti-cheat helpers, starving them mid-game.",
-            impact: "No process gets force-throttled. Higher idle power draw — skip on laptops running on battery.",
+            impact: "No process gets force-throttled. Higher idle power draw, skip on laptops running on battery.",
             risk: "Medium",
             requires_admin: true,
             reversible: true,
@@ -390,7 +390,7 @@ pub fn catalog() -> Vec<Tweak> {
             name: "Disable Multiplane Overlay (MPO)",
             category: "Gaming",
             description: "Sets DWM OverlayTestMode=5, disabling multiplane overlays. REBOOT REQUIRED.",
-            rationale: "MPO causes stutter, flicker and black-screen glitches on a range of GPU/monitor combos — both NVIDIA and AMD have historically recommended this exact toggle as the workaround.",
+            rationale: "MPO causes stutter, flicker and black-screen glitches on a range of GPU/monitor combos, both NVIDIA and AMD have historically recommended this exact toggle as the workaround.",
             impact: "Fixes MPO-related flicker/stutter if present. Slightly higher DWM GPU load. Only apply if you see flicker/stutter; undo if no change.",
             risk: "Medium",
             requires_admin: true,
@@ -417,7 +417,7 @@ pub fn catalog() -> Vec<Tweak> {
             name: "Disable Transparency Effects",
             category: "Responsiveness",
             description: "Disables acrylic/blur transparency in taskbar, Start menu, and windows.",
-            rationale: "Blur effects permanently consume GPU time (DWM) — measurable on iGPUs and weaker cards.",
+            rationale: "Blur effects permanently consume GPU time (DWM), measurable on iGPUs and weaker cards.",
             impact: "Lower DWM GPU load; UI looks more plain.",
             risk: "Low",
             requires_admin: false,
@@ -441,7 +441,7 @@ pub fn catalog() -> Vec<Tweak> {
             name: "Disable Web Search in Start Menu",
             category: "Privacy",
             description: "Start menu search shows only local results (no Bing suggestions).",
-            rationale: "Every keystroke in Start search otherwise goes to Bing — adds latency and data leakage.",
+            rationale: "Every keystroke in Start search otherwise goes to Bing, adds latency and data leakage.",
             impact: "Faster, purely local Start menu search.",
             risk: "Low",
             requires_admin: false,
@@ -479,7 +479,7 @@ pub fn catalog() -> Vec<Tweak> {
             id: "delivery_opt_off",
             name: "Disable Update P2P (Delivery Optimization)",
             category: "Network",
-            description: "Sets DODownloadMode=0 — updates come only from Microsoft, no peer-to-peer.",
+            description: "Sets DODownloadMode=0, updates come only from Microsoft, no peer-to-peer.",
             rationale: "Windows otherwise uploads updates to other PCs (upload bandwidth!) and keeps a disk cache.",
             impact: "No upload consumption from Windows Update; slightly slower update downloads possible.",
             risk: "Medium",
@@ -492,7 +492,7 @@ pub fn catalog() -> Vec<Tweak> {
             name: "Disable Windows Error Reporting",
             category: "Background",
             description: "Disables automatic crash report collection and upload.",
-            rationale: "WER writes crash dumps to disk and uploads them — I/O spikes exactly when the system is already struggling.",
+            rationale: "WER writes crash dumps to disk and uploads them, I/O spikes exactly when the system is already struggling.",
             impact: "No more WER dumps/uploads. Downside: less crash diagnostic data if you debug yourself.",
             risk: "Medium",
             requires_admin: true,
@@ -504,7 +504,7 @@ pub fn catalog() -> Vec<Tweak> {
             name: "Disable Activity History (Timeline)",
             category: "Privacy",
             description: "Stops logging app/document activity (PublishUserActivities=0).",
-            rationale: "Every opened app/file is otherwise written to the activity database — background I/O and data collection.",
+            rationale: "Every opened app/file is otherwise written to the activity database, background I/O and data collection.",
             impact: "Fewer background writes; Win+Tab Timeline stays empty.",
             risk: "Medium",
             requires_admin: true,
@@ -534,9 +534,9 @@ pub fn catalog() -> Vec<Tweak> {
             id: "fast_startup_off",
             name: "Disable Fast Startup",
             category: "Power",
-            description: "Disables hiberboot — Shutdown performs a full cold shutdown.",
+            description: "Disables hiberboot, Shutdown performs a full cold shutdown.",
             rationale: "Fast Startup freezes the kernel instead of restarting: driver issues survive reboots, dual-boot setups get corrupted, uptime grows indefinitely. A real cold boot fixes more than it costs.",
-            impact: "Boot ~5–15s slower, but a fresh kernel state every time. Hibernate itself remains available.",
+            impact: "Boot ~5-15s slower, but a fresh kernel state every time. Hibernate itself remains available.",
             risk: "Medium",
             requires_admin: true,
             reversible: true,
@@ -547,7 +547,7 @@ pub fn catalog() -> Vec<Tweak> {
             name: "Keep Kernel in RAM (DisablePagingExecutive)",
             category: "Memory",
             description: "Prevents kernel code and drivers from being paged out to the swap file.",
-            rationale: "By default Windows can write kernel pages to disk. With ≥8 GB RAM this only adds latency when kernel code is read back — disabling keeps everything in RAM.",
+            rationale: "By default Windows can write kernel pages to disk. With ≥8 GB RAM this only adds latency when kernel code is read back, disabling keeps everything in RAM.",
             impact: "Lower kernel call latency; marginally higher RAM usage (~50 MB). Do not apply on systems with less than 8 GB RAM.",
             risk: "Medium",
             requires_admin: true,
@@ -559,7 +559,7 @@ pub fn catalog() -> Vec<Tweak> {
             name: "Disable CPU Core Parking",
             category: "Gaming",
             description: "Keeps all CPU cores permanently active (Core Parking Min Cores = 100%). REBOOT RECOMMENDED.",
-            rationale: "Windows parks cores at idle to save power. Waking parked cores takes a few milliseconds — visible as frametime spikes on first load increase in a game.",
+            rationale: "Windows parks cores at idle to save power. Waking parked cores takes a few milliseconds, visible as frametime spikes on first load increase in a game.",
             impact: "Lower startup frametimes and fewer latency spikes; slightly higher idle power draw (negligible on desktop, noticeable on laptop battery).",
             risk: "Medium",
             requires_admin: true,
@@ -595,7 +595,7 @@ pub fn catalog() -> Vec<Tweak> {
             name: "Disable 8.3 Short Names (DOS compatibility)",
             category: "Storage",
             description: "Stops automatic generation of 8.3 short names (e.g. PROGRA~1) for new files.",
-            rationale: "On every file creation NTFS checks if an 8.3 short name must be generated — unnecessary overhead; no modern program needs this legacy compatibility.",
+            rationale: "On every file creation NTFS checks if an 8.3 short name must be generated, unnecessary overhead; no modern program needs this legacy compatibility.",
             impact: "Faster file creation in large directories; no 8.3 names for newly created files.",
             risk: "Low",
             requires_admin: true,
@@ -612,7 +612,7 @@ pub fn catalog() -> Vec<Tweak> {
             name: "Set Xbox Background Services to Manual",
             category: "Services",
             description: "Sets XblAuthManager, XblGameSave, and XboxNetApiSvc to Manual.",
-            rationale: "These services run permanently but are only needed for Xbox Live multiplayer and Game Pass cloud sync — most PC gamers without an Xbox account never use them.",
+            rationale: "These services run permanently but are only needed for Xbox Live multiplayer and Game Pass cloud sync, most PC gamers without an Xbox account never use them.",
             impact: "Less idle RAM and service overhead. Xbox Live auth and cloud saves must be set back to Automatic if needed.",
             risk: "Medium",
             requires_admin: true,
@@ -628,7 +628,7 @@ pub fn catalog() -> Vec<Tweak> {
             name: "Disable Remote Registry",
             category: "Services",
             description: "Sets the RemoteRegistry service to Disabled.",
-            rationale: "Allows external programs to access the registry over the network — a known attack vector that home users never need.",
+            rationale: "Allows external programs to access the registry over the network, a known attack vector that home users never need.",
             impact: "Improved security; no more remote registry access over the network.",
             risk: "Low",
             requires_admin: true,
@@ -640,7 +640,7 @@ pub fn catalog() -> Vec<Tweak> {
             name: "Disable Cortana (Policy)",
             category: "Privacy",
             description: "Sets AllowCortana=0 via policy.",
-            rationale: "Cortana runs as a background process, sends voice metrics, and permanently uses RAM — no value for most users.",
+            rationale: "Cortana runs as a background process, sends voice metrics, and permanently uses RAM, no value for most users.",
             impact: "No more Cortana process; less data transfer to Microsoft.",
             risk: "Low",
             requires_admin: true,
@@ -652,7 +652,7 @@ pub fn catalog() -> Vec<Tweak> {
             name: "Disable Edge Preloading (Startup Boost)",
             category: "Startup",
             description: "Prevents Edge from silently preloading in the background on Windows startup.",
-            rationale: "Edge auto-starts in the background on boot to open faster on first use — costs RAM even when Edge is never used.",
+            rationale: "Edge auto-starts in the background on boot to open faster on first use, costs RAM even when Edge is never used.",
             impact: "Less RAM usage after boot; Edge opens slightly slower on first launch.",
             risk: "Low",
             requires_admin: false,
@@ -667,7 +667,7 @@ pub fn catalog() -> Vec<Tweak> {
             name: "Disable Search Highlights & Trending Content",
             category: "Privacy",
             description: "Disables dynamic news and trending content in the Windows search box.",
-            rationale: "The search box downloads new highlight content daily and shows it on open — background traffic and distraction with no value.",
+            rationale: "The search box downloads new highlight content daily and shows it on open, background traffic and distraction with no value.",
             impact: "No network fetching by the search box; calmer, faster search box.",
             risk: "Low",
             requires_admin: false,
@@ -694,7 +694,7 @@ pub fn catalog() -> Vec<Tweak> {
             name: "Disable Fax Service",
             category: "Services",
             description: "Sets the Fax service to Disabled.",
-            rationale: "Virtually no one uses Windows Fax. The service loads drivers and waits for fax lines — pure waste.",
+            rationale: "Virtually no one uses Windows Fax. The service loads drivers and waits for fax lines, pure waste.",
             impact: "One fewer starting service. Fax functionality removed (reversible).",
             risk: "Low",
             requires_admin: true,
@@ -718,7 +718,7 @@ pub fn catalog() -> Vec<Tweak> {
             name: "Disable Windows Media Player Network Sharing",
             category: "Services",
             description: "Sets WMPNetworkSvc to Disabled.",
-            rationale: "Shares media over DLNA/UPnP on the home network — hardly anyone uses this through Windows itself. Unnecessary service + network listener.",
+            rationale: "Shares media over DLNA/UPnP on the home network, hardly anyone uses this through Windows itself. Unnecessary service + network listener.",
             impact: "No more DLNA streaming via Windows Media Player.",
             risk: "Low",
             requires_admin: true,
@@ -743,7 +743,7 @@ pub fn catalog() -> Vec<Tweak> {
             category: "Services",
             description: "Sets TrkWks to Disabled.",
             rationale: "Tracks NTFS links across network drives (legacy enterprise feature). On home systems it runs completely for nothing.",
-            impact: "Broken shortcuts over network drives won't be auto-repaired — affects home users virtually never.",
+            impact: "Broken shortcuts over network drives won't be auto-repaired, affects home users virtually never.",
             risk: "Low",
             requires_admin: true,
             reversible: true,
@@ -767,7 +767,7 @@ pub fn catalog() -> Vec<Tweak> {
             category: "Privacy",
             description: "Sets diagnosticshub.standardcollector.service to Disabled.",
             rationale: "Collects runtime diagnostic traces for Microsoft Visual Studio and Windows Diagnostics. Unnecessary on non-developer systems.",
-            impact: "Visual Studio diagnostic tools stop working — irrelevant for normal gaming/desktop use.",
+            impact: "Visual Studio diagnostic tools stop working, irrelevant for normal gaming/desktop use.",
             risk: "Low",
             requires_admin: true,
             reversible: true,
@@ -790,7 +790,7 @@ pub fn catalog() -> Vec<Tweak> {
             name: "Disable Nagle's Algorithm",
             category: "Network",
             description: "Sets TcpAckFrequency=1 and TCPNoDelay=1 on all network adapters, eliminating Nagle's packet-coalescing delay.",
-            rationale: "Nagle batches small TCP packets to reduce overhead — great for throughput, terrible for latency. Disabling it cuts ping spikes in competitive games.",
+            rationale: "Nagle batches small TCP packets to reduce overhead, great for throughput, terrible for latency. Disabling it cuts ping spikes in competitive games.",
             impact: "Lower ping variance and reduced input-to-server latency in online games.",
             risk: "Low",
             requires_admin: true,
@@ -835,8 +835,8 @@ pub fn catalog() -> Vec<Tweak> {
             id: "qos_bandwidth_free",
             name: "Set QoS NonBestEffortLimit to 0",
             category: "Network",
-            description: "Sets NonBestEffortLimit to 0. Note: this does NOT free up 20% bandwidth — that is a long-standing myth.",
-            rationale: "The '20% reserved bandwidth' claim is false. Per Microsoft, the QoS Packet Scheduler only limits bandwidth for apps that actively use the QoS API; if none do, 100% is already available to normal traffic. Setting NonBestEffortLimit=0 therefore has no measurable effect for typical users. Included only for completeness — expect no real-world gain.",
+            description: "Sets NonBestEffortLimit to 0. Note: this does NOT free up 20% bandwidth, that is a long-standing myth.",
+            rationale: "The '20% reserved bandwidth' claim is false. Per Microsoft, the QoS Packet Scheduler only limits bandwidth for apps that actively use the QoS API; if none do, 100% is already available to normal traffic. Setting NonBestEffortLimit=0 therefore has no measurable effect for typical users. Included only for completeness, expect no real-world gain.",
             impact: "No measurable change for normal use. The reserved bandwidth is already available when no QoS-aware app requests it.",
             risk: "Low",
             requires_admin: true,
@@ -868,7 +868,7 @@ pub fn catalog() -> Vec<Tweak> {
             name: "Enable Receive Side Scaling (RSS)",
             category: "Network",
             description: "Ensures RSS is enabled so network interrupts are spread across CPU cores instead of hammering core 0.",
-            rationale: "Without RSS, all NIC interrupts fire on a single core. On a 16-core gaming rig that's a wasted opportunity — RSS distributes load and reduces per-core latency spikes.",
+            rationale: "Without RSS, all NIC interrupts fire on a single core. On a 16-core gaming rig that's a wasted opportunity, RSS distributes load and reduces per-core latency spikes.",
             impact: "Lower CPU-side network latency; fewer frame drops when download/upload peaks.",
             risk: "Low",
             requires_admin: true,
@@ -946,7 +946,7 @@ fn service_set_start(name: &str, mode: &str) -> Result<(), String> {
         return Ok(());
     }
     // If the service doesn't exist (e.g. the VS diagnostics hub collector on a
-    // non-developer machine), there's nothing to disable — treat as success
+    // non-developer machine), there's nothing to disable, treat as success
     // instead of surfacing a scary "service not found" PowerShell error.
     crate::ps::run(&format!(
         "$s = Get-Service -Name '{name}' -ErrorAction SilentlyContinue; if (-not $s) {{ 'ABSENT' }} else {{ Set-Service -Name '{name}' -StartupType {mode} -ErrorAction Stop; 'OK' }}"
@@ -992,7 +992,7 @@ fn service_default(name: &str) -> &'static str {
         "MapsBroker" => "Automatic",
         "TrkWks" => "Automatic",
         "WSearch" => "Automatic",
-        // These are Manual by default — our tweak sets them to Disabled.
+        // These are Manual by default, our tweak sets them to Disabled.
         "XblAuthManager"
         | "XblGameSave"
         | "XboxNetApiSvc"
@@ -1015,7 +1015,7 @@ pub fn list_with_status() -> Value {
             let undoable = journal.iter().any(|e| e.tweak_id == t.id && !e.reverted);
             // Cmd-only tweaks (powercfg/fsutil/netsh one-shots) have no live
             // state detect_status() can read back, so it always returns
-            // "unknown" — fall back to the journal: a successful, unreverted
+            // "unknown", fall back to the journal: a successful, unreverted
             // apply means it IS applied, even though we can't re-verify it.
             let live = detect_status(t);
             let status = match live {
@@ -1024,7 +1024,7 @@ pub fn list_with_status() -> Value {
             };
             // canUndo: true when we have a journal entry (precise restore with
             // saved previous values) OR when live detection confirms the tweak
-            // is currently active — covers the "app reinstalled / journal lost"
+            // is currently active, covers the "app reinstalled / journal lost"
             // case for all RegSet + Service tweaks. Cmd-only tweaks return
             // "unknown" from detect_status so they still require the journal.
             let can_undo = undoable || live == "applied";
@@ -1105,7 +1105,7 @@ pub fn apply(tweak_id: &str) -> Result<Value, String> {
         if let Action::RegSet { root, path, .. } = a {
             match safety::backup_registry_key(root, path) {
                 Ok(f) => backups.push(f),
-                Err(_) => { /* key may not exist yet — journal still holds prev=None */ }
+                Err(_) => { /* key may not exist yet, journal still holds prev=None */ }
             }
         }
     }
@@ -1234,7 +1234,7 @@ pub(crate) fn revert_item(item: &ChangeItem) -> Result<(), String> {
 ///   • Service → resets to the known Windows default startup type
 ///   • Cmd     → executes the catalog's revert command
 /// Cmd-only tweaks (powercfg / fsutil) with no live detection still require a
-/// journal entry — if the journal is gone for those, return an error telling
+/// journal entry, if the journal is gone for those, return an error telling
 /// the user to apply-then-undo.
 pub fn revert(tweak_id: &str) -> Result<Value, String> {
     // ── 1. Journal path (precise: uses saved previous values + reg backups) ──
@@ -1264,7 +1264,7 @@ pub fn revert(tweak_id: &str) -> Result<Value, String> {
         return Ok(json!({ "entryId": id, "status": "reverted" }));
     }
 
-    // ── 2. Force-revert path (no journal — synthesize from catalog + live state) ──
+    // ── 2. Force-revert path (no journal, synthesize from catalog + live state) ──
     let t = catalog()
         .into_iter()
         .find(|t| t.id == tweak_id)
@@ -1272,11 +1272,11 @@ pub fn revert(tweak_id: &str) -> Result<Value, String> {
 
     let live = detect_status(&t);
     if live == "not_applied" {
-        return Err("tweak is not currently active — nothing to undo".into());
+        return Err("tweak is not currently active, nothing to undo".into());
     }
     if live == "unknown" {
         // Cmd-only tweak: we have no live signal. Running the revert command
-        // blind is still safe — offer it anyway so users who applied these
+        // blind is still safe, offer it anyway so users who applied these
         // manually (or lost the journal) can still reset.
         let mut errs = Vec::new();
         for a in t.actions.iter().rev() {
@@ -1324,7 +1324,7 @@ pub fn revert(tweak_id: &str) -> Result<Value, String> {
     }
 }
 
-/// Undo one specific journal entry by its id — the "restore token" handed
+/// Undo one specific journal entry by its id, the "restore token" handed
 /// back by any apply-style call (e.g. Quick Boost). Unlike `revert(tweak_id)`,
 /// which always targets the *latest* entry for a tweak id, this targets an
 /// exact entry, so callers that can have multiple concurrent instances active
@@ -1370,7 +1370,7 @@ mod tests {
             parse_power_scheme(out),
             Some("powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c".into())
         );
-        // German locale — header differs, GUID is the only reliable token
+        // German locale, header differs, GUID is the only reliable token
         let de = "Energieschema-GUID: 381b4222-f694-41f0-9685-ff5bb260df2e (Ausbalanciert)";
         assert_eq!(
             parse_power_scheme(de),
