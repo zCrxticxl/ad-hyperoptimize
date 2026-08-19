@@ -73,6 +73,23 @@ pub fn data_or(key: &str, force: bool, f: impl FnOnce() -> Value) -> Value {
     get_or(key, force, f)["data"].clone()
 }
 
+/// Delete every cached scan file. Returns how many were removed.
+pub fn clear() -> Result<usize, String> {
+    let dir = cache_dir();
+    let mut removed = 0;
+    if let Ok(rd) = fs::read_dir(&dir) {
+        for entry in rd.flatten() {
+            let p = entry.path();
+            if p.extension().and_then(|e| e.to_str()) == Some("json") {
+                if fs::remove_file(&p).is_ok() {
+                    removed += 1;
+                }
+            }
+        }
+    }
+    Ok(removed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::is_safe_cache_key;

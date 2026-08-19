@@ -160,6 +160,7 @@ export const api = {
   analyze: (force = false) => invoke<any>("cmd_analyze", { force }),
   generateReport: () => invoke<any>("cmd_generate_report"),
   openPath: (path: string) => invoke("cmd_open_path", { path }),
+  clearCache: () => invoke<string>("cmd_clear_cache"),
   // game profiles / auto-switcher
   gameList: () => invoke<any[]>("cmd_game_list"),
   gameSwitcherStatus: () => invoke<any>("cmd_game_switcher_status"),
