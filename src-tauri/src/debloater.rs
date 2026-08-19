@@ -306,12 +306,19 @@ pub fn list_tweaks() -> Value {
         .iter()
         .enumerate()
         .map(|(i, t)| {
+            let live = states.get(i).copied().unwrap_or(false);
+            // A tweak we successfully applied always has a captured state file.
+            // The live registry check can be flaky on some systems (value
+            // read-back differs from what we wrote), so treat "we applied it
+            // in this app" as applied too — revert uses that exact state file,
+            // so the status never wrongly flips back to "not applied".
+            let applied = live || state_path(t.id).exists();
             json!({
                 "id":      t.id,
                 "name":    t.name,
                 "desc":    t.desc,
                 "cat":     t.cat,
-                "applied": states.get(i).copied().unwrap_or(false),
+                "applied": applied,
             })
         })
         .collect();

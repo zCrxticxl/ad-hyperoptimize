@@ -64,8 +64,13 @@ export default function Debloater({ admin }: { admin: boolean }) {
   const [bloatLog, setBloatLog]   = useState("");
 
   useEffect(() => {
-    api.debloaterTweaksList().then(d => { setTweaks(d?.tweaks ?? []); setLoading(false); });
+    refresh();
   }, []);
+
+  const refresh = () => {
+    setLoading(true);
+    api.debloaterTweaksList().then(d => { setTweaks(d?.tweaks ?? []); setLoading(false); });
+  };
 
   const applied   = tweaks.filter(t => t.applied).length;
   const unapplied = tweaks.filter(t => !t.applied);
@@ -80,10 +85,12 @@ export default function Debloater({ admin }: { admin: boolean }) {
     setBusy(p => ({ ...p, [t.id]: true }));
     try {
       const msg = t.applied ? await api.debloaterTweakRevert(t.id) : await api.debloaterTweakApply(t.id);
-      setTweaks(prev => prev.map(tw => tw.id === t.id ? { ...tw, applied: !t.applied } : tw));
       setLog({ msg, ok: true });
     } catch (e: any) { setLog({ msg: String(e), ok: false }); }
-    finally { setBusy(p => ({ ...p, [t.id]: false })); }
+    finally {
+      setBusy(p => ({ ...p, [t.id]: false }));
+      refresh(); // re-read the real backend state (not just optimistic)
+    }
   };
 
   const applySection = async (ids: string[]) => {
@@ -93,10 +100,11 @@ export default function Debloater({ admin }: { admin: boolean }) {
     for (const id of ids) {
       const t = tweaks.find(tw => tw.id === id && !tw.applied);
       if (!t) continue;
-      try { await api.debloaterTweakApply(t.id); setTweaks(prev => prev.map(tw => tw.id === id ? { ...tw, applied: true } : tw)); applied++; }
+      try { await api.debloaterTweakApply(t.id); applied++; }
       catch { failed++; }
     }
     setApplyingAll(false);
+    refresh();
     if (failed > 0) {
       setLog({ msg: `${applied} ${t("debloatTweaksWord")} ${t("debloatSectionApplied")}, ${failed} ${t("debloatSkipped")}`, ok: false });
     } else {
@@ -109,10 +117,11 @@ export default function Debloater({ admin }: { admin: boolean }) {
     setApplyingAll(true); setLog(null);
     let n = 0, failed = 0;
     for (const t of unapplied) {
-      try { await api.debloaterTweakApply(t.id); setTweaks(prev => prev.map(tw => tw.id === t.id ? { ...tw, applied: true } : tw)); n++; }
+      try { await api.debloaterTweakApply(t.id); n++; }
       catch { failed++; }
     }
     setApplyingAll(false);
+    refresh();
     if (failed > 0) {
       setLog({ msg: `${t("debloatAppliedN")} ${n} ${n !== 1 ? t("debloatTweaksWord") : t("debloatTweakWord")}, ${failed} ${t("debloatSkipped")}. ${t("debloatRestartRecommended")}`, ok: false });
     } else {
