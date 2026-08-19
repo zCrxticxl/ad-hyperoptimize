@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { api, onMetrics, Metrics } from "../api";
-import { Card, Bar } from "../components/ui";
+import { Card, Bar, Spinner } from "../components/ui";
 import { useLang } from "../i18n";
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
@@ -16,8 +16,12 @@ export default function Monitor() {
   const unlisten = useRef<(() => void) | null>(null);
 
   useEffect(() => {
-    api.startMonitor().catch((e: any) => setErr(String(e)));
+    let active = true;
+    // Subscribe to metrics FIRST, then start the monitor — otherwise the first
+    // emission (which can lag a few seconds while sysinfo initializes on first
+    // start) is missed and the page appears empty on the first open.
     onMetrics((m) => {
+      if (!active) return;
       setLatest(m);
       setSeries((s) => {
         const next = [...s, {
@@ -29,8 +33,13 @@ export default function Monitor() {
         }];
         return next.length > MAX_POINTS ? next.slice(-MAX_POINTS) : next;
       });
-    }).then((u) => (unlisten.current = u));
+    }).then((u) => {
+      if (!active) { u(); return; }
+      unlisten.current = u;
+      api.startMonitor().catch((e: any) => setErr(String(e)));
+    });
     return () => {
+      active = false;
       unlisten.current?.();
       api.stopMonitor();
     };
@@ -56,6 +65,11 @@ export default function Monitor() {
       <h1 className="page-title">{t("monTitle")}</h1>
       <div className="page-sub">{t("monSub")}</div>
       {err && <div style={{ color: "var(--red)", marginBottom: 10 }}>{err}</div>}
+      {!latest && !err && (
+        <div className="row" style={{ gap: 10, marginBottom: 12 }}>
+          <Spinner /> <span className="muted">{t("monConnecting")}</span>
+        </div>
+      )}
 
       <div className="grid grid-4">
         <Card title={t("monCpu")}><div className="stat-big">{latest?.cpuTotal.toFixed(1) ?? "—"}%</div>
