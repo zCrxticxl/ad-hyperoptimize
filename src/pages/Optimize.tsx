@@ -128,15 +128,12 @@ export default function Optimize({ mode, admin, focusId, onSwitchExpert }: { mod
             tw = localizeTweak(tw, lang);
             const hwRisk = profile?.tweakRisks?.[tw.id];
             const needsAck = hwRisk?.severity === "danger" && riskAck !== tw.id;
-            // "partial" = the tweak was applied but not every value reads back
-            // identical (common for GameConfigStore/DWM keys that only settle
-            // after a reboot). It must NOT present as un-applied, otherwise the
-            // primary Apply button looks permanently stuck. Offer a quiet
-            // Re-apply instead and keep Undo available.
+            // Apply is only shown when there is genuinely nothing to undo yet
+            // (no journal entry and not detected as applied). Once the tweak
+            // is applied / undoable, the primary action is Undo alone — never
+            // show Apply next to Undo (confusing dual buttons).
             const applyTrigger =
-              tw.status === "partial"
-                ? { idle: t("optReapply"), confirmLabel: t("optConfirmReapply"), cls: "btn small ghost", title: t("optPartialTooltip") }
-                : (tw.status === "not_applied" || tw.status === "unknown")
+              !tw.canUndo && (tw.status === "not_applied" || tw.status === "unknown")
                 ? { idle: t("optApply"), confirmLabel: t("optConfirmApply"), cls: "btn small", title: undefined as string | undefined }
                 : null;
             return (
