@@ -922,6 +922,12 @@ fn cmd_game_revert(state: State<'_, AppState>) -> serde_json::Value {
 }
 
 // ---- misc ----
+#[tauri::command]
+fn cmd_clear_cache() -> Result<String, String> {
+    let n = cache::clear()?;
+    Ok(format!("Cleared {n} cached scans"))
+}
+
 #[tauri::command(async)]
 fn cmd_open_path(path: String) -> Result<(), String> {
     // Start-Process opens URLs, files and folders via their default handler
@@ -1544,6 +1550,7 @@ pub fn run() {
             cmd_sw_install,
             // misc
             cmd_open_path,
+            cmd_clear_cache,
         ])
         .setup(move |app| {
             let gs = app.state::<AppState>().game_switcher.clone();

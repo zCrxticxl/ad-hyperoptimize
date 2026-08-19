@@ -38,6 +38,7 @@ import RestorePointManager from "./pages/RestorePointManager";
 import GameProfiles from "./pages/GameProfiles";
 import SoftwareInstaller from "./pages/SoftwareInstaller";
 import PcConfigurator from "./pages/PcConfigurator";
+import Settings from "./pages/Settings";
 
 /**
  * `basic: true` marks a tool as safe and self-explanatory enough for Beginner
@@ -92,6 +93,7 @@ export const buildNav: NavBuilder = (t) => [
     { id: "updates", icon: "🔄", label: t("navUpdates"), desc: t("toolDescUpdates"), basic: true, keywords: "update upgrade version aktualisieren" },
     { id: "softinstaller", icon: "📥", label: t("navSoftInstaller"), desc: t("toolDescSoftInstaller"), keywords: "install software apps winget" },
     { id: "pcconfig", icon: "🛠️", label: t("navPcConfig"), desc: t("toolDescPcConfig"), keywords: "pc build configurator upgrade bottleneck" },
+    { id: "settings", icon: "⚙️", label: t("navSettings"), desc: t("toolDescSettings"), basic: true, keywords: "settings einstellungen options options sprache language" },
   ] },
   { id: "reports", group: t("navGrpReports"), icon: "📊", desc: t("catDescReports"), accent: "slate", items: [
     { id: "benchmark", icon: "🏁", label: t("navBenchmark"), desc: t("toolDescBenchmark"), basic: true, keywords: "benchmark test score messen" },
@@ -112,6 +114,7 @@ const MUTATING_TOOLS = new Set([
 
 const MODE_KEY = "ui.mode";
 const ONBOARDED_KEY = "ui.onboarded";
+const RECENTS_KEY = "ui.recents";
 
 /** Where the shell currently is: launcher home, a category grid, or a tool. */
 type Route =
@@ -119,7 +122,7 @@ type Route =
   | { kind: "category"; id: string }
   | { kind: "tool"; id: string; target?: string };
 
-function renderTool(page: string, mode: Mode, admin: boolean | null, go: (id: string, target?: string) => void, onSwitchExpert: () => void, target?: string) {
+function renderTool(page: string, mode: Mode, admin: boolean | null, go: (id: string, target?: string) => void, setMode: (m: Mode) => void, target?: string) {
   switch (page) {
     case "dashboard": return <Dashboard mode={mode} go={go} />;
     case "hardware": return <Hardware mode={mode} />;
@@ -128,7 +131,7 @@ function renderTool(page: string, mode: Mode, admin: boolean | null, go: (id: st
     case "processes": return <Processes />;
     case "startup": return <Startup admin={!!admin} />;
     case "schedtasks": return <ScheduledTasks admin={!!admin} />;
-    case "optimize": return <Optimize mode={mode} admin={!!admin} focusId={target} onSwitchExpert={onSwitchExpert} />;
+    case "optimize": return <Optimize mode={mode} admin={!!admin} focusId={target} onSwitchExpert={() => setMode("expert")} />;
     case "profiles": return <Profiles />;
     case "gameprofiles": return <GameProfiles />;
     case "cleanup": return <Cleanup />;
@@ -156,6 +159,7 @@ function renderTool(page: string, mode: Mode, admin: boolean | null, go: (id: st
     case "restorepoints": return <RestorePointManager admin={!!admin} />;
     case "softinstaller": return <SoftwareInstaller />;
     case "pcconfig": return <PcConfigurator />;
+    case "settings": return <Settings mode={mode} setMode={setMode} />;
     default: return null;
   }
 }
@@ -172,8 +176,12 @@ function AppInner() {
     try { return localStorage.getItem(ONBOARDED_KEY) === "1"; } catch { return true; }
   });
   const [query, setQuery] = useState("");
+  const [recents, setRecents] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem(RECENTS_KEY) || "[]"); } catch { return []; }
+  });
   const [updateBanner, setUpdateBanner] = useState<{ version: string } | null>(null);
   const [modeNotice, setModeNotice] = useState(false);
+  const searchRef = useRef<HTMLInputElement>(null);
   const updateChecked = useRef(false);
 
   const setMode = (next: Mode) => {
@@ -211,7 +219,16 @@ function AppInner() {
   const findTool = (toolId: string) => nav.flatMap((g) => g.items).find((i) => i.id === toolId);
 
   const openCategory = (id: string) => { setQuery(""); setRoute({ kind: "category", id }); };
-  const openTool = (id: string, target?: string) => { setQuery(""); setRoute({ kind: "tool", id, target }); };
+  const openTool = (id: string, target?: string) => {
+    setQuery("");
+    setRoute({ kind: "tool", id, target });
+    // "Recently used" — prepend, dedupe, cap at 6, persist.
+    setRecents((prev) => {
+      const next = [id, ...prev.filter((r) => r !== id)].slice(0, 6);
+      try { localStorage.setItem(RECENTS_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
   const goHome = () => { setQuery(""); setRoute({ kind: "home" }); };
   const back = () => {
     if (route.kind === "tool") { const g = findGroupOf(route.id); setRoute(g ? { kind: "category", id: g.id } : { kind: "home" }); }
@@ -240,6 +257,22 @@ function AppInner() {
     }
   }, [mode]);
 
+  // Keyboard shortcuts: "/" focuses the tool search, Esc clears it.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const typing = target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
+      if (e.key === "/" && !typing && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        searchRef.current?.focus();
+      } else if (e.key === "Escape" && query) {
+        setQuery("");
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [query]);
+
   if (!onboarded) return <Onboarding onDone={finishOnboarding} />;
 
   const activeGroup = route.kind === "category" ? nav.find((g) => g.id === route.id) : undefined;
@@ -267,7 +300,7 @@ function AppInner() {
 
         <div className="topbar-search">
           <span aria-hidden="true">⌕</span>
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("navSearchTools")} aria-label={t("navSearchTools")} />
+          <input ref={searchRef} value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("navSearchTools")} aria-label={t("navSearchTools")} />
           {query && <button className="topbar-search-clear" onClick={() => setQuery("")} aria-label="Clear search">×</button>}
         </div>
 
@@ -324,6 +357,28 @@ function AppInner() {
               </div>
               <button className="btn big" onClick={() => openTool("autoopt")}><span aria-hidden="true">⚡</span> {t("navAutoOpt")}</button>
             </div>
+
+            {recents.length > 0 && (
+              <>
+                <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".1em", color: "var(--muted)", margin: "6px 0 10px" }}>
+                  🕘 {t("homeRecents")}
+                </div>
+                <div className="tool-grid" style={{ marginBottom: 22 }}>
+                  {recents.map((id) => {
+                    const item = findTool(id);
+                    if (!item || !allowedByMode(item)) return null;
+                    return (
+                      <button key={id} className="tool-card" onClick={() => openTool(id)}>
+                        <span className="tool-icon" aria-hidden="true">{item.icon}</span>
+                        <b>{item.label}</b>
+                        {item.desc && <span className="tool-desc">{item.desc}</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+
             <div className="category-grid">
               {visibleGroups.map((g) => (
                 <button key={g.id} className={`category-card accent-${g.accent}`} onClick={() => openCategory(g.id)}>
@@ -367,7 +422,7 @@ function AppInner() {
                 </button>
               )}
             </div>
-            <div className="page-content">{renderTool(route.id, mode, admin, openTool, () => setMode("expert"), route.target)}</div>
+            <div className="page-content">{renderTool(route.id, mode, admin, openTool, setMode, route.target)}</div>
           </>
         ) : null}
       </main>
