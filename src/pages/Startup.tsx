@@ -2,12 +2,14 @@ import React, { useEffect, useState } from "react";
 import { api } from "../api";
 import { Card, Spinner, Badge } from "../components/ui";
 import { useLang } from "../i18n";
+import { useFeatureFocus } from "../hooks/useFeatureFocus";
 
-export default function Startup({ admin }: { admin: boolean }) {
+export default function Startup({ admin, focusId }: { admin: boolean; focusId?: string }) {
   const { t } = useLang();
   const [items, setItems] = useState<any[] | null>(null);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
+  useFeatureFocus(focusId, items !== null);
 
   const SCOPE_LABEL: Record<string, string> = {
     hkcu_run: t("scopeHkcuRun"),
@@ -60,7 +62,7 @@ export default function Startup({ admin }: { admin: boolean }) {
               {items.map((it, i) => {
                 const needsAdmin = it.scope.startsWith("hklm") || it.scope === "folder_common";
                 return (
-                  <tr key={i} style={{ opacity: it.enabled ? 1 : 0.55 }}>
+                  <tr key={i} data-focus-id={it.name} style={{ opacity: it.enabled ? 1 : 0.55 }}>
                     <td style={{ fontWeight: 600 }}>{it.name}</td>
                     <td className="mono muted" style={{ maxWidth: 420, wordBreak: "break-all", fontSize: 11 }}>
                       {it.command}

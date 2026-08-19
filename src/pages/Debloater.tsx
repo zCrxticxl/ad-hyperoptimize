@@ -3,6 +3,7 @@ import { api } from "../api";
 import { Spinner } from "../components/ui";
 import { HwWarnings } from "../components/HwWarnings";
 import { useLang } from "../i18n";
+import { useFeatureFocus } from "../hooks/useFeatureFocus";
 
 const BLOAT_PACKAGES: { name: string; displayKey: string; cat: string }[] = [
   { name: "Microsoft.BingNews",                     displayKey: "debloatPkgBingNews",        cat: "Microsoft" },
@@ -51,7 +52,7 @@ function ProgressBar({ done, total }: { done: number; total: number }) {
   );
 }
 
-export default function Debloater({ admin }: { admin: boolean }) {
+export default function Debloater({ admin, focusId }: { admin: boolean; focusId?: string }) {
   const { t } = useLang();
   const [tweaks, setTweaks]       = useState<Tweak[]>([]);
   const [loading, setLoading]     = useState(true);
@@ -62,6 +63,7 @@ export default function Debloater({ admin }: { admin: boolean }) {
   const [removingBloat, setRemovingBloat] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [bloatLog, setBloatLog]   = useState("");
+  useFeatureFocus(focusId, !loading);
 
   useEffect(() => {
     refresh();
@@ -207,7 +209,7 @@ export default function Debloater({ admin }: { admin: boolean }) {
                 : <button className="btn small ghost" style={{ fontSize: 11 }} onClick={() => applySection(catUnapplied)} disabled={applyingAll}>{t("debloatApplySection")} →</button>}
             </div>
             {items.map(tw => (
-              <div key={tw.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 0", borderBottom: "1px solid var(--border)", opacity: busy[tw.id] ? 0.7 : 1 }}>
+              <div key={tw.id} data-focus-id={tw.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 0", borderBottom: "1px solid var(--border)", opacity: busy[tw.id] ? 0.7 : 1 }}>
                 <button
                   onClick={() => toggle(tw)}
                   style={{ width: 22, height: 22, borderRadius: 5, flexShrink: 0, border: `2px solid ${tw.applied ? "var(--green)" : "var(--border)"}`, background: tw.applied ? "var(--green)" : "transparent", color: "#fff", fontSize: 12, display: "flex", alignItems: "center", justifyContent: "center", cursor: admin ? "pointer" : "not-allowed" }}

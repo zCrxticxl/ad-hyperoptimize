@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { Card, Spinner, Badge } from "../components/ui";
 import { useLang } from "../i18n";
+import { useFeatureFocus } from "../hooks/useFeatureFocus";
 
 type PTweak = {
   id: string; name: string; category: string;
@@ -22,7 +23,7 @@ const CAT_ICONS: Record<string, string> = {
   "Netzwerk": "🌐",
 };
 
-export default function PrivacyCenter({ admin }: { admin: boolean }) {
+export default function PrivacyCenter({ admin, focusId }: { admin: boolean; focusId?: string }) {
   const { t } = useLang();
 
   // Translate backend category names (backend always returns German keys)
@@ -43,6 +44,7 @@ export default function PrivacyCenter({ admin }: { admin: boolean }) {
   const [log, setLog]         = useState<string[]>([]);
   const [err, setErr]         = useState("");
   const [filter, setFilter]   = useState<string | null>(null);
+  useFeatureFocus(focusId, !loading);
   const [openId, setOpenId]   = useState<string | null>(null);
 
   const push = (m: string) =>
@@ -166,7 +168,7 @@ export default function PrivacyCenter({ admin }: { admin: boolean }) {
               const isBusy = busy === tw.id;
               const isOpen = openId === tw.id;
               return (
-                <div className="tweak" key={tw.id}>
+                <div className="tweak" key={tw.id} data-focus-id={tw.id}>
                   <div className="tweak-head">
                     <span className="tweak-name" style={{ color: tw.applied ? "var(--green)" : undefined }}>
                       {tw.name}

@@ -2,6 +2,7 @@ import React, { useEffect, useState, useMemo } from "react";
 import { api } from "../api";
 import { Card, Spinner } from "../components/ui";
 import { useLang } from "../i18n";
+import { useFeatureFocus } from "../hooks/useFeatureFocus";
 
 type Task = {
   path: string;
@@ -19,13 +20,14 @@ function pathCategory(path: string): string {
   return parts[parts.length - 1] || path;
 }
 
-export default function ScheduledTasks({ admin }: { admin: boolean }) {
+export default function ScheduledTasks({ admin, focusId }: { admin: boolean; focusId?: string }) {
   const { t } = useLang();
   const [data, setData] = useState<{ tasks: Task[]; bloatCount: number } | null>(null);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("bloat");
   const [search, setSearch] = useState("");
+  useFeatureFocus(focusId, !!data);
 
   const load = () =>
     api
@@ -140,7 +142,7 @@ export default function ScheduledTasks({ admin }: { admin: boolean }) {
                   const key = task.path + task.name;
                   const isBusy = busy === key;
                   return (
-                    <tr key={key} style={{ opacity: task.enabled ? 1 : 0.55 }}>
+                    <tr key={key} data-focus-id={task.name} style={{ opacity: task.enabled ? 1 : 0.55 }}>
                       <td style={{ fontWeight: 600, minWidth: 220 }}>
                         {task.name}
                         {task.isBloat && tab === "all" && (
