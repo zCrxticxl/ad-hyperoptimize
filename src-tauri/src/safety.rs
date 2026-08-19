@@ -114,7 +114,7 @@ pub fn backup_registry_key(root: &str, path: &str) -> Result<String, String> {
 }
 
 /// Create a System Restore point. Requires admin; Windows throttles creation
-/// to one per 24h by default — surface that as a warning, not a failure.
+/// to one per 24h by default, surface that as a warning, not a failure.
 pub fn create_restore_point(description: &str) -> Result<String, String> {
     if !ps::is_admin() {
         return Err(
@@ -127,7 +127,7 @@ pub fn create_restore_point(description: &str) -> Result<String, String> {
     )) {
         Ok(_) => Ok("Restore point created.".into()),
         Err(e) if e.contains("1440") || e.to_lowercase().contains("already been created") => Ok(
-            "Windows limits restore points to one per 24h — an existing recent point covers you.".into(),
+            "Windows limits restore points to one per 24h, an existing recent point covers you.".into(),
         ),
         Err(e) => Err(e),
     }

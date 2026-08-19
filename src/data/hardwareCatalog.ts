@@ -6,7 +6,7 @@
 //   - GPU:     TechPowerUp "Relative Performance" table (real aggregated
 //              review-benchmark data across 1080p/1440p/4K, anchored to the
 //              fastest current card = 100%), read directly from
-//              techpowerup.com/gpu-specs — it IS fetchable; an earlier pass
+//              techpowerup.com/gpu-specs, it IS fetchable; an earlier pass
 //              wrongly assumed it was JS-only and substituted PassMark's
 //              G3D Mark, which compresses the high-end gap far too much
 //              (e.g. shows a 4090 at ~98% of a 5090, vs TechPowerUp/reality's
@@ -16,7 +16,7 @@
 //              explicitly gaming-weighted). Chips too old to appear on that
 //              chart (mostly LGA1151/LGA1200 8th-11th gen) are scored via
 //              PassMark's Single-Thread Rating as a documented fallback proxy
-//              — flagged inline below.
+//             , flagged inline below.
 //   - RAM:     Real AIDA64 bandwidth/latency deltas between DDR4/DDR5 speed
 //              grades + published gaming FPS uplift figures (Hardware
 //              Unboxed/Tom's Hardware-class CPU-bound benchmarks). Capacity
@@ -25,15 +25,15 @@
 //   - Storage: Tom's Hardware SSD Benchmarks Hierarchy (Seq MB/s, Random
 //              IOPS, Overall Score) for NVMe/SATA tiers; StorageReview/vendor
 //              datasheets for 7200RPM HDD figures. HDD scores are
-//              deliberately compressed near the floor — real HDDs are
+//              deliberately compressed near the floor, real HDDs are
 //              10-50x+ slower in throughput/IOPS than NVMe, not ~20% slower
 //              as the old hand-estimated scores implied.
 // These are NOT official vendor metrics, and PassMark/AIDA64/Tom's figures
-// drift over time — treat as a representative snapshot, re-derive
+// drift over time, treat as a representative snapshot, re-derive
 // periodically. Prices are rough USD market estimates and WILL drift; every
 // part links out to live retailer search results via buyQuery. Treat this as
 // a representative spread (budget → flagship, current + the last few
-// generations that dominate the used market), not an exhaustive SKU list —
+// generations that dominate the used market), not an exhaustive SKU list -
 // new parts can be appended without touching any other file.
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -110,7 +110,7 @@ export interface Psu {
 
 // ── GPUs ──────────────────────────────────────────────────────────────────────
 // Scores: TechPowerUp Relative Performance %, RTX 5090 = 100. This is a raw
-// throughput ratio, not a "gaming adequacy" score — see ratingFromGpuScore()
+// throughput ratio, not a "gaming adequacy" score, see ratingFromGpuScore()
 // in pcAdvisor.ts for how this gets banded into bottleneck/good/excellent
 // (a flat 30/55/80 split would wrongly flag e.g. a 19%-of-5090 RTX 3060,
 // still a perfectly playable 1080p/1440p card, as a "bottleneck").
@@ -185,10 +185,10 @@ export const GPUS: Gpu[] = [
 // ── CPUs ──────────────────────────────────────────────────────────────────────
 // Scores: PassMark "Top Gaming CPUs" chart, normalized to the top entry = 100.
 // Chips marked "[ST proxy]" don't appear on that gaming-specific chart (too
-// old) — scored from PassMark's Single-Thread Rating instead, the documented
+// old), scored from PassMark's Single-Thread Rating instead, the documented
 // fallback for chips outside the gaming chart's modern-enthusiast coverage.
 export const CPUS: Cpu[] = [
-  // AMD AM5 — current
+  // AMD AM5, current
   { id: "r9-9850x3d", name: "Ryzen 9 9850X3D",  vendor: "AMD",   socket: "AM5", cores: 16, threads: 32, tdpW: 170, score: 100, year: 2026, priceNew: 550, priceUsed: 480, buyQuery: "AMD Ryzen 9 9850X3D" },
   { id: "r9-9950x3d", name: "Ryzen 9 9950X3D",  vendor: "AMD",   socket: "AM5", cores: 16, threads: 32, tdpW: 170, score: 90,  year: 2025, priceNew: 650, priceUsed: 550, buyQuery: "AMD Ryzen 9 9950X3D" },
   { id: "r7-9800x3d", name: "Ryzen 7 9800X3D",  vendor: "AMD",   socket: "AM5", cores: 8,  threads: 16, tdpW: 120, score: 97,  year: 2024, priceNew: 440, priceUsed: 380, buyQuery: "AMD Ryzen 7 9800X3D" },
@@ -202,7 +202,7 @@ export const CPUS: Cpu[] = [
   { id: "r5-7600",    name: "Ryzen 5 7600",     vendor: "AMD",   socket: "AM5", cores: 6,  threads: 12, tdpW: 65,  score: 46,  year: 2023, priceNew: 200, priceUsed: 170, buyQuery: "AMD Ryzen 5 7600" },
   { id: "r5-7500f",   name: "Ryzen 5 7500F",    vendor: "AMD",   socket: "AM5", cores: 6,  threads: 12, tdpW: 65,  score: 48,  year: 2023, priceNew: 150, priceUsed: 130, buyQuery: "AMD Ryzen 5 7500F" },
 
-  // AMD AM4 — legacy / huge used market
+  // AMD AM4, legacy / huge used market
   { id: "r7-5800x3d", name: "Ryzen 7 5800X3D",  vendor: "AMD",   socket: "AM4", cores: 8,  threads: 16, tdpW: 105, score: 64,  year: 2022, priceNew: null, priceUsed: 230, buyQuery: "AMD Ryzen 7 5800X3D" },
   { id: "r9-5950x",   name: "Ryzen 9 5950X",    vendor: "AMD",   socket: "AM4", cores: 16, threads: 32, tdpW: 105, score: 32,  year: 2020, priceNew: null, priceUsed: 280, buyQuery: "AMD Ryzen 9 5950X" },
   { id: "r9-5900x",   name: "Ryzen 9 5900X",    vendor: "AMD",   socket: "AM4", cores: 12, threads: 24, tdpW: 105, score: 38,  year: 2020, priceNew: null, priceUsed: 180, buyQuery: "AMD Ryzen 9 5900X" },
@@ -214,14 +214,14 @@ export const CPUS: Cpu[] = [
   { id: "r7-3700x",   name: "Ryzen 7 3700X",    vendor: "AMD",   socket: "AM4", cores: 8,  threads: 16, tdpW: 65,  score: 24,  year: 2019, priceNew: null, priceUsed: 100, buyQuery: "AMD Ryzen 7 3700X" },
   { id: "r5-3600",    name: "Ryzen 5 3600",     vendor: "AMD",   socket: "AM4", cores: 6,  threads: 12, tdpW: 65,  score: 20,  year: 2019, priceNew: null, priceUsed: 80,  buyQuery: "AMD Ryzen 5 3600" }, // [ST proxy, interpolated]
 
-  // Intel LGA1851 — current (Core Ultra 200S / "Plus" refresh)
+  // Intel LGA1851, current (Core Ultra 200S / "Plus" refresh)
   { id: "cu9-285k",   name: "Core Ultra 9 285K", vendor: "Intel", socket: "LGA1851", cores: 24, threads: 24, tdpW: 125, score: 83, year: 2024, priceNew: 480, priceUsed: 420, buyQuery: "Intel Core Ultra 9 285K" },
   { id: "cu7-270kplus",name:"Core Ultra 7 270K Plus", vendor: "Intel", socket: "LGA1851", cores: 20, threads: 20, tdpW: 125, score: 87, year: 2025, priceNew: 370, priceUsed: 320, buyQuery: "Intel Core Ultra 7 270K" },
   { id: "cu7-265k",   name: "Core Ultra 7 265K", vendor: "Intel", socket: "LGA1851", cores: 20, threads: 20, tdpW: 125, score: 75, year: 2024, priceNew: 350, priceUsed: 300, buyQuery: "Intel Core Ultra 7 265K" },
   { id: "cu5-250kplus",name:"Core Ultra 5 250K Plus", vendor: "Intel", socket: "LGA1851", cores: 14, threads: 14, tdpW: 125, score: 87, year: 2025, priceNew: 270, priceUsed: 230, buyQuery: "Intel Core Ultra 5 250K" },
   { id: "cu5-245k",   name: "Core Ultra 5 245K", vendor: "Intel", socket: "LGA1851", cores: 14, threads: 14, tdpW: 125, score: 73, year: 2024, priceNew: 260, priceUsed: 220, buyQuery: "Intel Core Ultra 5 245K" },
 
-  // Intel LGA1700 — 12th-14th gen, huge installed base
+  // Intel LGA1700, 12th-14th gen, huge installed base
   { id: "i9-14900k",  name: "Core i9-14900K",   vendor: "Intel", socket: "LGA1700", cores: 24, threads: 32, tdpW: 125, score: 63, year: 2023, priceNew: null, priceUsed: 380, buyQuery: "Intel Core i9-14900K" },
   { id: "i9-13900k",  name: "Core i9-13900K",   vendor: "Intel", socket: "LGA1700", cores: 24, threads: 32, tdpW: 125, score: 60, year: 2022, priceNew: null, priceUsed: 360, buyQuery: "Intel Core i9-13900K" },
   { id: "i7-14700k",  name: "Core i7-14700K",   vendor: "Intel", socket: "LGA1700", cores: 20, threads: 28, tdpW: 125, score: 58, year: 2023, priceNew: null, priceUsed: 290, buyQuery: "Intel Core i7-14700K" },
@@ -235,9 +235,9 @@ export const CPUS: Cpu[] = [
   { id: "i5-12400",   name: "Core i5-12400",    vendor: "Intel", socket: "LGA1700", cores: 6,  threads: 12, tdpW: 65,  score: 27, year: 2022, priceNew: null, priceUsed: 130, buyQuery: "Intel Core i5-12400" },
   { id: "i3-12100",   name: "Core i3-12100",    vendor: "Intel", socket: "LGA1700", cores: 4,  threads: 8,  tdpW: 60,  score: 14, year: 2021, priceNew: null, priceUsed: 70,  buyQuery: "Intel Core i3-12100" },
 
-  // Intel LGA1200 — 10th/11th gen, huge installed base (previously had ZERO
+  // Intel LGA1200, 10th/11th gen, huge installed base (previously had ZERO
   // entries despite the chipset-socket map already recognizing H410/B460/
-  // H470/Z490/H510/B560/H570/Z590 boards — any real 10th/11th-gen system
+  // H470/Z490/H510/B560/H570/Z590 boards, any real 10th/11th-gen system
   // detected a socket but had no compatible CPUs/motherboards to offer).
   { id: "i9-11900k",  name: "Core i9-11900K",   vendor: "Intel", socket: "LGA1200", cores: 8,  threads: 16, tdpW: 125, score: 27, year: 2021, priceNew: null, priceUsed: 180, buyQuery: "Intel Core i9-11900K" }, // [ST proxy]
   { id: "i9-10900k",  name: "Core i9-10900K",   vendor: "Intel", socket: "LGA1200", cores: 10, threads: 20, tdpW: 125, score: 26, year: 2020, priceNew: null, priceUsed: 150, buyQuery: "Intel Core i9-10900K" }, // [ST proxy]
@@ -246,8 +246,8 @@ export const CPUS: Cpu[] = [
   { id: "i5-11600k",  name: "Core i5-11600K",   vendor: "Intel", socket: "LGA1200", cores: 6,  threads: 12, tdpW: 125, score: 20, year: 2021, priceNew: null, priceUsed: 110, buyQuery: "Intel Core i5-11600K" },
   { id: "i5-10400",   name: "Core i5-10400",    vendor: "Intel", socket: "LGA1200", cores: 6,  threads: 12, tdpW: 65,  score: 21, year: 2020, priceNew: null, priceUsed: 80,  buyQuery: "Intel Core i5-10400" }, // [ST proxy]
 
-  // Intel LGA1151 — 8th/9th gen, still common budget/used (chipset map: Z390/
-  // B365/H310/Z370/B360/H370/Q370 — see socketFromBoardModel in pcAdvisor.ts)
+  // Intel LGA1151, 8th/9th gen, still common budget/used (chipset map: Z390/
+  // B365/H310/Z370/B360/H370/Q370, see socketFromBoardModel in pcAdvisor.ts)
   { id: "i7-9700k",   name: "Core i7-9700K",    vendor: "Intel", socket: "LGA1151", cores: 8,  threads: 8,  tdpW: 95,  score: 22, year: 2018, priceNew: null, priceUsed: 110, buyQuery: "Intel Core i7-9700K" }, // [ST proxy]
   { id: "i7-8700k",   name: "Core i7-8700K",    vendor: "Intel", socket: "LGA1151", cores: 6,  threads: 12, tdpW: 95,  score: 21, year: 2017, priceNew: null, priceUsed: 95,  buyQuery: "Intel Core i7-8700K" }, // [ST proxy]
   { id: "i5-9600k",   name: "Core i5-9600K",    vendor: "Intel", socket: "LGA1151", cores: 6,  threads: 6,  tdpW: 95,  score: 21, year: 2018, priceNew: null, priceUsed: 75,  buyQuery: "Intel Core i5-9600K" }, // [ST proxy]
@@ -263,7 +263,7 @@ export const CPUS: Cpu[] = [
 // Prices updated June 2026 for the ongoing AI-driven DRAM shortage: 32GB DDR5
 // kits that sold for $80-120 in mid-2025 are now $300-500+ and climbing
 // (SK hynix/Samsung have signaled supply constraints persisting well beyond
-// 2026), so these are deliberately set far higher than a "normal" snapshot —
+// 2026), so these are deliberately set far higher than a "normal" snapshot -
 // still rough estimates, always confirm via the live Buy links.
 export const RAM_KITS: RamKit[] = [
   { id: "ddr5-16-6000", name: "DDR5 16GB (2×8GB) 6000MT/s",  type: "DDR5", capacityGb: 16, speedMtps: 6000, score: 88, priceNew: 220, priceUsed: 160, buyQuery: "DDR5 16GB 6000MHz kit" },
@@ -301,7 +301,7 @@ export const MOTHERBOARDS: Motherboard[] = [
 // Scores: Tom's Hardware SSD Benchmarks Hierarchy (Seq MB/s, Random IOPS,
 // Overall Score) for NVMe/SATA tiers; StorageReview/vendor datasheets for
 // 7200RPM HDD figures. Normalized to PCIe Gen5 NVMe = 100. HDD scores are
-// deliberately near the floor — real HDDs are 10-50x+ slower in throughput/
+// deliberately near the floor, real HDDs are 10-50x+ slower in throughput/
 // IOPS than NVMe, not ~20% slower as the old hand-estimated scores implied.
 export const STORAGE: StorageDrive[] = [
   { id: "nvme-gen5-2tb", name: "NVMe Gen5 SSD 2TB", kind: "NVMe",     capacityGb: 2000, score: 100, priceNew: 170, priceUsed: 130, buyQuery: "NVMe Gen5 SSD 2TB" },
@@ -331,7 +331,7 @@ export type BuyLink = { label: string; url: string };
 
 /** UI language code → retailer store list. Keyed loosely on the app's `Lang`
  * type (kept as plain strings here to avoid a circular import with i18n.tsx).
- * Each entry is a store that actually serves/ships to that market — the old
+ * Each entry is a store that actually serves/ships to that market, the old
  * version hardcoded amazon.com + ebay.com + a German price-comparison site
  * for every locale, which silently breaks for anyone outside the US/DE (e.g.
  * amazon.com often blocks or mis-prices non-US checkout). Only domains/search
@@ -366,7 +366,7 @@ const STORES_BY_LANG: Record<string, StoreDef[]> = {
     { label: "Newegg",      build: (q) => `https://www.newegg.com/p/pl?d=${q}` },
     { label: "PCPartPicker", build: (q) => `https://pcpartpicker.com/search/?q=${q}` },
   ],
-  pt: [ // Amazon/eBay have no dedicated .pt marketplace — amazon.es ships to/serves Portugal
+  pt: [ // Amazon/eBay have no dedicated .pt marketplace, amazon.es ships to/serves Portugal
     { label: "Amazon.es",   build: (q) => `https://www.amazon.es/s?k=${q}` },
     { label: "Newegg",      build: (q) => `https://www.newegg.com/p/pl?d=${q}` },
     { label: "PCPartPicker", build: (q) => `https://pcpartpicker.com/search/?q=${q}` },
@@ -377,7 +377,7 @@ const STORES_BY_LANG: Record<string, StoreDef[]> = {
     { label: "Allegro",     build: (q) => `https://allegro.pl/listing?string=${q}` },
     { label: "Newegg",      build: (q) => `https://www.newegg.com/p/pl?d=${q}` },
   ],
-  ru: [ // Amazon/eBay/Newegg do not reliably serve Russia — domestic retailers only
+  ru: [ // Amazon/eBay/Newegg do not reliably serve Russia, domestic retailers only
     { label: "DNS",         build: (q) => `https://www.dns-shop.ru/search/?q=${q}` },
     { label: "Citilink",    build: (q) => `https://www.citilink.ru/search/?text=${q}` },
     { label: "Yandex Market", build: (q) => `https://market.yandex.ru/search?text=${q}` },
@@ -388,14 +388,14 @@ const STORES_BY_LANG: Record<string, StoreDef[]> = {
     { label: "Newegg",      build: (q) => `https://www.newegg.com/p/pl?d=${q}` },
     { label: "PCPartPicker", build: (q) => `https://pcpartpicker.com/search/?q=${q}` },
   ],
-  sv: [ // Sweden — no dedicated eBay.se marketplace
+  sv: [ // Sweden, no dedicated eBay.se marketplace
     { label: "Amazon.se",   build: (q) => `https://www.amazon.se/s?k=${q}` },
     { label: "Newegg",      build: (q) => `https://www.newegg.com/p/pl?d=${q}` },
     { label: "PCPartPicker", build: (q) => `https://pcpartpicker.com/search/?q=${q}` },
   ],
 };
 
-/** Builds direct search-result links instead of static product URLs — exact
+/** Builds direct search-result links instead of static product URLs, exact
  * product page IDs go stale; a search query never 404s and always reflects
  * the current live price. Stores are chosen per UI language so links actually
  * work for the user's region instead of always pointing at US/DE-only sites. */

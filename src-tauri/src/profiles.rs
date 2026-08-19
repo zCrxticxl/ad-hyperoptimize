@@ -46,7 +46,7 @@ const PROFILES: &[Profile] = &[
     Profile {
         id: "workstation",
         name: "Workstation / Productivity",
-        desc: "Fast boot, snappy UI, less telemetry/ads and background noise — without gaming scheduler changes.",
+        desc: "Fast boot, snappy UI, less telemetry/ads and background noise, without gaming scheduler changes.",
         tweaks: &[
             "power_high_performance",
             "startup_delay_off",
@@ -109,7 +109,7 @@ fn bench_suite() -> Value {
 }
 
 /// Apply a whole profile. Optionally benchmark before/after.
-/// Per-tweak failures don't abort the rest — they're reported.
+/// Per-tweak failures don't abort the rest, they're reported.
 pub fn apply(profile_id: &str, with_bench: bool) -> Result<Value, String> {
     let p = PROFILES
         .iter()
@@ -153,7 +153,7 @@ pub fn apply(profile_id: &str, with_bench: bool) -> Result<Value, String> {
         "failed": failed,
         "benchBefore": before,
         "benchAfter": after,
-        "benchNote": "Synthetische Benchmarks zeigen Scheduler-/Latenz-Tweaks kaum — der echte Effekt zeigt sich in Frametimes im Spiel. Disk/CPU-Deltas unter ~3% sind Messrauschen.",
+        "benchNote": "Synthetische Benchmarks zeigen Scheduler-/Latenz-Tweaks kaum, der echte Effekt zeigt sich in Frametimes im Spiel. Disk/CPU-Deltas unter ~3% sind Messrauschen.",
     }))
 }
 

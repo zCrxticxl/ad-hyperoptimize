@@ -132,7 +132,7 @@ export default function AutoOptimizer({ admin }: { admin: boolean }) {
             </div>
           </Card>
 
-          {/* Confirm step — always shown before applying, warns for non-Low risk */}
+          {/* Confirm step, always shown before applying, warns for non-Low risk */}
           {confirming && (
             <Card title={`${t("autoConfirmTitle")} (${selectedRecs.length})`} style={{ marginBottom: 14, borderColor: hasNonLow ? "var(--red)" : undefined }}>
               <div className="muted" style={{ fontSize: 13, lineHeight: 1.6 }}>
@@ -153,7 +153,7 @@ export default function AutoOptimizer({ admin }: { admin: boolean }) {
 
           {/* Results */}
           {results && (
-            <Card title={`${t("autoResultsTitle")} — ${results.ok ?? 0} ${t("autoOk")} · ${results.errors ?? 0} ${t("autoErrors")}`} style={{ marginBottom: 14 }}>
+            <Card title={`${t("autoResultsTitle")}, ${results.ok ?? 0} ${t("autoOk")} · ${results.errors ?? 0} ${t("autoErrors")}`} style={{ marginBottom: 14 }}>
               {results.restore_point && (
                 <div className="muted" style={{ fontSize: 11, marginBottom: 8 }}>🛟 {results.restore_point}</div>
               )}

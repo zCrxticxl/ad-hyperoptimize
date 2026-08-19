@@ -71,8 +71,8 @@ export default function PrivacyCenter({ admin, focusId }: { admin: boolean; focu
     push(`Applying ${tw.name}…`);
     try {
       const res = await api.privacyApply(tw.id);
-      if (res?.ok === false) push(`✘ ${tw.name}: not applied — ${res.warning}`);
-      else if (res?.warning) push(`⚠ ${tw.name}: applied with warning — ${res.warning}`);
+      if (res?.ok === false) push(`✘ ${tw.name}: not applied, ${res.warning}`);
+      else if (res?.warning) push(`⚠ ${tw.name}: applied with warning, ${res.warning}`);
       else push(`✔ ${tw.name} ${t("active")}`);
     } catch (e: any) { push(`✘ ${tw.name}: ${e}`); setErr(String(e)); }
     finally { setBusy(null); refresh(); }
@@ -83,8 +83,8 @@ export default function PrivacyCenter({ admin, focusId }: { admin: boolean; focu
     push(`Reverting ${tw.name}…`);
     try {
       const res = await api.privacyRevert(tw.id);
-      if (res?.ok === false) push(`✘ ${tw.name}: not reverted — ${res.warning}`);
-      else if (res?.warning) push(`⚠ ${tw.name}: reverted with warning — ${res.warning}`);
+      if (res?.ok === false) push(`✘ ${tw.name}: not reverted, ${res.warning}`);
+      else if (res?.warning) push(`⚠ ${tw.name}: reverted with warning, ${res.warning}`);
       else push(`↩ ${tw.name} reverted`);
     } catch (e: any) { push(`✘ ${tw.name}: ${e}`); setErr(String(e)); }
     finally { setBusy(null); refresh(); }

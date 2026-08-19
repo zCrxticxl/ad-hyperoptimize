@@ -62,7 +62,7 @@ export default function PcConfigurator() {
   }
 
   // Prefer the socket implied by the actually-scanned motherboard (read from
-  // its chipset code) over inferring it from the detected CPU name — the
+  // its chipset code) over inferring it from the detected CPU name, the
   // board is the authoritative constraint for what fits, and CPU-name
   // matching can silently fail for any CPU outside our ~24-entry catalog.
   const boardSocket = socketFromBoardModel(board?.model);
@@ -266,7 +266,7 @@ export default function PcConfigurator() {
 
               <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>
                 {t("pcconfCurrentPart")}: {matchedCpu?.name ?? hw.cpu.name} ({t("pcconfScoreLabel")} {Math.round(curCpuScore)})
-                {!matchedCpu && <span> — {t("pcconfNoExactMatch")}</span>}
+                {!matchedCpu && <span>, {t("pcconfNoExactMatch")}</span>}
               </div>
               <PartSelect label={t("pcconfSelectCpu")} options={cpuOptions as unknown as PriceablePart[]} value={selCpu} onChange={setSelCpu} />
               {cfgMode === "upgrade" && cpuObj && (
@@ -290,7 +290,7 @@ export default function PcConfigurator() {
 
               <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>
                 {t("pcconfCurrentPart")}: {matchedGpu?.name ?? hw.gpu.name} ({t("pcconfScoreLabel")} {Math.round(curGpuScore)})
-                {!matchedGpu && <span> — {t("pcconfNoExactMatch")}</span>}
+                {!matchedGpu && <span>, {t("pcconfNoExactMatch")}</span>}
               </div>
               <PartSelect label={t("pcconfSelectGpu")} options={GPUS as unknown as PriceablePart[]} value={selGpu} onChange={setSelGpu} />
 

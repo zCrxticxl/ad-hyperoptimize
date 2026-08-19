@@ -51,7 +51,7 @@ pub fn new_state() -> SharedState {
 // ── Background polling thread ────────────────────────────────────────────────
 pub fn start(state: SharedState, app: tauri::AppHandle) {
     if STARTED.swap(true, Ordering::SeqCst) {
-        return; // already running — never spawn a second poll loop
+        return; // already running, never spawn a second poll loop
     }
     thread::spawn(move || {
         loop {
@@ -92,7 +92,7 @@ pub fn start(state: SharedState, app: tauri::AppHandle) {
                     );
                 }
 
-                // Active game no longer running — revert
+                // Active game no longer running, revert
                 (None, Some(id)) => {
                     {
                         let mut s = lock(&state);
@@ -196,7 +196,7 @@ fn get_process_names() -> Vec<String> {
 
 pub(crate) fn get_active_plan_guid() -> Option<String> {
     let out = ps::run("powercfg /getactivescheme").ok()?;
-    // Output: "Power Scheme GUID: xxxxxxxx-xxxx-... (Name)" — the header is
+    // Output: "Power Scheme GUID: xxxxxxxx-xxxx-... (Name)", the header is
     // localized; the GUID itself is not.
     out.split_whitespace()
         .find(|s| ps::is_guid(s))

@@ -8,9 +8,9 @@ import { useLang } from "../i18n";
 const ULTIMATE_GUID = "e9a42b02-d5df-448d-aa00-03f14749eb61";
 
 // Map a plan's GUID to a risk-badge id. The 3 non-Ultimate Windows defaults
-// have no backend risk entry (intentional — they're always safe, badge
+// have no backend risk entry (intentional, they're always safe, badge
 // defaults to green "OK"). Ultimate uses its real laptop-conditional risk.
-// Anything else (Winhance, OEM-bundled, hand-made custom plans) is unknown —
+// Anything else (Winhance, OEM-bundled, hand-made custom plans) is unknown -
 // we can't see its Advanced Power Settings, so it's always flagged.
 const PLAN_RISK_ID: Record<string, string> = {
   "381b4222-f694-41f0-9685-ff5bb260df2e": "power_plan_balanced",

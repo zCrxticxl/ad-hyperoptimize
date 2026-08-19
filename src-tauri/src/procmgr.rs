@@ -64,14 +64,14 @@ pub fn kill(pid: u32) -> Result<Value, String> {
         .ok_or("Process not found (already terminated?)")?;
     if is_protected(p.name()) {
         return Err(format!(
-            "'{}' ist ein geschützter Systemprozess — Beenden würde Windows crashen.",
+            "'{}' ist ein geschützter Systemprozess, Beenden würde Windows crashen.",
             p.name()
         ));
     }
     if p.kill() {
         Ok(json!({ "killed": pid }))
     } else {
-        Err("Beenden fehlgeschlagen (Zugriff verweigert — als Admin starten?)".into())
+        Err("Beenden fehlgeschlagen (Zugriff verweigert, als Admin starten?)".into())
     }
 }
 

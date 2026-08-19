@@ -54,13 +54,13 @@ export default function Benchmark() {
         </Card>
       ))}
 
-      <Card title={`${t("benchHistoryTitle")} (${history.length} ${t("benchRuns")}) — ${t("benchBeforeAfter")}`}>
+      <Card title={`${t("benchHistoryTitle")} (${history.length} ${t("benchRuns")}), ${t("benchBeforeAfter")}`}>
         <table className="tbl">
           <thead><tr><th scope="col">{t("benchColTime")}</th><th scope="col">{t("benchColTest")}</th><th scope="col">{t("benchColResult")}</th></tr></thead>
           <tbody>
             {[...history].reverse().slice(0, 25).map((h, i) => (
               <tr key={i}>
-                <td className="muted">{h.time ? new Date(h.time).toLocaleString() : "—"}</td>
+                <td className="muted">{h.time ? new Date(h.time).toLocaleString() : "-"}</td>
                 <td>{h.kind}</td>
                 <td>{fmt(h)}</td>
               </tr>

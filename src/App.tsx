@@ -103,7 +103,7 @@ export const buildNav: NavBuilder = (t) => [
 
 export type Mode = "beginner" | "expert";
 
-/** Tools that change system state — only these get the "revertible" trust pill
+/** Tools that change system state, only these get the "revertible" trust pill
  * (a read-only page must not claim it), which now also links to the undo hub. */
 const MUTATING_TOOLS = new Set([
   "optimize", "autoopt", "cleanup", "uninstaller", "regclean", "gputweaks", "nvcontrol",
@@ -227,7 +227,7 @@ function AppInner() {
   const openTool = (id: string, target?: string) => {
     setQuery("");
     setRoute({ kind: "tool", id, target });
-    // "Recently used" — prepend, dedupe, cap at 6, persist.
+    // "Recently used", prepend, dedupe, cap at 6, persist.
     setRecents((prev) => {
       const next = [id, ...prev.filter((r) => r !== id)].slice(0, 6);
       try { localStorage.setItem(RECENTS_KEY, JSON.stringify(next)); } catch {}
@@ -300,7 +300,7 @@ function AppInner() {
   const allResults = [...searchResults, ...featureResults];
 
   // Leaving Expert mode while sitting on an advanced tool/category would strand
-  // the user on a screen they can no longer reach — bounce home WITH a notice
+  // the user on a screen they can no longer reach, bounce home WITH a notice
   // instead of a silent context loss (UI-020).
   useEffect(() => {
     if (mode !== "beginner") return;

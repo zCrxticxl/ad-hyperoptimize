@@ -11,7 +11,7 @@ $out = @{}
 try {
     $zones = Get-WmiObject MSAcpi_ThermalZoneTemperature -Namespace "root/wmi" -ErrorAction Stop
     $out['cpuZones'] = @($zones | ForEach-Object {
-        # 0xFFFFFFFF / 0 = no working sensor on this machine — skip, don't
+        # 0xFFFFFFFF / 0 = no working sensor on this machine, skip, don't
         # render an absurd temperature on the Monitor page.
         if ($_.CurrentTemperature -eq 0 -or $_.CurrentTemperature -gt 50000) { return }
         [PSCustomObject]@{
@@ -73,7 +73,7 @@ $disks = @()
 try {
     $physical = Get-PhysicalDisk -ErrorAction Stop
     foreach ($d in $physical) {
-        # Match the reliability counter to the SAME disk by UniqueId — the old
+        # Match the reliability counter to the SAME disk by UniqueId, the old
         # `-or $true` workaround attached the first disk's counter to every disk.
         $rc = $physical | Where-Object { $_.UniqueId -eq $d.UniqueId } |
             Get-StorageReliabilityCounter -ErrorAction SilentlyContinue |

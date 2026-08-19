@@ -98,11 +98,11 @@ export function RiskBadge({ id }: { id: string }) {
   const risk = useTweakRisk(id);
   const { t } = useLang();
 
-  // Hardware not detected yet — don't claim a verdict we haven't checked.
+  // Hardware not detected yet, don't claim a verdict we haven't checked.
   if (!profile) return null;
 
   if (!risk) {
-    // Absence of a risk record is NOT evidence of safety — word it honestly.
+    // Absence of a risk record is NOT evidence of safety, word it honestly.
     return (
       <span
         title={t("hwNoKnownIssue")}
@@ -144,7 +144,7 @@ export function RiskBadge({ id }: { id: string }) {
   );
 }
 
-// Inline block shown inside an open detail/confirm panel — always renders the
+// Inline block shown inside an open detail/confirm panel, always renders the
 // full risk message (not just a tooltip) so the user cannot miss it before confirming.
 export function RiskNotice({ id }: { id: string }) {
   const risk = useTweakRisk(id);
@@ -177,7 +177,7 @@ export function useRequiresRiskConfirm(id: string): boolean {
 
 // ─── hardware summary card (for Dashboard) ───────────────────────────────────
 // Badge shows pcAdvisor's bottleneck-RELATIVE rating (real benchmark scores,
-// CPU-vs-GPU aware) rather than hwprofile.rs's coarse absolute tier — an
+// CPU-vs-GPU aware) rather than hwprofile.rs's coarse absolute tier, an
 // absolute "HIGH" on both CPU and GPU previously hid the fact that the CPU
 // is the actual bottleneck next to that specific GPU. The raw tier is still
 // used elsewhere (RiskBadge / tweak gating); only this display changed.
@@ -196,7 +196,7 @@ function Row({ label, value, rating, t }: { label: string; value: string; rating
 }
 
 function fmtRam(mb: number) {
-  if (!mb) return "—";
+  if (!mb) return "-";
   return mb >= 1024 ? `${(mb / 1024).toFixed(0)} GB` : `${mb} MB`;
 }
 

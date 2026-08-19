@@ -1,4 +1,4 @@
-//! Boot Optimizer — Event Log boot times (Event 100), BCD read/write, tweak catalog.
+//! Boot Optimizer, Event Log boot times (Event 100), BCD read/write, tweak catalog.
 
 use crate::ps;
 use serde_json::{json, Value};
@@ -23,8 +23,8 @@ static TWEAKS: &[BcdTweak] = &[
     BcdTweak {
         id:          "bcd_timeout_0",
         name:        "Set Boot Menu Timeout to 0",
-        description: "Sets the boot menu timeout to 0 seconds — skips the selection menu instantly when only one OS is present.",
-        impact:      "Saves 3–5 s on every boot",
+        description: "Sets the boot menu timeout to 0 seconds, skips the selection menu instantly when only one OS is present.",
+        impact:      "Saves 3-5 s on every boot",
         risk:        "Low",
         apply_cmd:   "bcdedit /timeout 0",
         revert_cmd:  "bcdedit /deletevalue '{bootmgr}' timeout",
@@ -44,7 +44,7 @@ static TWEAKS: &[BcdTweak] = &[
         id:          "bcd_no_bootux",
         name:        "Disable Boot Progress Bar",
         description: "Schaltet den animierten Windows-Ladebalken ab (quietboot). Spart etwas GPU-Initialisierungszeit.",
-        impact:      "~0.1–0.3 s faster boot",
+        impact:      "~0.1-0.3 s faster boot",
         risk:        "Low",
         apply_cmd:   "bcdedit /set '{current}' quietboot yes",
         revert_cmd:  "bcdedit /deletevalue '{current}' quietboot",
@@ -97,7 +97,7 @@ static TWEAKS: &[BcdTweak] = &[
 /// Query Event Log for Kernel-Boot Event ID 100 (BootDuration in ms).
 /// Returns last N entries.
 /// Returns (events, log_was_disabled). If the log was disabled we just enabled it
-/// but won't have history yet — the caller should surface this to the user.
+/// but won't have history yet, the caller should surface this to the user.
 fn query_boot_events(limit: usize) -> (Vec<Value>, bool) {
     let script = format!(
         r#"
@@ -149,7 +149,7 @@ if ($events) {{
 }
 
 /// Read relevant BCD values via bcdedit.
-/// Uses /enum {current} + /enum {bootmgr} — works without admin for read.
+/// Uses /enum {current} + /enum {bootmgr}, works without admin for read.
 fn read_bcd() -> Value {
     let script = r#"
 $out = @{}
@@ -176,7 +176,7 @@ $out | ConvertTo-Json -Compress
         .unwrap_or(json!({}))
 }
 
-/// Check applied status for all tweaks — one PS call, one variable per tweak.
+/// Check applied status for all tweaks, one PS call, one variable per tweak.
 fn check_statuses() -> std::collections::HashMap<String, bool> {
     // Each tweak gets its own $var assignment; collect into a hashtable for JSON.
     let assignments: Vec<String> = TWEAKS

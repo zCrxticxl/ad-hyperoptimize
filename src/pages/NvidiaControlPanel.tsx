@@ -115,7 +115,7 @@ export default function NvidiaControlPanel() {
       )}
 
       {data && data.supported && (
-        <Card title={`${t("nvcpGlobalSettings")} — ${data.name ?? "NVIDIA"}`}>
+        <Card title={`${t("nvcpGlobalSettings")}, ${data.name ?? "NVIDIA"}`}>
           {data.driverKeyMissing && (
             <div style={{ color: "var(--orange)", fontSize: 12, marginBottom: 8 }}>{t("gpuNoKeyDesc")}</div>
           )}

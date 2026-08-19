@@ -16,7 +16,7 @@ use tauri::Emitter as _;
 const SKIP_DIRS: &[&str] = &[
     "$recycle.bin",
     "system volume information",
-    "winsxs", // Windows component store — huge, untouchable
+    "winsxs", // Windows component store, huge, untouchable
     "softwaredistribution",
     ".git",
     "node_modules",
@@ -25,7 +25,7 @@ const SKIP_DIRS: &[&str] = &[
     ".cargo",
 ];
 
-/// Minimum file size for duplicate detection (100 KB — hashing tiny files wastes time).
+/// Minimum file size for duplicate detection (100 KB, hashing tiny files wastes time).
 const DUP_MIN_BYTES: u64 = 100 * 1024;
 
 /// Maximum files to walk per drive scan (safety valve for drives with millions of files).
@@ -77,7 +77,7 @@ fn walk(root: &Path) -> Vec<FileInfo> {
             continue;
         };
         for entry in rd.flatten() {
-            // symlink_metadata: do NOT follow symlinks/junctions — a reparse
+            // symlink_metadata: do NOT follow symlinks/junctions, a reparse
             // point inside the scanned tree must never pull system paths in.
             let Ok(meta) = entry.path().symlink_metadata() else {
                 continue;
@@ -138,9 +138,9 @@ fn hash_file(path: &Path) -> Option<String> {
 /// True when a path must never be deleted/moved by the disk analyzer.
 ///
 /// Paths produced by the scan are absolute `X:\…` paths without `.`/`..`
-/// segments. Everything else — relative paths, drive-relative paths, `..`
+/// segments. Everything else, relative paths, drive-relative paths, `..`
 /// traversal, system roots, the app's own data directory and whole user
-/// profiles — is rejected. String-based so it behaves identically on Linux
+/// profiles, is rejected. String-based so it behaves identically on Linux
 /// (unit tests) and Windows (runtime).
 pub(crate) fn is_protected(path: &Path) -> bool {
     is_protected_inner(path, false)
@@ -194,7 +194,7 @@ fn is_protected_inner(path: &Path, allow_root: bool) -> bool {
         "\\RECOVERY",
         "\\WINDOWS.OLD",
         "\\EFI",
-        "\\PCOPTSUITE", // journal / cache / backups — never self-delete
+        "\\PCOPTSUITE", // journal / cache / backups, never self-delete
     ];
     // `X:\…` → keep the backslash: index 2 is `\`, so [2..] is `\…`.
     let rest = &norm_upper[2..];
@@ -206,7 +206,7 @@ fn is_protected_inner(path: &Path, allow_root: bool) -> bool {
     }
 
     // Whole user profiles and their data roots: `\Users`, `\Users\<name>`,
-    // `\Users\<name>\AppData`, `…\AppData\Roaming|Local|LocalLow` — deleting
+    // `\Users\<name>\AppData`, `…\AppData\Roaming|Local|LocalLow`, deleting
     // any of these is never a scan-level action, yet the folder scan
     // surfaces exactly these roots. Deeper paths (e.g. Temp files) stay
     // user-controllable.
@@ -229,7 +229,7 @@ fn is_protected_inner(path: &Path, allow_root: bool) -> bool {
         return true;
     }
     // The app's own data dir lives under `\Users\<name>\AppData\…\PCOptSuite`
-    // (Roaming/Local) — never self-delete journal, cache or backups.
+    // (Roaming/Local), never self-delete journal, cache or backups.
     if comps[0].eq_ignore_ascii_case("users")
         && comps.iter().any(|c| c.eq_ignore_ascii_case("pcoptsuite"))
     {
@@ -555,7 +555,7 @@ pub fn scan_duplicates(path: String) -> Value {
     let root = PathBuf::from(&path);
     let files = walk(&root);
 
-    // Group by size — skip tiny files
+    // Group by size, skip tiny files
     let mut by_size: HashMap<u64, Vec<PathBuf>> = HashMap::new();
     for f in files {
         if f.size >= DUP_MIN_BYTES {

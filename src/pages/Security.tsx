@@ -380,7 +380,7 @@ export default function Security({ mode }: { mode: Mode }) {
                     busyLabel: string
                   ) => {
                     if (!deviceId) {
-                      setTaskMsg({ text: `No device instance ID for "${label}" — open Device Manager instead.`, ok: false });
+                      setTaskMsg({ text: `No device instance ID for "${label}", open Device Manager instead.`, ok: false });
                       return;
                     }
                     if (confirmMsg && !window.confirm(confirmMsg)) return;

@@ -164,7 +164,7 @@ enum TweakAction {
         apply: &'static str,
         revert: &'static str,
     },
-    /// PowerShell script — check returns "True" or "1" when applied
+    /// PowerShell script, check returns "True" or "1" when applied
     Ps {
         apply: &'static str,
         revert: &'static str,
@@ -192,7 +192,7 @@ fn catalog() -> Vec<GpuTweak> {
             name: "Maximum Performance (Disable PowerMizer)",
             category: "Clock & Power",
             vendor: "nvidia",
-            description: "Disables PowerMizer — NVIDIA otherwise aggressively lowers GPU clocks at idle and under load.",
+            description: "Disables PowerMizer, NVIDIA otherwise aggressively lowers GPU clocks at idle and under load.",
             impact: "GPU stays at maximum clocks permanently; power saving fully disabled. Not recommended for laptops on battery.",
             risk: "Low",
             reboot: false,
@@ -207,8 +207,8 @@ fn catalog() -> Vec<GpuTweak> {
             name: "Disable Dynamic P-States",
             category: "Clock & Power",
             vendor: "nvidia",
-            description: "Stops dynamic switching between GPU performance states (P0–P8).",
-            impact: "Smoother frametimes — eliminates clock dips from mid-frame P-state transitions. Slightly higher idle power draw.",
+            description: "Stops dynamic switching between GPU performance states (P0-P8).",
+            impact: "Smoother frametimes, eliminates clock dips from mid-frame P-state transitions. Slightly higher idle power draw.",
             risk: "Medium",
             reboot: true,
             actions: vec![
@@ -235,7 +235,7 @@ fn catalog() -> Vec<GpuTweak> {
             name: "Disable NVIDIA Telemetry Container Service",
             category: "Privacy",
             vendor: "nvidia",
-            description: "Sets NvContainerLocalSystem to Manual — prevents the NVIDIA telemetry container from auto-starting.",
+            description: "Sets NvContainerLocalSystem to Manual, prevents the NVIDIA telemetry container from auto-starting.",
             impact: "No NVIDIA telemetry process on boot. GeForce Experience and drivers continue to work normally.",
             risk: "Low",
             reboot: false,
@@ -248,7 +248,7 @@ fn catalog() -> Vec<GpuTweak> {
             name: "Enable NVIDIA Threaded Optimization",
             category: "Rendering",
             vendor: "nvidia",
-            description: "Forces ThreadedOptimization globally — allows the NVIDIA driver to use multi-threading for OpenGL/D3D calls.",
+            description: "Forces ThreadedOptimization globally, allows the NVIDIA driver to use multi-threading for OpenGL/D3D calls.",
             impact: "Higher CPU-GPU throughput in many titles. Explicitly setting this prevents per-app overrides.",
             risk: "Low",
             reboot: false,
@@ -269,7 +269,7 @@ fn catalog() -> Vec<GpuTweak> {
             name: "Disable ULPS (Ultra Low Power State)",
             category: "Clock & Power",
             vendor: "amd",
-            description: "Disables Ultra Low Power State — AMD GPUs otherwise enter a deep sleep that requires a wake-up cycle.",
+            description: "Disables Ultra Low Power State, AMD GPUs otherwise enter a deep sleep that requires a wake-up cycle.",
             impact: "Eliminates the most common AMD micro-stutters on the first frame after idle. No measurable power increase during gaming.",
             risk: "Low",
             reboot: false,
@@ -296,7 +296,7 @@ fn catalog() -> Vec<GpuTweak> {
             name: "Disable Compute Preemption",
             category: "Rendering",
             vendor: "amd",
-            description: "Disables preemptive interruption of compute workloads — reduces driver overhead.",
+            description: "Disables preemptive interruption of compute workloads, reduces driver overhead.",
             impact: "Lower driver latency for compute tasks; less frametime variance in DX12/Vulkan titles.",
             risk: "Medium",
             reboot: true,
@@ -337,8 +337,8 @@ fn catalog() -> Vec<GpuTweak> {
             name:        "Max Pre-Rendered Frames = 1",
             category:    "Low Latency",
             vendor:      "nvidia",
-            description: "Limits NVIDIA frame queue to 1 pre-rendered frame (default: 3). Reduces buffering between CPU and GPU — less input lag, especially at high FPS.",
-            impact:      "3–10 ms lower input lag. May cause minor stutter if CPU is the bottleneck.",
+            description: "Limits NVIDIA frame queue to 1 pre-rendered frame (default: 3). Reduces buffering between CPU and GPU, less input lag, especially at high FPS.",
+            impact:      "3-10 ms lower input lag. May cause minor stutter if CPU is the bottleneck.",
             risk:        "Low",
             reboot:      false,
             actions: vec![
@@ -356,8 +356,8 @@ fn catalog() -> Vec<GpuTweak> {
             name:        "NVIDIA Low Latency Ultra Mode",
             category:    "Low Latency",
             vendor:      "nvidia",
-            description: "Sets NVIDIA frame submission to Ultra Low Latency (RTHM_MODE=2). GPU renders frames just-in-time — minimises the CPU→GPU pipeline delay.",
-            impact:      "Lowest possible input lag in GPU-bound games. Best effect at 60–144 Hz with VSYNC off.",
+            description: "Sets NVIDIA frame submission to Ultra Low Latency (RTHM_MODE=2). GPU renders frames just-in-time, minimises the CPU→GPU pipeline delay.",
+            impact:      "Lowest possible input lag in GPU-bound games. Best effect at 60-144 Hz with VSYNC off.",
             risk:        "Low",
             reboot:      false,
             actions: vec![
@@ -421,7 +421,7 @@ fn detect_status(tweak: &GpuTweak, driver_key: &str) -> &'static str {
             TweakAction::DriverReg { name, apply, .. } => {
                 checkable += 1;
                 // `driver_key` (from detect_gpu) is already the full path under
-                // HKLM — do not re-prepend GPU_CLASS, or this reads/writes a
+                // HKLM, do not re-prepend GPU_CLASS, or this reads/writes a
                 // bogus doubled key and every DriverReg tweak silently no-ops.
                 if reg_read_dword("HKLM", driver_key, name) == Some(*apply) {
                     matching += 1;
@@ -623,20 +623,20 @@ mod tests {
     }
 }
 
-// ── NVIDIA Control Panel — editable global 3D settings ──────────────────────
+// ── NVIDIA Control Panel, editable global 3D settings ──────────────────────
 // Mirrors a subset of "Manage 3D Settings → Global Settings" from NVIDIA's
 // own Control Panel: the handful of options that are genuinely backed by a
 // plain registry DWORD. NVIDIA stores most other global settings (texture
 // filtering quality, antialiasing, vertical sync, digital vibrance, per-app
 // profiles, …) only in its own undocumented driver settings database (DRS),
-// which has no public Windows registry or API surface — those are left to
+// which has no public Windows registry or API surface, those are left to
 // `nv_open_panel()`, which launches NVIDIA's real app instead of faking a
 // control that wouldn't actually do anything.
 //
 // Every change here is captured as a `ChangeItem::Registry` (prev value read
 // live, before writing) and written to the same write-ahead journal as every
 // other tweak in this app, so it shows up in Reports.tsx and is undone with
-// `tweaks::revert_entry` — identical plumbing to Quick Boost.
+// `tweaks::revert_entry`, identical plumbing to Quick Boost.
 
 #[cfg(windows)]
 const NV_TWEAK_HKCU: &str = "Software\\NVIDIA Corporation\\Global\\NVTweak";
@@ -765,7 +765,7 @@ pub fn nv_set_setting(setting: String, value: String) -> Result<Value, String> {
     safety::append_entry(JournalEntry {
         id: entry_id.clone(),
         tweak_id: format!("nvCtrlPanel:{setting}"),
-        tweak_name: format!("NVIDIA Control Panel — {setting} = {value}"),
+        tweak_name: format!("NVIDIA Control Panel, {setting} = {value}"),
         time: chrono::Local::now().to_rfc3339(),
         items: items.clone(),
         reverted: false,

@@ -65,7 +65,7 @@ function DriverRow({ d, admin }: { d: Driver; admin?: boolean }) {
 
   return (
     <div style={{ borderBottom: "1px solid var(--border)" }}>
-      {/* Main row — clickable to expand */}
+      {/* Main row, clickable to expand */}
       <div
         className="row"
         style={{ padding: "7px 0", gap: 8, cursor: "pointer", alignItems: "flex-start" }}

@@ -294,7 +294,7 @@ export default function GpuTweaks({ admin, focusId }: { admin: boolean; focusId?
                             style={{ background: "var(--red)", borderColor: "var(--red)" }}
                             disabled={isBusy || blocked}
                             onClick={() => { setPendingApply(tw.id); setOpen(tw.id); }}
-                            title="This tweak has a known risk for your detected hardware — review before applying"
+                            title="This tweak has a known risk for your detected hardware, review before applying"
                           >
                             {t("gpuReviewRisk")}
                           </button>

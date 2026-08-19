@@ -1,4 +1,4 @@
-//! Context menu cleaner — disable/enable Windows right-click bloat entries.
+//! Context menu cleaner, disable/enable Windows right-click bloat entries.
 //! Disabling renames the registry key (appends "-bak") so it's fully reversible.
 
 use crate::ps;
@@ -168,7 +168,7 @@ pub fn list_entries() -> Value {
 }
 
 pub fn toggle_entry(path: String, enable: bool) -> Result<String, String> {
-    // Only curated entries may be toggled — the path is embedded in a PS
+    // Only curated entries may be toggled, the path is embedded in a PS
     // script, and renaming arbitrary registry keys is a system-level action.
     if !ENTRIES.iter().any(|e| e.path == path) {
         return Err("unbekannter Kontextmenü-Eintrag".into());
@@ -192,7 +192,7 @@ if (Test-Path '{path}') {{
     Rename-Item -Path '{path}' -NewName '{leaf_bak}' -Force -ErrorAction Stop
     "Disabled"
 }} elseif (Test-Path '{bak}') {{ "Already disabled" }}
-else {{ "Key not found — may not be installed" }}
+else {{ "Key not found, may not be installed" }}
 "#
         )
     };
@@ -207,7 +207,7 @@ pub fn disable_all_bloat() -> Result<String, String> {
 
     for e in ENTRIES {
         if !e.admin {
-            // HKCU entries — don't need admin, always attempt
+            // HKCU entries, don't need admin, always attempt
         }
         match toggle_entry(e.path.to_string(), false) {
             Ok(s) if s == "Disabled" => disabled += 1,

@@ -1,5 +1,5 @@
 //! Startup manager. Enumerates Run keys (HKCU/HKLM/Wow6432Node) and Startup
-//! folders, and toggles entries exactly like Task Manager does — via the
+//! folders, and toggles entries exactly like Task Manager does, via the
 //! StartupApproved registry values (REG_BINARY: first byte 0x02 = enabled,
 //! 0x03 = disabled). Nothing is ever deleted; toggles are fully reversible.
 

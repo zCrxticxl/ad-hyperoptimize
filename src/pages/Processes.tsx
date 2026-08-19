@@ -191,7 +191,7 @@ export default function Processes() {
                         <td colSpan={7} style={{ background: "var(--bg2)" }}>
                           <div className="row">
                             <span className="muted" style={{ fontSize: 12 }}>
-                              {t("procCores")} (0–{data.coreCount - 1}), {t("procCoresEg")}:
+                              {t("procCores")} (0-{data.coreCount - 1}), {t("procCoresEg")}:
                             </span>
                             <input className="select" value={affinityText} onChange={(e) => setAffinityText(e.target.value)} style={{ width: 160 }} />
                             <button className="btn small" onClick={() => {

@@ -12,7 +12,7 @@ use std::os::windows::process::CommandExt;
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-/// Upper bound for every external command — a hung powershell/WMI call must
+/// Upper bound for every external command, a hung powershell/WMI call must
 /// not block a command worker forever. On timeout the process is killed.
 const CMD_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -81,7 +81,7 @@ fn wait_with_timeout(
     Ok((status, out, err))
 }
 
-/// Kill `child` and — on Windows — its entire descendant tree so no orphaned
+/// Kill `child` and, on Windows, its entire descendant tree so no orphaned
 /// grandchild survives a timeout.
 fn kill_tree(child: &mut Child) -> std::io::Result<()> {
     let _ = child.kill();
@@ -262,7 +262,7 @@ pub fn is_admin() -> bool {
 /// PowerShell script. Rejects every character that has meaning inside PS
 /// single or double quotes (`'`, `"`, `$`, backtick), plus control chars,
 /// so a validated value is safe to embed in either quoting style. All other
-/// Unicode (umlauts, CJK, …) is allowed — PS strings are UTF-16.
+/// Unicode (umlauts, CJK, …) is allowed, PS strings are UTF-16.
 pub fn is_safe_ident(s: &str) -> bool {
     !s.is_empty()
         && s.len() <= 256
@@ -341,7 +341,7 @@ mod tests {
 
     // wait_with_timeout / run_checked are the heart of the PS bridge: output
     // must be captured (piped) and a hung child must be killed on timeout.
-    // `sh` only exists on non-Windows dev hosts — the production powershell
+    // `sh` only exists on non-Windows dev hosts, the production powershell
     // path is verified on Windows; these guard the generic logic here.
     #[cfg(not(windows))]
     #[test]

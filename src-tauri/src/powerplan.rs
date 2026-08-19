@@ -1,4 +1,4 @@
-//! Power Plan Manager — list, activate, create and unlock Windows power schemes.
+//! Power Plan Manager, list, activate, create and unlock Windows power schemes.
 
 use crate::ps;
 use serde_json::{json, Value};
@@ -77,7 +77,7 @@ if ($existing) {{
     "Ultimate Performance plan is already available"
 }} else {{
     powercfg /duplicatescheme {ULTIMATE_GUID} 2>&1
-    "Ultimate Performance plan unlocked — restart powercfg to see it"
+    "Ultimate Performance plan unlocked, restart powercfg to see it"
 }}
 "#
     );

@@ -1,4 +1,4 @@
-//! Privacy Center — catalog of Windows privacy tweaks with apply/revert/check.
+//! Privacy Center, catalog of Windows privacy tweaks with apply/revert/check.
 //! All via registry + service control. Check status in a single PS call.
 
 use crate::ps;
@@ -38,7 +38,7 @@ static TWEAKS: &[PrivacyTweak] = &[
         id:          "prv_telemetry_basic",
         name:        "Set Telemetry to Minimum",
         category:    "Telemetry",
-        description: "Sets AllowTelemetry to 1 (Basic) — lowest value for Home/Pro. Prevents sending Enhanced/Full diagnostic data.",
+        description: "Sets AllowTelemetry to 1 (Basic), lowest value for Home/Pro. Prevents sending Enhanced/Full diagnostic data.",
         risk:        "Low",
         apply:       r#"$p='HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection'; if(!(Test-Path $p)){New-Item -Path $p -Force|Out-Null}; Set-ItemProperty -Path $p -Name AllowTelemetry -Value 1 -Type DWord; Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\DataCollection' -Name AllowTelemetry -Value 1 -Type DWord -ErrorAction SilentlyContinue"#,
         revert:      r#"Remove-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection' -Name AllowTelemetry -ErrorAction SilentlyContinue"#,
@@ -78,7 +78,7 @@ static TWEAKS: &[PrivacyTweak] = &[
         id:          "prv_dmwap_off",
         name:        "Disable WAP Push Service",
         category:    "Telemetry",
-        description: "Disables dmwappushservice — used for telemetry routing, not needed for normal user applications.",
+        description: "Disables dmwappushservice, used for telemetry routing, not needed for normal user applications.",
         risk:        "Low",
         apply:       "Stop-Service -Name dmwappushservice -Force -ErrorAction SilentlyContinue; Set-Service -Name dmwappushservice -StartupType Disabled -ErrorAction SilentlyContinue",
         revert:      "Set-Service -Name dmwappushservice -StartupType Manual -ErrorAction SilentlyContinue",
@@ -90,7 +90,7 @@ static TWEAKS: &[PrivacyTweak] = &[
         id:          "prv_adid_off",
         name:        "Disable Advertising ID",
         category:    "Advertising",
-        description: "Disables the Windows Advertising ID — prevents cross-app tracking for personalized ads.",
+        description: "Disables the Windows Advertising ID, prevents cross-app tracking for personalized ads.",
         risk:        "Low",
         apply:       r#"$p='HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\AdvertisingInfo'; if(!(Test-Path $p)){New-Item -Path $p -Force|Out-Null}; Set-ItemProperty -Path $p -Name Enabled -Value 0 -Type DWord"#,
         revert:      r#"Set-ItemProperty -Path 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\AdvertisingInfo' -Name Enabled -Value 1 -Type DWord"#,
@@ -190,7 +190,7 @@ static TWEAKS: &[PrivacyTweak] = &[
         id:          "prv_feedback_never",
         name:        "Disable Feedback Requests",
         category:    "Feedback",
-        description: "Sets feedback frequency to Never — prevents Windows feedback dialogs from appearing.",
+        description: "Sets feedback frequency to Never, prevents Windows feedback dialogs from appearing.",
         risk:        "Low",
         apply:       r#"$p='HKCU:\SOFTWARE\Microsoft\Siuf\Rules'; if(!(Test-Path $p)){New-Item -Path $p -Force|Out-Null}; Set-ItemProperty -Path $p -Name NumberOfSIUFInPeriod -Value 0 -Type DWord; Remove-ItemProperty -Path $p -Name PeriodInNanoSeconds -ErrorAction SilentlyContinue"#,
         revert:      r#"Remove-ItemProperty -Path 'HKCU:\SOFTWARE\Microsoft\Siuf\Rules' -Name NumberOfSIUFInPeriod -ErrorAction SilentlyContinue"#,

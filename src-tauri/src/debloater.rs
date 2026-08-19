@@ -1,4 +1,4 @@
-//! Windows Debloater — remove UWP bloatware + disable telemetry/ads/Cortana.
+//! Windows Debloater, remove UWP bloatware + disable telemetry/ads/Cortana.
 
 use crate::ps;
 use serde_json::{json, Value};
@@ -34,7 +34,7 @@ $apps | ConvertTo-Json -Compress -Depth 3
 }
 
 pub fn remove_uwp(package_full_name: String) -> Result<String, String> {
-    // Sanitize — only allow package name characters
+    // Sanitize, only allow package name characters
     if package_full_name.contains('\'') || package_full_name.contains('"') {
         return Err("Invalid package name".into());
     }
@@ -83,14 +83,14 @@ struct Tweak {
     // PowerShell to check current state → should output "1" if tweak is applied
     check: &'static str,
     apply: &'static str,
-    // Fallback undo with documented defaults — only used when no captured
+    // Fallback undo with documented defaults, only used when no captured
     // state exists (e.g. a revert without a matching apply in this install).
     undo: &'static str,
     /// Registry values written by `apply` (root, path, name). Captured before
-    /// applying so the undo restores the exact previous value — or removes
+    /// applying so the undo restores the exact previous value, or removes
     /// the value when it did not exist before (never guesses a default).
     capture: &'static [(&'static str, &'static str, &'static str)],
-    /// Service controlled by `apply` — start type and running state are
+    /// Service controlled by `apply`, start type and running state are
     /// captured before applying and restored exactly on undo.
     service: Option<&'static str>,
 }
@@ -310,7 +310,7 @@ pub fn list_tweaks() -> Value {
             // A tweak we successfully applied always has a captured state file.
             // The live registry check can be flaky on some systems (value
             // read-back differs from what we wrote), so treat "we applied it
-            // in this app" as applied too — revert uses that exact state file,
+            // in this app" as applied too, revert uses that exact state file,
             // so the status never wrongly flips back to "not applied".
             let applied = live || state_path(t.id).exists();
             json!({
@@ -431,7 +431,7 @@ pub fn apply_tweak(id: String) -> Result<String, String> {
         .iter()
         .find(|t| t.id == id)
         .ok_or_else(|| format!("Unknown tweak: {id}"))?;
-    // Capture before applying — the undo restores exactly this.
+    // Capture before applying, the undo restores exactly this.
     let state = capture_state(t)?;
     ps::run(t.apply)?;
     let dir = state_path(id.as_str()).parent().unwrap().to_path_buf();
@@ -465,7 +465,7 @@ pub fn revert_tweak(id: String) -> Result<String, String> {
             match res {
                 Ok(_) => {
                     // Only drop the captured state once the exact restore
-                    // succeeded — deleting it on failure would silently
+                    // succeeded, deleting it on failure would silently
                     // downgrade a retry to the guessed-default static undo.
                     let _ = std::fs::remove_file(&path);
                     Ok(format!("Reverted: {}", t.name))
@@ -476,7 +476,7 @@ pub fn revert_tweak(id: String) -> Result<String, String> {
             }
         }
         // No captured state (apply happened outside this app or the state was
-        // lost) — fall back to the documented-default undo.
+        // lost), fall back to the documented-default undo.
         None => ps::run(t.undo).map(|_| format!("Reverted: {}", t.name)),
     }
 }

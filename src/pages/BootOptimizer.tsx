@@ -17,7 +17,7 @@ type ScanData = {
 };
 
 const fmtMs = (ms: number) => {
-  if (ms < 0)    return "–";
+  if (ms < 0)    return "-";
   if (ms < 1000) return `${ms} ms`;
   return `${(ms / 1000).toFixed(1)} s`;
 };
@@ -269,7 +269,7 @@ export default function BootOptimizer({ admin }: { admin: boolean }) {
         <>
           <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 16 }}>
             <div className="stat-chip" style={{ borderColor: rating.color }}>
-              <div className="chip-val" style={{ color: rating.color }}>{data.lastBootMs > 0 ? `${(data.lastBootMs/1000).toFixed(1)} s` : "–"}</div>
+              <div className="chip-val" style={{ color: rating.color }}>{data.lastBootMs > 0 ? `${(data.lastBootMs/1000).toFixed(1)} s` : "-"}</div>
               <div className="chip-lbl">{t("bootLast")}</div>
             </div>
             <div className="stat-chip">

@@ -78,7 +78,7 @@ export default function HealthCheck({ admin }: { admin: boolean }) {
   const repairedCount = Object.values(results).filter(r => r.result === "repaired").length;
   const unknownCount   = Object.values(results).filter(r => r.result === "unknown").length;
 
-  // Only summarise once EVERY check has run — a green "all good" while other
+  // Only summarise once EVERY check has run, a green "all good" while other
   // checks are still pending would be a false success.
   const summary = allDone === CHECKS.length && allDone > 0
     ? hasProblem
@@ -164,8 +164,8 @@ export default function HealthCheck({ admin }: { admin: boolean }) {
       <div style={{ marginTop: 16 }}>
         <Card title={t("healthWorkflow")}>
           <div className="muted" style={{ fontSize: 13, lineHeight: 2 }}>
-            <div>1. <strong>DISM CheckHealth</strong> — {t("hw1")}</div>
-            <div>2. <strong>SFC /scannow</strong> — {t("hw2")}</div>
+            <div>1. <strong>DISM CheckHealth</strong>, {t("hw1")}</div>
+            <div>2. <strong>SFC /scannow</strong>, {t("hw2")}</div>
             <div>3. {t("hw3")}</div>
             <div>4. {t("hw4")}</div>
             <div>5. {t("hw5")}</div>

@@ -2,7 +2,7 @@
 //!
 //! Apps:    winget (built into Windows 10 1809+/11). List + selective or
 //!          bulk silent upgrades.
-//! Drivers: Windows Update Agent COM API — WHQL-signed drivers straight from
+//! Drivers: Windows Update Agent COM API, WHQL-signed drivers straight from
 //!          Microsoft. Deliberately NO third-party driver sources: that whole
 //!          ecosystem is scamware. GPU drivers get a vendor hint instead,
 //!          since vendor packages (NVIDIA/AMD) are newer than WU's.
@@ -55,7 +55,7 @@ pub fn scan_app_updates() -> Result<Value, String> {
         }
     })?;
 
-    // winget redraws progress with '\r' — keep only the final segment per line.
+    // winget redraws progress with '\r', keep only the final segment per line.
     let lines: Vec<String> = raw
         .lines()
         .map(|l| l.rsplit('\r').next().unwrap_or("").to_string())
@@ -124,7 +124,7 @@ pub fn scan_app_updates() -> Result<Value, String> {
     let mut apps = Vec::new();
     for line in &lines[dash_idx + 1..] {
         if is_dash(line) {
-            break; // secondary section (e.g. pinned packages) — stop
+            break; // secondary section (e.g. pinned packages), stop
         }
         let chars: Vec<char> = line.chars().collect();
         if chars.len() < cols[1] + 1 {
@@ -163,7 +163,7 @@ pub fn scan_app_updates() -> Result<Value, String> {
 }
 
 /// Upgrade one app by exact id, or everything when `id` is None.
-/// Silent, license-accepting. Can run for many minutes — async command.
+/// Silent, license-accepting. Can run for many minutes, async command.
 pub fn update_apps(id: Option<String>) -> Result<Value, String> {
     let mut args: Vec<String> = vec!["upgrade".into()];
     match &id {
@@ -192,7 +192,7 @@ pub fn update_apps(id: Option<String>) -> Result<Value, String> {
     args.extend(extra.iter().map(|s| s.to_string()));
     let argrefs: Vec<&str> = args.iter().map(String::as_str).collect();
 
-    // winget writes errors to stdout (not stderr) — exec_capture returns the
+    // winget writes errors to stdout (not stderr), exec_capture returns the
     // status + both streams, and enforces the long timeout + tree kill so a
     // hung installer can never wedge the command or leak children.
     let (status, stdout, _stderr) = ps::exec_capture("winget.exe", &argrefs)?;

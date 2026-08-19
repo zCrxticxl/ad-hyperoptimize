@@ -42,7 +42,7 @@ export default function Dashboard({ mode, go }: { mode: Mode; go: (p: string, ta
         <h1>{t("dashTitle")}</h1>
         <p>{analysis ? localizeSummary(findings, t) : busy ? t("dashRunningFullAnalysis") : t("dashSub")}</p>
         <div className="hero-actions">
-          {/* Auto-Optimize is the "just make it faster" path — it stays the primary
+          {/* Auto-Optimize is the "just make it faster" path, it stays the primary
               action so a new user never has to pick tweaks by hand. */}
           <button className="btn" onClick={() => go("autoopt")}><span aria-hidden="true">⚡</span> {t("navAutoOpt")}</button>
           <button className="btn ghost" onClick={() => run(true)} disabled={busy}>{busy ? <><Spinner /> {t("dashAnalyzing")}</> : <>↻ {t("dashReanalyze")}</>}</button>
@@ -52,7 +52,7 @@ export default function Dashboard({ mode, go }: { mode: Mode; go: (p: string, ta
         {err && <div className="inline-error">{err}</div>}
       </div>
       <div className="score-orbit" style={{ background: `conic-gradient(${ringColor} 0 ${arc}%, rgba(255,255,255,.09) ${arc}%)` }}>
-        <div className="score-inner"><span className="score-value">{busy && score === null ? <Spinner /> : score ?? "—"}</span><span className="score-label">{t("dashHealthScore")}</span><span className="score-total">/ 100</span></div>
+        <div className="score-inner"><span className="score-value">{busy && score === null ? <Spinner /> : score ?? "-"}</span><span className="score-label">{t("dashHealthScore")}</span><span className="score-total">/ 100</span></div>
       </div>
     </section>
 
