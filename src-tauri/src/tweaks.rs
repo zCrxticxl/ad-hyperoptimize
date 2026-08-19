@@ -75,8 +75,9 @@ fn parse_tcp_autotuning(out: &str) -> Option<String> {
 fn capture_revert(cap: &ShowCapture) -> Option<String> {
     match cap {
         ShowCapture::PowerScheme => {
-            let out = run_cmdline("powercfg /getactivescheme").ok()?;
-            parse_power_scheme(out.as_str())
+            // ps::exec returns the captured output; run_cmdline discards it.
+            let out = crate::ps::exec("powercfg.exe", &["/getactivescheme"]).ok()?;
+            parse_power_scheme(&out)
         }
         ShowCapture::TcpAutotuning => {
             // Get-NetTCPSetting is a PowerShell cmdlet, not an executable —
