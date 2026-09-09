@@ -752,10 +752,12 @@ async fn cmd_uninstaller_list() -> Value {
 }
 
 #[tauri::command(async)]
-async fn cmd_uninstall_app(uninstall_string: String) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || uninstaller::uninstall_app(uninstall_string))
-        .await
-        .map_err(|_| "uninstall task panicked".to_string())?
+async fn cmd_uninstall_app(uninstall_string: String, from_hkcu: Option<bool>) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        uninstaller::uninstall_app(uninstall_string, from_hkcu.unwrap_or(false))
+    })
+    .await
+    .map_err(|_| "uninstall task panicked".to_string())?
 }
 
 #[tauri::command(async)]

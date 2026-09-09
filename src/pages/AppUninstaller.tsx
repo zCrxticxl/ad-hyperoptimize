@@ -52,7 +52,7 @@ export default function AppUninstaller({ admin }: { admin: boolean }) {
     if (!window.confirm(`${t("uninstConfirmTitle")} "${app.name}"?\n\n${t("uninstConfirmBody")}`)) return;
     setBusy(app.name);
     try {
-      const msg = await api.uninstallApp(app.uninstallString);
+      const msg = await api.uninstallApp(app.uninstallString, app.hive === "HKCU");
       setLog(prev => ({ ...prev, [app.name]: msg }));
     } catch (e: any) {
       setLog(prev => ({ ...prev, [app.name]: String(e) }));

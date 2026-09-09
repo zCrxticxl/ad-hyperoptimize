@@ -22,7 +22,7 @@ export const api = {
   defenderQuickScan: () => invoke<string>("cmd_defender_quick_scan"),
   // app uninstaller
   uninstallerList: () => invoke<any>("cmd_uninstaller_list"),
-  uninstallApp: (uninstallString: string) => invoke<string>("cmd_uninstall_app", { uninstallString }),
+  uninstallApp: (uninstallString: string, fromHkcu: boolean) => invoke<string>("cmd_uninstall_app", { uninstallString, fromHkcu }),
   scanLeftovers: (appName: string, publisher: string, installLocation: string) =>
     invoke<any>("cmd_scan_leftovers", { appName, publisher, installLocation }),
   cleanLeftovers: (paths: string[]) => invoke<string>("cmd_clean_leftovers", { paths }),

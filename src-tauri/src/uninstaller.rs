@@ -22,7 +22,9 @@ foreach ($k in $keys) {
         $dedup = $_.DisplayName.ToLower().Trim()
         if (-not $seen[$dedup]) {
             $seen[$dedup] = $true
+                $hive = if ($k -like '*HKCU*') { 'HKCU' } else { 'HKLM' }
             $apps += [PSCustomObject]@{
+                hive            = $hive
                 name            = $_.DisplayName.Trim()
                 publisher       = if ($_.Publisher)       { $_.Publisher.Trim() }      else { '' }
                 version         = if ($_.DisplayVersion)  { $_.DisplayVersion.Trim() } else { '' }
@@ -43,8 +45,22 @@ $apps | Sort-Object name | ConvertTo-Json -Compress -Depth 2
     }
 }
 
-pub fn uninstall_app(uninstall_string: String) -> Result<String, String> {
+pub fn uninstall_app(uninstall_string: String, from_hkcu: bool) -> Result<String, String> {
     // Detect MSI vs EXE and launch appropriately, detached so UI stays responsive.
+    //
+    // The cmd.exe /C fallback executes the string verbatim. For HKLM entries
+    // that adds no privilege (writing them already needs admin), but a per-user
+    // HKCU entry can be planted by user-level malware, so executing it from
+    // this elevated app would turn the uninstall button into an escalation
+    // path. Quoted-exe and MsiExec forms stay allowed for per-user apps.
+    let needs_cmd_shell = !uninstall_string.starts_with('"')
+        && !uninstall_string.to_lowercase().starts_with("msiexec");
+    if from_hkcu && needs_cmd_shell {
+        return Err(
+            "Refused for safety: this per-user uninstaller would run through cmd.exe,              which installed software could forge into an admin-level payload.              Please uninstall it from Windows Settings > Apps."
+                .into(),
+        );
+    }
     let safe = uninstall_string.replace('\'', "''");
     let script = format!(
         r#"
