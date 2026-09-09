@@ -11,11 +11,23 @@ use std::sync::Mutex;
 static JOURNAL_LOCK: Mutex<()> = Mutex::new(());
 
 pub fn app_data_dir() -> PathBuf {
-    let p = dirs::data_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("PCOptSuite");
-    let _ = fs::create_dir_all(p.join("backups"));
-    let _ = fs::create_dir_all(p.join("reports"));
+    // Under elevation the CWD can be System32; a "." fallback would silently
+    // relocate the whole journal/backup pipeline there. Fall back to
+    // %APPDATA%, then the home directory, then temp — all guaranteed writable.
+    let base = dirs::data_dir()
+        .or_else(|| std::env::var("APPDATA").ok().map(PathBuf::from))
+        .or_else(dirs::home_dir)
+        .unwrap_or_else(std::env::temp_dir);
+    let p = base.join("PCOptSuite");
+    if let Err(e) = fs::create_dir_all(p.join("backups"))
+        .map_err(|e| e.to_string())
+        .and_then(|_| fs::create_dir_all(p.join("reports")).map_err(|e| e.to_string()))
+    {
+        eprintln!(
+            "ad-hyperoptimize: cannot create data dir {}: {e}",
+            p.display()
+        );
+    }
     p
 }
 
@@ -45,6 +57,15 @@ pub enum ChangeItem {
 pub enum RegVal {
     Dword(u32),
     Str(String),
+    /// Faithful capture of an exotic registry type (REG_BINARY, REG_QWORD,
+    /// REG_EXPAND_SZ, REG_MULTI_SZ, …). `ty` mirrors the winreg RegType name,
+    /// `hex` is the raw little-endian payload. Only ever produced by capture
+    /// and only ever written back verbatim, so undo preserves the original
+    /// representation instead of degrading it to REG_SZ or deletion.
+    Raw {
+        ty: String,
+        hex: String,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -56,6 +77,25 @@ pub struct JournalEntry {
     pub items: Vec<ChangeItem>,
     pub reverted: bool,
     pub backup_files: Vec<String>,
+    /// False between the write-ahead append and full apply success. An
+    /// interrupted apply must never count as "applied" in the UI.
+    #[serde(default = "default_completed")]
+    pub completed: bool,
+    /// How many items apply actually attempted (crash safety: undo only
+    /// touches what was attempted). usize::MAX = legacy/unknown = all.
+    #[serde(default = "default_all_attempted")]
+    pub attempted: usize,
+    /// How many items (counted from the END of items) a partial revert has
+    /// already restored, so a retry resumes exactly where it stopped.
+    #[serde(default)]
+    pub reverted_items: usize,
+}
+
+fn default_completed() -> bool {
+    true
+}
+fn default_all_attempted() -> usize {
+    usize::MAX
 }
 
 fn journal_path() -> PathBuf {
@@ -100,7 +140,9 @@ pub fn with_journal<R>(
 
 /// Appends an entry and returns the ACTUAL stored id: collisions (two applies
 /// of the same tweak within one second) get a numeric suffix so every entry
-/// keeps an unambiguous restore token.
+/// keeps an unambiguous restore token. The journal is pruned on append so it
+/// stays bounded: beyond 500 entries the oldest already-reverted ones are
+/// dropped first; entries with undo state are never dropped.
 pub fn append_entry(entry: JournalEntry) -> Result<String, String> {
     with_journal(|j| {
         let mut id = entry.id.clone();
@@ -112,8 +154,54 @@ pub fn append_entry(entry: JournalEntry) -> Result<String, String> {
         let mut owned = entry;
         owned.id = id.clone();
         j.push(owned);
+
+        const MAX_ENTRIES: usize = 500;
+        if j.len() > MAX_ENTRIES {
+            // Oldest-first, but only fully reverted AND completed entries are
+            // expendable; open undo state always survives.
+            let mut reverted_idx: Vec<usize> = j
+                .iter()
+                .enumerate()
+                .filter(|(_, e)| e.reverted && e.completed)
+                .map(|(i, _)| i)
+                .collect();
+            reverted_idx.sort_unstable();
+            let excess = j.len() - MAX_ENTRIES;
+            let drop: std::collections::HashSet<usize> =
+                reverted_idx.into_iter().take(excess).collect();
+            if drop.len() == excess {
+                let mut i = 0;
+                j.retain(|_| {
+                    let keep = !drop.contains(&i);
+                    i += 1;
+                    keep
+                });
+            }
+        }
         Ok(id)
     })
+}
+
+/// Newest `.reg` backup for a registry key, or None. Used by the force-revert
+/// path to restore prior state instead of blindly deleting values.
+pub fn latest_backup_for(root: &str, path: &str) -> Option<String> {
+    let safe = path.replace(['\\', '/'], "_");
+    let prefix = format!("{root}_{safe}_");
+    let mut best: Option<(std::time::SystemTime, String)> = None;
+    for entry in fs::read_dir(app_data_dir().join("backups")).ok()?.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.starts_with(&prefix) && name.ends_with(".reg") {
+            let modified = entry.metadata().and_then(|m| m.modified()).ok()?;
+            let better = match &best {
+                Some((t, _)) => modified > *t,
+                None => true,
+            };
+            if better {
+                best = Some((modified, entry.path().to_string_lossy().into_owned()));
+            }
+        }
+    }
+    best.map(|(_, p)| p)
 }
 
 /// Export a registry key with reg.exe before touching it. Returns backup path.
@@ -136,7 +224,9 @@ pub fn create_restore_point(description: &str) -> Result<String, String> {
             "Administrator rights required for restore points. Restart the app as admin.".into(),
         );
     }
-    let desc = description.replace('\'', "");
+    // PowerShell doubles '' inside single-quoted strings; stripping changed
+    // the user's description text.
+    let desc = description.replace('\'', "''");
     match ps::run(&format!(
         "Checkpoint-Computer -Description '{desc}' -RestorePointType MODIFY_SETTINGS -ErrorAction Stop; 'OK'"
     )) {

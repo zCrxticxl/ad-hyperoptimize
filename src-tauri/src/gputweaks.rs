@@ -770,6 +770,9 @@ pub fn nv_set_setting(setting: String, value: String) -> Result<Value, String> {
         items: items.clone(),
         reverted: false,
         backup_files: vec![],
+        completed: true,
+        attempted: usize::MAX,
+        reverted_items: 0,
     })?;
 
     for (idx, item) in items.iter().enumerate() {

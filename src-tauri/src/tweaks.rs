@@ -55,6 +55,10 @@ pub enum ShowCapture {
         subgroup: &'static str,
         setting: &'static str,
     },
+    /// Snapshots the per-interface TcpAckFrequency/TCPNoDelay state before
+    /// mutation; the generated revert restores exactly the captured values
+    /// and never touches adapters added afterwards.
+    NagleInterfaces,
 }
 
 /// Extract the active power scheme GUID from `powercfg /getactivescheme`
@@ -105,6 +109,55 @@ fn parse_active_scheme_guid(out: &str) -> Option<String> {
     out.split_whitespace()
         .find(|t| crate::ps::is_guid(t))
         .map(|s| s.to_string())
+}
+
+/// Enumerates the per-interface Nagle state as `GUID|ack|nodelay` lines
+/// ("A" marks an absent value). Locale-independent: only the key GUID and
+/// numeric values are read.
+#[cfg(any(windows, test))]
+const NAGLE_SNAPSHOT_PS: &str = r#"
+Get-ChildItem 'HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces' | ForEach-Object {
+  $p = Get-ItemProperty -Path $_.PSPath
+  $ack = if ($p.PSObject.Properties['TcpAckFrequency']) { $p.TcpAckFrequency } else { 'A' }
+  $nd  = if ($p.PSObject.Properties['TCPNoDelay'])    { $p.TCPNoDelay }    else { 'A' }
+  "$($_.PSChildName)|$ack|$nd"
+}"#;
+
+/// Builds a revert script from a NAGLE_SNAPSHOT_PS capture. Every step is
+/// baked from the captured state: pre-existing values are restored verbatim,
+/// absent values get a conditional delete (only removed if still holding the
+/// value we wrote), and any step failure fails the whole undo.
+#[cfg(any(windows, test))]
+fn build_nagle_revert(out: &str) -> Option<String> {
+    let mut steps: Vec<String> = Vec::new();
+    for line in out.lines().map(str::trim).filter(|l| !l.is_empty()) {
+        let mut parts = line.split('|');
+        let key = parts.next()?;
+        let ack = parts.next()?;
+        let nd = parts.next()?;
+        if parts.next().is_some() || !crate::ps::is_guid(key) {
+            return None;
+        }
+        let path = format!(
+            "HKLM:\\SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters\\Interfaces\\{key}"
+        );
+        for (name, captured) in [("TcpAckFrequency", ack), ("TCPNoDelay", nd)] {
+            if captured == "A" {
+                steps.push(format!(
+                    "$v = (Get-ItemProperty -Path '{path}' -Name '{name}' -EA SilentlyContinue).'{name}'; \
+                     if ($v -eq 1) {{ Remove-ItemProperty -Path '{path}' -Name '{name}' -EA Stop }} else {{ if ($null -ne $v) {{ exit 1 }} }}"
+                ));
+            } else if captured != "1" {
+                steps.push(format!(
+                    "Set-ItemProperty -Path '{path}' -Name '{name}' -Value {captured} -Type DWord -EA Stop"
+                ));
+            }
+        }
+    }
+    if steps.is_empty() {
+        return Some("powershell -Command \"exit 0\"".into());
+    }
+    Some(format!("powershell -Command \"{}\"", steps.join("; ")))
 }
 
 /// Run a capture and build the exact revert command for it.
@@ -172,6 +225,10 @@ fn capture_revert(cap: &ShowCapture) -> Option<String> {
                      if ($LASTEXITCODE -eq 0) {{ powercfg /setactive scheme_current }} }}\""
                 )
             })
+        }
+        ShowCapture::NagleInterfaces => {
+            let out = crate::ps::run(NAGLE_SNAPSHOT_PS).ok()?;
+            build_nagle_revert(&out)
         }
     }
 }
@@ -877,8 +934,10 @@ pub fn catalog() -> Vec<Tweak> {
                     apply: r"powershell -NoProfile -WindowStyle Hidden -Command $errs = 0; Get-ChildItem 'HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces' | ForEach-Object { try { Set-ItemProperty -Path $_.PSPath -Name TcpAckFrequency -Value 1 -Type DWord -Force -EA Stop; Set-ItemProperty -Path $_.PSPath -Name TCPNoDelay -Value 1 -Type DWord -Force -EA Stop } catch { $errs++ } }; if ($errs -gt 0) { exit 1 }",
                     // Only removes values that still hold OUR written value (1),
                     // so an adapter with pre-existing custom settings keeps them.
+                    // Fallback for the force-revert path only; the precise
+                    // journal undo uses the NagleInterfaces capture instead.
                     revert: r"powershell -NoProfile -WindowStyle Hidden -Command $errs = 0; Get-ChildItem 'HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces' | ForEach-Object { $p = Get-ItemProperty -Path $_.PSPath; if ($p.PSObject.Properties['TcpAckFrequency'] -and $p.TcpAckFrequency -eq 1) { try { Remove-ItemProperty -Path $_.PSPath -Name TcpAckFrequency -EA Stop } catch { $errs++ } }; if ($p.PSObject.Properties['TCPNoDelay'] -and $p.TCPNoDelay -eq 1) { try { Remove-ItemProperty -Path $_.PSPath -Name TCPNoDelay -EA Stop } catch { $errs++ } } }; if ($errs -gt 0) { exit 1 }",
-                    show: None,
+                    show: Some(ShowCapture::NagleInterfaces),
                 },
             ],
         },
@@ -991,14 +1050,30 @@ fn reg_read(root: &str, path: &str, name: &str) -> Result<Option<RegVal>, String
                 ))))
             }
             RegType::REG_SZ => Ok(Some(RegVal::Str(rv.to_string()))),
-            other => Err(format!(
-                "unsupported registry type for '{name}' ({other:?}); \
-                 refusing to overwrite a value we cannot faithfully capture"
-            )),
+            other => Ok(Some(RegVal::Raw {
+                ty: format!("{other:?}"),
+                hex: hex_encode(&rv.bytes),
+            })),
         },
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(format!("read {root}\\{path}\\{name}: {e}")),
     }
+}
+
+#[cfg(any(windows, test))]
+fn hex_encode(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+#[cfg(any(windows, test))]
+fn hex_decode(s: &str) -> Option<Vec<u8>> {
+    if s.len() % 2 != 0 {
+        return None;
+    }
+    (0..s.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).ok())
+        .collect()
 }
 
 #[cfg(windows)]
@@ -1009,6 +1084,22 @@ fn reg_write(root: &str, path: &str, name: &str, val: &RegVal) -> Result<(), Str
     match val {
         RegVal::Dword(d) => key.set_value(name, d),
         RegVal::Str(s) => key.set_value(name, s),
+        RegVal::Raw { ty, hex } => {
+            use winreg::enums::RegType::*;
+            let bytes = hex_decode(hex)
+                .ok_or_else(|| format!("set {name}: corrupt raw capture (bad hex)"))?;
+            let vtype = match ty.as_str() {
+                "REG_DWORD" => REG_DWORD,
+                "REG_SZ" => REG_SZ,
+                "REG_EXPAND_SZ" => REG_EXPAND_SZ,
+                "REG_MULTI_SZ" => REG_MULTI_SZ,
+                "REG_BINARY" => REG_BINARY,
+                "REG_QWORD" => REG_QWORD,
+                "REG_NONE" => REG_NONE,
+                other => return Err(format!("set {name}: unknown captured type {other}")),
+            };
+            key.set_raw_value(name, &winreg::RegValue { bytes, vtype })
+        }
     }
     .map_err(|e| format!("set {name}: {e}"))
 }
@@ -1045,6 +1136,19 @@ fn service_set_start(name: &str, mode: &str) -> Result<(), String> {
     if mode == SERVICE_ABSENT {
         return Ok(());
     }
+    // `mode` is interpolated into the PowerShell command; only documented
+    // startup types may ever reach it (blocks injection via journal data).
+    if !matches!(
+        mode,
+        "Automatic" | "AutomaticDelayedStart" | "Manual" | "Disabled"
+    ) {
+        return Err(format!("refusing to set invalid startup type '{mode}'"));
+    }
+    if !crate::ps::is_safe_ident(name) {
+        return Err(format!(
+            "refusing to touch service with unsafe name '{name}'"
+        ));
+    }
     // If the service doesn't exist (e.g. the VS diagnostics hub collector on a
     // non-developer machine), there's nothing to disable, treat as success
     // instead of surfacing a scary "service not found" PowerShell error.
@@ -1079,6 +1183,7 @@ fn run_cmdline(line: &str) -> Result<(), String> {
 fn vals_eq(a: &RegVal, b: &RegVal) -> bool {
     matches!((a, b), (RegVal::Dword(x), RegVal::Dword(y)) if x == y)
         || matches!((a, b), (RegVal::Str(x), RegVal::Str(y)) if x == y)
+        || matches!((a, b), (RegVal::Raw { hex: hx, .. }, RegVal::Raw { hex: hy, .. }) if hx == hy)
 }
 
 // ---------- public API ----------
@@ -1094,13 +1199,11 @@ fn engine_guard() -> Result<std::sync::MutexGuard<'static, ()>, String> {
 
 // Known Windows default startup types for every service we touch in the
 // catalog. Used by the force-revert path when no journal entry is available.
-fn service_default(name: &str) -> &'static str {
+// Returns None for unmapped services: force-revert must refuse rather than
+// silently guess a wrong startup type.
+fn service_default(name: &str) -> Option<&'static str> {
     match name {
-        "DiagTrack" => "Automatic",
-        "SysMain" => "Automatic",
-        "MapsBroker" => "Automatic",
-        "TrkWks" => "Automatic",
-        "WSearch" => "Automatic",
+        "DiagTrack" | "SysMain" | "MapsBroker" | "TrkWks" | "WSearch" => Some("Automatic"),
         // Tweaks set these to Disabled. Manual is the factory default for
         // most editions; RemoteRegistry ships Disabled on Home SKUs (and
         // Manual on Pro/Enterprise), so Disabled is the safe revert for it.
@@ -1111,9 +1214,9 @@ fn service_default(name: &str) -> &'static str {
         | "Fax"
         | "wisvc"
         | "diagnosticshub.standardcollector.service"
-        | "WMPNetworkSvc" => "Manual",
-        "RemoteRegistry" => "Disabled",
-        _ => "Manual", // safe fallback
+        | "WMPNetworkSvc" => Some("Manual"),
+        "RemoteRegistry" => Some("Disabled"),
+        _ => None,
     }
 }
 
@@ -1125,7 +1228,12 @@ pub fn list_with_status() -> Value {
     let out: Vec<Value> = catalog()
         .iter()
         .map(|t| {
-            let undoable = journal.iter().any(|e| e.tweak_id == t.id && !e.reverted);
+            // Only completed entries prove "applied": an interrupted apply
+            // (crash between journal append and mutations) must not show up
+            // as applied/undoable.
+            let undoable = journal
+                .iter()
+                .any(|e| e.tweak_id == t.id && !e.reverted && e.completed);
             // Cmd-only tweaks (powercfg/fsutil/netsh one-shots) have no live
             // state detect_status() can read back, so it always returns
             // "unknown", fall back to the journal: a successful, unreverted
@@ -1287,6 +1395,8 @@ pub fn apply(tweak_id: &str) -> Result<Value, String> {
 
     // 3. Write-ahead journal entry (append returns the ACTUAL id: collisions
     //    with a same-second apply get a suffix so undo tokens stay unique).
+    //    completed=false until every action succeeded; an interrupted apply
+    //    must never count as applied.
     let entry_id = format!(
         "{}-{}",
         t.id,
@@ -1300,6 +1410,9 @@ pub fn apply(tweak_id: &str) -> Result<Value, String> {
         items: items.clone(),
         reverted: false,
         backup_files: backups,
+        completed: false,
+        attempted: 0,
+        reverted_items: 0,
     })?;
 
     // 4. Apply. On failure, roll back everything up to and including the
@@ -1331,7 +1444,20 @@ pub fn apply(tweak_id: &str) -> Result<Value, String> {
                 rollback_errs.join("; ")
             ));
         }
+        let _ = safety::with_journal(|j| {
+            if let Some(en) = j.iter_mut().find(|en| en.id == entry_id) {
+                en.attempted = idx + 1;
+            }
+            Ok(())
+        });
     }
+
+    let _ = safety::with_journal(|j| {
+        if let Some(en) = j.iter_mut().find(|en| en.id == entry_id) {
+            en.completed = true;
+        }
+        Ok(())
+    });
 
     Ok(json!({ "entryId": entry_id, "status": "applied" }))
 }
@@ -1393,19 +1519,32 @@ pub fn revert(tweak_id: &str) -> Result<Value, String> {
         let entry = match journal
             .iter_mut()
             .rev()
-            .find(|e| e.tweak_id == tweak_id && !e.reverted)
+            .find(|e| e.tweak_id == tweak_id && !e.reverted && e.completed)
         {
             Some(e) => e,
+            // Incomplete (interrupted) entries are deliberately skipped: their
+            // apply never finished, so undoing them wholesale would touch
+            // actions that were never attempted. The force-revert path below
+            // handles whatever actually landed, driven by live state.
             None => return Ok(None),
         };
+        // Resume semantics: reverted_items counts already-restored entries
+        // from the END of the list, so a retry continues exactly where the
+        // previous attempt stopped instead of re-running finished steps.
+        let already = entry.reverted_items.min(entry.items.len());
+        let stop = entry.items.len() - already;
         let mut errs = Vec::new();
-        for item in entry.items.iter().rev() {
-            if let Err(e) = revert_item(item) {
-                errs.push(e);
+        for offset in (0..stop).rev() {
+            match revert_item(&entry.items[offset]) {
+                Ok(()) => entry.reverted_items += 1,
+                Err(e) => errs.push(e),
             }
         }
         if !errs.is_empty() {
-            return Err(format!("partial revert, errors: {}", errs.join("; ")));
+            return Err(format!(
+                "partial revert, errors: {} — retry to resume the remaining steps",
+                errs.join("; ")
+            ));
         }
         entry.reverted = true;
         Ok(Some(entry.id.clone()))
@@ -1450,15 +1589,30 @@ pub fn revert(tweak_id: &str) -> Result<Value, String> {
             Action::RegSet {
                 root, path, name, ..
             } => {
-                // Delete the value we wrote. For all our catalog tweaks the
-                // value either didn't exist before (deletion → absent = default)
-                // or was at the Windows built-in default which also wins when
-                // the key is absent. reg_delete returns Ok(()) if already gone.
-                reg_delete(root, path, name)
+                // Blind deletion would destroy values set by the user, Group
+                // Policy or other tools. Restore from the newest .reg backup
+                // when one exists; refuse when there is no backup and the
+                // value is present. Only a genuinely absent value is a no-op.
+                match safety::latest_backup_for(root, path) {
+                    Some(backup) => crate::ps::exec("reg.exe", &["import", &backup]).map(|_| ()),
+                    None => match reg_read(root, path, name) {
+                        Ok(Some(_)) => Err(format!(
+                            "no backup exists for {root}\\{path}\\{name}; refusing to delete \
+                             a value the app cannot prove it created — restore it manually \
+                             or re-apply the tweak and use journal Undo"
+                        )),
+                        other => other.map(|_| ()),
+                    },
+                }
             }
             #[cfg(not(windows))]
             Action::RegSet { .. } => Ok(()),
-            Action::Service { name, .. } => service_set_start(name, service_default(name)),
+            Action::Service { name, .. } => match service_default(name) {
+                Some(default) => service_set_start(name, default),
+                None => Err(format!(
+                    "no known Windows default for service '{name}'; refusing to guess"
+                )),
+            },
             Action::Cmd { revert, .. } => run_cmdline(revert),
         };
         if let Err(e) = res {
@@ -1489,14 +1643,25 @@ pub fn revert_entry(entry_id: &str) -> Result<Value, String> {
         if entry.reverted {
             return Err("already reverted".into());
         }
+        // Only undo what apply actually attempted: an interrupted entry has
+        // items that were never dispatched, and running their revert commands
+        // would modify state the apply never touched. Same resume semantics
+        // as revert(): reverted_items counts restored entries from the END.
+        let attempted = entry.attempted.min(entry.items.len());
+        let already = entry.reverted_items.min(attempted);
+        let stop = attempted - already;
         let mut errs = Vec::new();
-        for item in entry.items.iter().rev() {
-            if let Err(e) = revert_item(item) {
-                errs.push(e);
+        for offset in (0..stop).rev() {
+            match revert_item(&entry.items[offset]) {
+                Ok(()) => entry.reverted_items += 1,
+                Err(e) => errs.push(e),
             }
         }
         if !errs.is_empty() {
-            return Err(format!("partial revert, errors: {}", errs.join("; ")));
+            return Err(format!(
+                "partial revert, errors: {} — retry to resume the remaining steps",
+                errs.join("; ")
+            ));
         }
         entry.reverted = true;
         Ok(entry.id.clone())

@@ -427,6 +427,9 @@ pub fn quick_boost_start(process_name: String) -> Result<Value, String> {
         items: items.clone(),
         reverted: false,
         backup_files: vec![],
+        completed: true,
+        attempted: usize::MAX,
+        reverted_items: 0,
     })?;
 
     // ---- apply; roll back whatever already succeeded if one step fails ----
