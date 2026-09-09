@@ -52,7 +52,7 @@ fn bloat_catalog() -> HashMap<(String, String), &'static str> {
         ("\\microsoft\\windows\\windowsupdate\\", "automatic app update",
             "Automatically updates Store apps in the background, separate from normal Windows Update."),
         ("\\microsoft\\windows\\windowsupdate\\", "scheduled start",
-            "Starts Windows Update scans on a fixed schedule."),
+            "Starts Windows Update scans on a fixed schedule. Effect is limited on Win11: the Update Orchestrator and trigger-start of wuauserv run scans independently of this task."),
         // Workplace Join
         ("\\microsoft\\windows\\workplace join\\", "automatic-device-join",
             "Automatically registers the device in Azure AD / Workplace Join (enterprise feature)."),
@@ -72,11 +72,11 @@ fn bloat_catalog() -> HashMap<(String, String), &'static str> {
             "Sends detailed device inventory data to Microsoft (Device Census)."),
         ("\\microsoft\\windows\\device information\\", "device user",
             "Sends user-related device data to Microsoft."),
-        // Feedback
-        ("\\microsoft\\windows\\feedback\\siuf\\", "dosiffeedbacktask",
-            "Windows Feedback Hub: solicits user feedback in the background."),
-        ("\\microsoft\\windows\\feedback\\siuf\\", "dosiffeedbacktasknonujailbreak",
-            "Feedback Hub background task for non-Insiders."),
+        // Siuf tasks were removed from Windows 11 25H2; still present on Windows 10 and 24H2.
+        ("\\microsoft\\windows\\feedback\\siuf\\", "dmclient",
+            "Feedback/telemetry client task (Siuf): uploads user feedback diagnostics in the background."),
+        ("\\microsoft\\windows\\feedback\\siuf\\", "dmclientonscenariodownload",
+            "Feedback/telemetry client task (Siuf, scenario download): downloads feedback-scenario payloads."),
         // Clip
         ("\\microsoft\\windows\\clip\\", "license validation",
             "Microsoft Store license validation, runs periodically in the background."),
