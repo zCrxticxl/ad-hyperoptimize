@@ -1304,63 +1304,34 @@ fn ensure_admin() {
             };
             // Escape single quotes in path, hide the spawning shell entirely
             let path = exe.to_string_lossy().replace('\'', "''");
-            let Ok(_) = std::process::Command::new("powershell")
+            // Relaunch elevated and block on the UAC outcome before this
+            // unelevated instance shows any window. `Start-Process -Verb RunAs`
+            // throws if the user declines UAC; the try/catch maps that to a
+            // non-zero exit. On approval we exit immediately so ONLY the
+            // elevated window appears (no lingering second, unelevated window);
+            // on cancellation we fall through and keep running unelevated with
+            // the in-app admin hint.
+            let approved = std::process::Command::new("powershell")
                 .args([
                     "-NoProfile",
                     "-NonInteractive",
                     "-WindowStyle",
                     "Hidden",
                     "-Command",
-                    &format!("Start-Process -FilePath '{}' -Verb RunAs", path),
+                    &format!(
+                        "try {{ Start-Process -FilePath '{}' -Verb RunAs -ErrorAction Stop; exit 0 }} \
+                         catch {{ exit 1 }}",
+                        path
+                    ),
                 ])
                 .creation_flags(CREATE_NO_WINDOW)
-                .spawn()
-            else {
-                return;
-            };
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false);
 
-            // Watch for the elevated sibling in the background. The moment it
-            // shows up (user approved UAC) this unelevated instance exits and
-            // the elevated one takes over. If the user cancels UAC no sibling
-            // ever appears, the app keeps running unelevated instead of
-            // silently vanishing, and the UI shows the admin hint.
-            // Note: the check must exclude THIS process (its own PID), not
-            // the PowerShell child's PID. Polling is bounded (5 min) so the
-            // watchdog never spins forever if the user neither approves nor
-            // cancels, the unelevated instance simply keeps running.
-            let needle = exe.to_string_lossy().to_lowercase().replace('\'', "''");
-            let own_pid = std::process::id();
-            let exe_name = exe
-                .file_name()
-                .map(|n| n.to_string_lossy().replace('\'', "''"))
-                .unwrap_or_default();
-            std::thread::spawn(move || {
-                for _ in 0..150 {
-                    std::thread::sleep(std::time::Duration::from_secs(2));
-                    let found = std::process::Command::new("powershell")
-                        .args([
-                            "-NoProfile",
-                            "-NonInteractive",
-                            "-WindowStyle",
-                            "Hidden",
-                            "-Command",
-                            &format!(
-                                "$self = {own_pid}; \
-                                 Get-CimInstance Win32_Process -Filter \"Name='{exe_name}'\" | \
-                                 Where-Object {{ $_.ExecutablePath -and \
-                                 $_.ExecutablePath.ToLower() -eq '{needle}' -and \
-                                 $_.ProcessId -ne $self }} | Select-Object -First 1",
-                            ),
-                        ])
-                        .creation_flags(CREATE_NO_WINDOW)
-                        .output()
-                        .map(|o| !o.stdout.is_empty())
-                        .unwrap_or(false);
-                    if found {
-                        std::process::exit(0);
-                    }
-                }
-            });
+            if approved {
+                std::process::exit(0);
+            }
         }
     }
 }
