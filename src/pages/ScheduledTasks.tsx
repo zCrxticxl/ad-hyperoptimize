@@ -11,14 +11,32 @@ type Task = {
   enabled: boolean;
   isBloat: boolean;
   reason: string;
+  origin: "windows" | "thirdparty";
+  author?: string;
+  created?: string | null;
+  lastRun?: string | null;
+  exec?: string;
 };
 
-type Tab = "bloat" | "all";
+type Tab = "bloat" | "third" | "all";
+type SortKey = "name" | "path" | "created" | "lastrun";
 
 function pathCategory(path: string): string {
   const parts = path.replace(/\\/g, "/").split("/").filter(Boolean);
   return parts[parts.length - 1] || path;
 }
+
+const fmtDate = (iso: string) =>
+  new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "2-digit", day: "2-digit" });
+
+const fmtDateTime = (iso: string) =>
+  new Date(iso).toLocaleString(undefined, {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 
 export default function ScheduledTasks({ admin, focusId }: { admin: boolean; focusId?: string }) {
   const { t } = useLang();
@@ -27,6 +45,7 @@ export default function ScheduledTasks({ admin, focusId }: { admin: boolean; foc
   const [busy, setBusy] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("bloat");
   const [search, setSearch] = useState("");
+  const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "path", dir: 1 });
   useFeatureFocus(focusId, !!data);
 
   const load = () =>
@@ -41,14 +60,52 @@ export default function ScheduledTasks({ admin, focusId }: { admin: boolean; foc
     if (!data) return [];
     let list = data.tasks;
     if (tab === "bloat") list = list.filter((task) => task.isBloat);
+    if (tab === "third") list = list.filter((task) => task.origin === "thirdparty");
     if (search.trim()) {
       const q = search.toLowerCase();
       list = list.filter(
-        (task) => task.name.toLowerCase().includes(q) || task.path.toLowerCase().includes(q)
+        (task) =>
+          task.name.toLowerCase().includes(q) ||
+          task.path.toLowerCase().includes(q) ||
+          (task.exec ?? "").toLowerCase().includes(q) ||
+          (task.author ?? "").toLowerCase().includes(q)
       );
     }
-    return list.sort((a, b) => a.path.localeCompare(b.path) || a.name.localeCompare(b.name));
-  }, [data, tab, search]);
+    const sortVal = (task: Task): string | null => {
+      switch (sort.key) {
+        case "name": return task.name.toLowerCase();
+        case "path": return task.path.toLowerCase();
+        case "created": return task.created ?? null;
+        case "lastrun": return task.lastRun ?? null;
+      }
+    };
+    return [...list].sort((a, b) => {
+      const va = sortVal(a);
+      const vb = sortVal(b);
+      if (va === null && vb === null) return a.path.localeCompare(b.path) || a.name.localeCompare(b.name);
+      if (va === null) return 1;
+      if (vb === null) return -1;
+      return va.localeCompare(vb) * sort.dir;
+    });
+  }, [data, tab, search, sort]);
+
+  const toggleSort = (key: SortKey) =>
+    setSort((s) => (s.key === key ? { key, dir: s.dir === 1 ? -1 : 1 } : { key, dir: 1 }));
+
+  const th = (key: SortKey, label: string) => {
+    const active = sort.key === key;
+    return (
+      <th
+        scope="col"
+        onClick={() => toggleSort(key)}
+        aria-sort={active ? (sort.dir === 1 ? "ascending" : "descending") : "none"}
+        style={{ cursor: "pointer", userSelect: "none", whiteSpace: "nowrap" }}
+      >
+        {label}
+        {active && <span aria-hidden="true">{sort.dir === 1 ? " ▲" : " ▼"}</span>}
+      </th>
+    );
+  };
 
   const toggle = async (task: Task) => {
     const key = task.path + task.name;
@@ -66,6 +123,7 @@ export default function ScheduledTasks({ admin, focusId }: { admin: boolean; foc
 
   const totalCount = data?.tasks.length ?? 0;
   const bloatCount = data?.bloatCount ?? 0;
+  const thirdCount = data?.tasks.filter((task) => task.origin === "thirdparty").length ?? 0;
   const activeCount = tasks.filter((task) => task.enabled).length;
 
   return (
@@ -88,6 +146,10 @@ export default function ScheduledTasks({ admin, focusId }: { admin: boolean; foc
               <span className="chip-val" style={{ color: "var(--yellow)" }}>{bloatCount}</span>
               <span className="chip-lbl">{t("schedBloat")}</span>
             </div>
+            <div className="stat-chip" style={{ borderColor: "var(--accent)" }}>
+              <span className="chip-val" style={{ color: "var(--accent)" }}>{thirdCount}</span>
+              <span className="chip-lbl">{t("schedThird")}</span>
+            </div>
             <div className="stat-chip" style={{ borderColor: "var(--green)" }}>
               <span className="chip-val" style={{ color: "var(--green)" }}>{activeCount}</span>
               <span className="chip-lbl">{t("schedActive")}</span>
@@ -95,12 +157,18 @@ export default function ScheduledTasks({ admin, focusId }: { admin: boolean; foc
           </div>
 
           {/* Tabs + Search */}
-          <div style={{ display: "flex", gap: 8, marginBottom: 14, alignItems: "center" }}>
+          <div style={{ display: "flex", gap: 8, marginBottom: 14, alignItems: "center", flexWrap: "wrap" }}>
             <button
               className={`btn small ${tab === "bloat" ? "" : "ghost"}`}
               onClick={() => setTab("bloat")}
             >
               {t("schedBloatTab")} ({bloatCount})
+            </button>
+            <button
+              className={`btn small ${tab === "third" ? "" : "ghost"}`}
+              onClick={() => setTab("third")}
+            >
+              {t("schedThird")} ({thirdCount})
             </button>
             <button
               className={`btn small ${tab === "all" ? "" : "ghost"}`}
@@ -130,9 +198,11 @@ export default function ScheduledTasks({ admin, focusId }: { admin: boolean; foc
             <table className="tbl">
               <thead>
                 <tr>
-                  <th scope="col">{t("schedTaskCol")}</th>
-                  <th scope="col">{t("schedCategory")}</th>
+                  {th("name", t("schedTaskCol"))}
+                  {th("path", t("schedCategory"))}
                   {tab === "bloat" && <th scope="col">{t("schedDescription")}</th>}
+                  {th("created", t("schedCreated"))}
+                  {th("lastrun", t("schedLastRun"))}
                   <th scope="col">{t("status")}</th>
                   <th scope="col"></th>
                 </tr>
@@ -141,12 +211,30 @@ export default function ScheduledTasks({ admin, focusId }: { admin: boolean; foc
                 {tasks.map((task) => {
                   const key = task.path + task.name;
                   const isBusy = busy === key;
+                  const isThird = task.origin === "thirdparty";
+                  const badgeTip = [task.author, task.exec].filter(Boolean).join("\n");
                   return (
                     <tr key={key} data-focus-id={task.name} style={{ opacity: task.enabled ? 1 : 0.55 }}>
                       <td style={{ fontWeight: 600, minWidth: 220 }}>
                         {task.name}
-                        {task.isBloat && tab === "all" && (
+                        {tab !== "third" && isThird && (
                           <span
+                            title={badgeTip}
+                            style={{
+                              marginLeft: 6,
+                              fontSize: 10,
+                              background: "var(--accent)",
+                              color: "#fff",
+                              borderRadius: 4,
+                              padding: "1px 5px",
+                            }}
+                          >
+                            {t("schedThird")}
+                          </span>
+                        )}
+                        {task.isBloat && tab !== "bloat" && (
+                          <span
+                            title={task.reason}
                             style={{
                               marginLeft: 6,
                               fontSize: 10,
@@ -158,6 +246,22 @@ export default function ScheduledTasks({ admin, focusId }: { admin: boolean; foc
                           >
                             bloat
                           </span>
+                        )}
+                        {tab === "third" && task.exec && (
+                          <div
+                            className="muted"
+                            title={badgeTip}
+                            style={{
+                              fontWeight: 400,
+                              fontSize: 11,
+                              maxWidth: 300,
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {task.exec}
+                          </div>
                         )}
                       </td>
                       <td className="muted" style={{ whiteSpace: "nowrap", fontSize: 12 }}>
@@ -171,6 +275,12 @@ export default function ScheduledTasks({ admin, focusId }: { admin: boolean; foc
                           {task.reason}
                         </td>
                       )}
+                      <td className="muted" style={{ whiteSpace: "nowrap", fontSize: 12 }} title={task.created ?? ""}>
+                        {task.created ? fmtDate(task.created) : "—"}
+                      </td>
+                      <td className="muted" style={{ whiteSpace: "nowrap", fontSize: 12 }} title={task.lastRun ?? ""}>
+                        {task.lastRun ? fmtDateTime(task.lastRun) : "—"}
+                      </td>
                       <td style={{ whiteSpace: "nowrap" }}>
                         <span
                           style={{
@@ -196,7 +306,7 @@ export default function ScheduledTasks({ admin, focusId }: { admin: boolean; foc
                 })}
                 {tasks.length === 0 && (
                   <tr>
-                    <td colSpan={tab === "bloat" ? 5 : 4} className="muted">
+                    <td colSpan={tab === "bloat" ? 7 : 6} className="muted">
                       {t("schedEmpty")}
                     </td>
                   </tr>

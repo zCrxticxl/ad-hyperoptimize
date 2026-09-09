@@ -93,10 +93,27 @@ pub fn list() -> Value {
 
     let script = r#"
 $tasks = Get-ScheduledTask -ErrorAction SilentlyContinue | ForEach-Object {
+    $created = $null
+    $ds = "$($_.Date)"
+    if ($ds) { try { $created = [datetime]::Parse($ds).ToUniversalTime().ToString("o") } catch { } }
+    $lastRun = $null
+    $nextRun = $null
+    try {
+        $info = $_ | Get-ScheduledTaskInfo -ErrorAction Stop
+        if ($info.LastRunTime -and $info.LastRunTime.Year -gt 1601) { $lastRun = $info.LastRunTime.ToUniversalTime().ToString("o") }
+        if ($info.NextRunTime -and $info.NextRunTime.Year -gt 1601) { $nextRun = $info.NextRunTime.ToUniversalTime().ToString("o") }
+    } catch { }
+    $exec = ""
+    try { $exec = "$($_.Actions[0].Execute)" } catch { }
     [PSCustomObject]@{
-        Path  = $_.TaskPath
-        Name  = $_.TaskName
-        State = $_.State.ToString()
+        Path    = $_.TaskPath
+        Name    = $_.TaskName
+        State   = $_.State.ToString()
+        Author  = "$($_.Author)"
+        Created = $created
+        LastRun = $lastRun
+        NextRun = $nextRun
+        Exec    = $exec
     }
 }
 $tasks | ConvertTo-Json -Compress -Depth 2
@@ -128,6 +145,13 @@ $tasks | ConvertTo-Json -Compress -Depth 2
             let reason = catalog.get(&key).copied().unwrap_or("");
             let is_bloat = !reason.is_empty();
             let enabled = matches!(state.as_str(), "Ready" | "Running");
+            // All inbox Windows tasks live under \Microsoft\; anything else
+            // (vendor folders or root-level entries) is third-party installed.
+            let origin = if path.to_lowercase().starts_with("\\microsoft\\") {
+                "windows"
+            } else {
+                "thirdparty"
+            };
             Some(json!({
                 "path":    path,
                 "name":    name,
@@ -135,6 +159,12 @@ $tasks | ConvertTo-Json -Compress -Depth 2
                 "enabled": enabled,
                 "isBloat": is_bloat,
                 "reason":  reason,
+                "origin":  origin,
+                "author":  t["Author"].as_str().unwrap_or(""),
+                "created": t["Created"].as_str(),
+                "lastRun": t["LastRun"].as_str(),
+                "nextRun": t["NextRun"].as_str(),
+                "exec":    t["Exec"].as_str().unwrap_or(""),
             }))
         })
         .collect();
