@@ -99,10 +99,10 @@ static TWEAKS: &[Tweak] = &[
     Tweak {
         id: "telemetry_off",
         name: "Disable Telemetry",
-        desc: "Sets AllowTelemetry=0 (Security level). Stops diagnostic data upload.",
+        desc: "Sets AllowTelemetry=1 (Basic), the lowest level Windows Home/Pro honor. Prevents Enhanced/Full diagnostic data upload.",
         cat: "Telemetry",
-        check: r#"(Get-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection' -Name AllowTelemetry -EA SilentlyContinue).AllowTelemetry -eq 0"#,
-        apply: r#"$p='HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection'; if(!(Test-Path $p)){New-Item $p -Force -EA Stop|Out-Null}; Set-ItemProperty $p AllowTelemetry 0 -Type DWord -EA Stop; 'Applied'"#,
+        check: r#"(Get-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection' -Name AllowTelemetry -EA SilentlyContinue).AllowTelemetry -eq 1"#,
+        apply: r#"$p='HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection'; if(!(Test-Path $p)){New-Item $p -Force -EA Stop|Out-Null}; Set-ItemProperty $p AllowTelemetry 1 -Type DWord -EA Stop; 'Applied'"#,
         undo:  r#"Remove-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection' AllowTelemetry -EA SilentlyContinue"#,
         capture: &[("HKLM", "SOFTWARE\\Policies\\Microsoft\\Windows\\DataCollection", "AllowTelemetry")],
         service: None,
@@ -377,14 +377,18 @@ $out | ConvertTo-Json -Compress -Depth 4
 /// values back to their previous value (or removed if they were absent),
 /// service back to its previous start type and running state.
 fn restore_script(state: &serde_json::Value) -> String {
+    // Every interpolated field is single-quote-escaped: the state file lives
+    // in user-writable %APPDATA%, so a tampered file must never be able to
+    // break out of the quoted PS strings (this script runs elevated).
+    let q = |s: &str| s.replace('\'', "''");
     let mut lines = Vec::new();
     if let Some(arr) = state.as_array() {
         for it in arr {
             match it["kind"].as_str() {
                 Some("reg") => {
-                    let root = it["root"].as_str().unwrap_or("HKCU");
-                    let path = it["path"].as_str().unwrap_or("");
-                    let name = it["name"].as_str().unwrap_or("");
+                    let root = q(it["root"].as_str().unwrap_or("HKCU"));
+                    let path = q(it["path"].as_str().unwrap_or(""));
+                    let name = q(it["name"].as_str().unwrap_or(""));
                     if it["value"].is_null() {
                         lines.push(format!(
                             "Remove-ItemProperty '{root}:\\{path}' '{name}' -EA SilentlyContinue"
@@ -395,17 +399,22 @@ fn restore_script(state: &serde_json::Value) -> String {
                             v = it["value"]
                         ));
                     } else {
-                        // Escape single quotes so a captured value can never
-                        // terminate the quoted PS string.
-                        let v = it["value"].as_str().unwrap_or("").replace('\'', "''");
+                        let v = q(it["value"].as_str().unwrap_or(""));
                         lines.push(format!(
                             "Set-ItemProperty '{root}:\\{path}' '{name}' '{v}' -EA Stop"
                         ));
                     }
                 }
                 Some("service") => {
-                    let svc = it["name"].as_str().unwrap_or("");
-                    let start = it["startType"].as_str().unwrap_or("Manual");
+                    let svc = q(it["name"].as_str().unwrap_or(""));
+                    // Whitelist instead of escaping: StartType has exactly
+                    // three valid values.
+                    let start_type = it["startType"].as_str().unwrap_or("Manual");
+                    let start = if matches!(start_type, "Automatic" | "Manual" | "Disabled") {
+                        start_type
+                    } else {
+                        "Manual"
+                    };
                     lines.push(format!(
                         "Set-Service -Name '{svc}' -StartupType {start} -EA Stop"
                     ));

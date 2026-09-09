@@ -386,7 +386,9 @@ async fn cmd_proc_priority(pid: u32, priority: String) -> Result<Value, String> 
 }
 
 #[tauri::command(async)]
-async fn cmd_proc_affinity(pid: u32, mask: u64) -> Result<Value, String> {
+async fn cmd_proc_affinity(pid: u32, mask: String) -> Result<Value, String> {
+    // Decimal string: 64-bit masks exceed JS number precision (>2^53).
+    let mask: u64 = mask.parse().map_err(|_| "invalid affinity mask".to_string())?;
     tauri::async_runtime::spawn_blocking(move || procmgr::set_affinity(pid, mask))
         .await
         .map_err(|_| "process task panicked".to_string())?

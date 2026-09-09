@@ -88,11 +88,47 @@ $a=0;[NtTP]::NtSetTimerResolution({target_100ns},$true,[ref]$a)|Out-Null;while($
 $msg
 "#
     );
-    ps::run(&script).map(|s| s.trim().to_string())
+    let entry_id = crate::safety::append_entry(crate::safety::JournalEntry {
+        id: format!(
+            "timerRes-{}",
+            chrono::Local::now().format("%Y%m%d%H%M%S%6f")
+        ),
+        tweak_id: "perftweaks:timer".into(),
+        tweak_name: "Timer Resolution task".into(),
+        time: chrono::Local::now().to_rfc3339(),
+        items: vec![crate::safety::ChangeItem::Command {
+            applied: script.clone(),
+            revert: TIMER_RESET_PS.to_string(),
+        }],
+        reverted: false,
+        backup_files: vec![],
+        completed: false,
+        attempted: 1,
+        reverted_items: 0,
+    });
+    let res = ps::run(&script).map(|s| s.trim().to_string());
+    if let Ok(id) = entry_id {
+        let ok = res.is_ok();
+        let _ = crate::safety::with_journal(|j| {
+            if let Some(en) = j.iter_mut().find(|en| en.id == id) {
+                en.completed = ok;
+                if !ok {
+                    en.reverted = true;
+                }
+            }
+            Ok(())
+        });
+    }
+    res
 }
 
 pub fn timer_reset() -> Result<String, String> {
-    let script = r#"
+    ps::run(TIMER_RESET_PS).map(|s| s.trim().to_string())
+}
+
+/// Undo operations for the persistent timer-resolution task; shared by
+/// timer_reset and the journal entry timer_set writes.
+const TIMER_RESET_PS: &str = r#"
 # Stop and remove the persistent scheduled task
 try { Stop-ScheduledTask  -TaskPath '\ADHyperOptimize\' -TaskName 'TimerResolution' -EA SilentlyContinue } catch {}
 try { Unregister-ScheduledTask -TaskPath '\ADHyperOptimize\' -TaskName 'TimerResolution' -Confirm:$false -EA SilentlyContinue } catch {}
@@ -110,8 +146,6 @@ try {
 } catch {}
 "Timer reset to default"
 "#;
-    ps::run(script).map(|s| s.trim().to_string())
-}
 
 // ── MSI Mode ─────────────────────────────────────────────────────────────────
 
@@ -157,8 +191,12 @@ pub fn msi_set(reg_path: String, enabled: bool) -> Result<String, String> {
     let ps_path = reg_path.replacen("HKEY_LOCAL_MACHINE", "HKLM:", 1);
     // The path is embedded in a single-quoted PS string and can only target
     // device instances the scan produced (HKLM:\SYSTEM\CurrentControlSet\Enum\…).
+    // Wildcards are rejected: Set-ItemProperty -Path resolves them at the
+    // provider level, so a single '*' would flip MSI mode on EVERY device —
+    // disabling it on the boot storage controller bricks the next boot.
     if !ps_path.starts_with(r"HKLM:\SYSTEM\CurrentControlSet\Enum\")
         || !crate::ps::is_safe_ident(&ps_path)
+        || ps_path.contains(['*', '?', '[', ']'])
     {
         return Err("Invalid registry path for MSI mode".into());
     }

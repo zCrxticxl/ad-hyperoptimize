@@ -259,7 +259,11 @@ pub fn clean_leftovers(paths: Vec<String>) -> Result<String, String> {
                 continue;
             }
             let p = std::path::Path::new(path);
-            let ok = if p.is_dir() {
+            // A junction/symlink must never be recursed into; deleting the
+            // link itself is always safe.
+            let ok = if crate::diskanalyzer::is_reparse_point(p) {
+                std::fs::remove_file(p).is_ok()
+            } else if p.is_dir() {
                 std::fs::remove_dir_all(p).is_ok()
             } else {
                 std::fs::remove_file(p).is_ok()

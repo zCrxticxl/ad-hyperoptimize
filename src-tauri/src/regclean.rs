@@ -620,18 +620,9 @@ pub fn clean(entries: Vec<Value>) -> Result<Value, String> {
 /// combined output as an error string on non-zero exit.
 #[cfg(windows)]
 fn reg_exe(args: &[&str]) -> Result<(), String> {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    let out = std::process::Command::new("reg.exe")
-        .args(args)
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-        .map_err(|e| e.to_string())?;
-    if out.status.success() {
-        Ok(())
-    } else {
-        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
-    }
+    // ps::exec: CREATE_NO_WINDOW + hard timeout — the raw Command::output()
+    // here had none, so a hung reg.exe wedged the whole cleaning pipeline.
+    crate::ps::exec("reg.exe", args).map(|_| ())
 }
 
 /// Export a registry key (with all its values/subkeys) to a .reg file.

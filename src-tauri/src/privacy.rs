@@ -2,6 +2,7 @@
 //! All via registry + service control. Check status in a single PS call.
 
 use crate::ps;
+use crate::safety;
 use serde_json::{json, Value};
 
 struct PrivacyTweak {
@@ -281,8 +282,38 @@ pub fn apply(id: String) -> Result<Value, String> {
         .iter()
         .find(|t| t.id == id)
         .ok_or_else(|| format!("Unknown tweak: {id}"))?;
-    ps::run(t.apply)?;
-    Ok(json!({ "ok": true, "id": id }))
+    // Write-ahead journal so privacy tweaks participate in the app-wide Undo
+    // (the audit flagged these as mutating without any journal entry).
+    let entry_id = safety::append_entry(safety::JournalEntry {
+        id: format!(
+            "privacy-{id}-{}",
+            chrono::Local::now().format("%Y%m%d%H%M%S%6f")
+        ),
+        tweak_id: format!("privacy:{id}"),
+        tweak_name: t.name.to_string(),
+        time: chrono::Local::now().to_rfc3339(),
+        items: vec![safety::ChangeItem::Command {
+            applied: t.apply.to_string(),
+            revert: t.revert.to_string(),
+        }],
+        reverted: false,
+        backup_files: vec![],
+        completed: false,
+        attempted: 0,
+        reverted_items: 0,
+    })?;
+    let res = ps::run(t.apply);
+    let _ = safety::with_journal(|j| {
+        if let Some(en) = j.iter_mut().find(|en| en.id == entry_id) {
+            en.completed = res.is_ok();
+            if res.is_err() {
+                en.reverted = true; // nothing to undo if the apply never ran
+            }
+        }
+        Ok(())
+    });
+    res?;
+    Ok(json!({ "ok": true, "id": id, "entryId": entry_id }))
 }
 
 pub fn revert(id: String) -> Result<Value, String> {

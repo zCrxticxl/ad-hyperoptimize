@@ -21,7 +21,11 @@ export default function Profiles() {
   const [confirm, setConfirm] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const load = () => api.profileList().then(setProfiles);
+  const load = () =>
+    api
+      .profileList()
+      .then(setProfiles)
+      .catch((e: any) => setResult({ error: String(e) }));
   useEffect(() => {
     load();
   }, []);

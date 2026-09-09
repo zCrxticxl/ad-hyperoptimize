@@ -178,14 +178,12 @@ pub fn cmd_game_revert(state: &SharedState) -> Value {
 // ── Internal helpers ─────────────────────────────────────────────────────────
 
 fn get_process_names() -> Vec<String> {
-    let Ok(out) = std::process::Command::new("tasklist")
-        .args(["/fo", "csv", "/nh"])
-        .output()
-    else {
+    // ps::exec: CREATE_NO_WINDOW + timeout — a raw Command here flashed a
+    // console window every poll interval.
+    let Ok(out) = ps::exec("tasklist.exe", &["/fo", "csv", "/nh"]) else {
         return vec![];
     };
-    String::from_utf8_lossy(&out.stdout)
-        .lines()
+    out.lines()
         .filter_map(|line| {
             let first = if let Some(stripped) = line.strip_prefix('"') {
                 // tasklist /fo csv quotes fields containing commas
@@ -209,13 +207,9 @@ pub(crate) fn get_active_plan_guid() -> Option<String> {
 
 fn set_power_plan(guid: &str) {
     // Try primary GUID; if Ultimate isn't provisioned, fall back to High Performance
-    let result = std::process::Command::new("powercfg")
-        .args(["/setactive", guid])
-        .status();
-    if result.map(|s| !s.success()).unwrap_or(true) && guid == PLAN_ULTIMATE {
-        let _ = std::process::Command::new("powercfg")
-            .args(["/setactive", PLAN_HIGH_PERFORMANCE])
-            .status();
+    let ok = ps::exec("powercfg.exe", &["/setactive", guid]).is_ok();
+    if !ok && guid == PLAN_ULTIMATE {
+        let _ = ps::exec("powercfg.exe", &["/setactive", PLAN_HIGH_PERFORMANCE]);
     }
 }
 

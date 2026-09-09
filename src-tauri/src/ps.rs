@@ -98,6 +98,11 @@ fn kill_tree(child: &mut Child) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Forces UTF-8 stdout/stderr for every PowerShell child: localized Windows
+/// uses legacy code pages (CP1252, CP936, ...), which would turn every
+/// non-ASCII byte into U+FFFD in from_utf8_lossy decoding.
+const PS_UTF8_PROLOGUE: &str = "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; ";
+
 /// Spawn `cmd` with piped output, enforce `timeout`, return (stdout, stderr).
 fn run_checked(
     cmd: &mut Command,
@@ -134,7 +139,7 @@ pub fn run(script: &str) -> Result<String, String> {
         "-ExecutionPolicy",
         "Bypass",
         "-Command",
-        script,
+        &format!("{PS_UTF8_PROLOGUE}{script}"),
     ]);
     configure(&mut cmd);
     run_checked(&mut cmd, "powershell", CMD_TIMEOUT).map(|(out, _)| out)
@@ -150,7 +155,7 @@ pub fn run_long(script: &str) -> Result<String, String> {
         "-ExecutionPolicy",
         "Bypass",
         "-Command",
-        script,
+        &format!("{PS_UTF8_PROLOGUE}{script}"),
     ]);
     configure(&mut cmd);
     run_checked(&mut cmd, "powershell", CMD_TIMEOUT_LONG).map(|(out, _)| out)
@@ -204,7 +209,7 @@ fn run_with(script: &str, timeout: Duration) -> Result<String, String> {
         "-ExecutionPolicy",
         "Bypass",
         "-Command",
-        script,
+        &format!("{PS_UTF8_PROLOGUE}{script}"),
     ]);
     configure(&mut cmd);
     run_checked(&mut cmd, "powershell", timeout).map(|(out, _)| out)

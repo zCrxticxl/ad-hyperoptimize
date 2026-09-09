@@ -110,7 +110,7 @@ export const api = {
   procList: () => invoke<any>("cmd_proc_list"),
   procKill: (pid: number) => invoke<any>("cmd_proc_kill", { pid }),
   procPriority: (pid: number, priority: string) => invoke<any>("cmd_proc_priority", { pid, priority }),
-  procAffinity: (pid: number, mask: number) => invoke<any>("cmd_proc_affinity", { pid, mask }),
+  procAffinity: (pid: number, mask: string) => invoke<any>("cmd_proc_affinity", { pid, mask }),
   permPriorityList: () => invoke<any>("cmd_perm_priority_list"),
   permPrioritySet: (exe: string, priority: string) =>
     invoke<any>("cmd_perm_priority_set", { exe, priority }),

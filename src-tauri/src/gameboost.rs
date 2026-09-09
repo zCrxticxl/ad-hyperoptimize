@@ -342,11 +342,18 @@ pub fn quick_boost_start(process_name: String) -> Result<Value, String> {
     let pid = find_pid_by_name(&process_name)?;
 
     // ---- snapshot current state ----
-    let prev_priority = ps::run(&format!(
+    // Whitelist the captured priority: the value is interpolated into a
+    // single-quoted revert script, so anything outside the .NET enum set is
+    // replaced instead of trusted.
+    let captured_priority = ps::run(&format!(
         "(Get-Process -Id {pid} -ErrorAction Stop).PriorityClass.ToString()"
     ))
     .map(|s| s.trim().to_string())
-    .unwrap_or_else(|_| "Normal".into());
+    .unwrap_or_default();
+    let prev_priority = match captured_priority.as_str() {
+        "Normal" | "Low" | "BelowNormal" | "AboveNormal" | "High" | "RealTime" => captured_priority,
+        _ => "Normal".to_string(),
+    };
 
     let prev_affinity = ps::run(&format!(
         "[int64](Get-Process -Id {pid} -ErrorAction Stop).ProcessorAffinity"
@@ -361,7 +368,8 @@ pub fn quick_boost_start(process_name: String) -> Result<Value, String> {
     ))
     .ok()
     .map(|s| s.trim().to_string())
-    .filter(|s| !s.is_empty());
+    // Only digits survive: the value is interpolated into a DWord write.
+    .filter(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit()));
 
     let core_count: usize = ps::run("[Environment]::ProcessorCount")
         .ok()

@@ -119,7 +119,7 @@ try {
 # ── Network ───────────────────────────────────────────────────────────────────
 try {
     $wifi = (Get-NetAdapter -ErrorAction SilentlyContinue |
-        Where-Object { $_.PhysicalMediaType -match 'Native 802' -and $_.Status -eq 'Up' }).Count -gt 0
+        Where-Object { $_.PhysicalMediaType -match 'Native 802\.11' -and $_.Status -eq 'Up' }).Count -gt 0
     $out.isWifi = $wifi
 } catch { $out.isWifi = $false }
 

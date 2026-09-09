@@ -6,6 +6,7 @@ use crate::ps;
 use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 fn sec(script: &str) -> Value {
     ps::run_json(script).unwrap_or_else(|e| json!({ "error": e.trim() }))
@@ -208,7 +209,15 @@ pub fn hosts_list_all() -> Value {
     hosts_entries()
 }
 
+/// Serializes hosts-file mutations: two concurrent disable/enable calls would
+/// otherwise read-modify-write the same file and lose entries.
+static HOSTS_LOCK: Mutex<()> = Mutex::new(());
+
 pub fn hosts_disable_entries(entries: Vec<String>) -> Result<String, String> {
+    if !crate::ps::is_admin() {
+        return Err("Administrator rights required to edit the hosts file.".into());
+    }
+    let _g = HOSTS_LOCK.lock().map_err(|e| format!("hosts lock: {e}"))?;
     let path = hosts_path();
     let backup = hosts_backup()?;
     let content = fs::read_to_string(&path).map_err(|e| e.to_string())?;
@@ -234,6 +243,10 @@ pub fn hosts_disable_entries(entries: Vec<String>) -> Result<String, String> {
 }
 
 pub fn hosts_enable_entries(entries: Vec<String>) -> Result<String, String> {
+    if !crate::ps::is_admin() {
+        return Err("Administrator rights required to edit the hosts file.".into());
+    }
+    let _g = HOSTS_LOCK.lock().map_err(|e| format!("hosts lock: {e}"))?;
     let path = hosts_path();
     let backup = hosts_backup()?;
     let content = fs::read_to_string(&path).map_err(|e| e.to_string())?;

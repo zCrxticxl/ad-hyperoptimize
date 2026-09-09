@@ -135,10 +135,10 @@ export default function RegClean({ admin }: { admin: boolean }) {
 
       {/* Scan button + status */}
       <div style={{ display: "flex", gap: 10, marginBottom: 16, alignItems: "center", flexWrap: "wrap" }}>
-        <button className="btn" onClick={doScan} disabled={scanning || cleaning}>
+        <button className="btn" onClick={doScan} disabled={scanning || cleaning || restoring !== null}>
           {scanning ? <><Spinner /> {t("regScanning")}</> : t("regScan")}
         </button>
-        <button className="btn ghost" onClick={toggleBackups} disabled={cleaning}>
+        <button className="btn ghost" onClick={toggleBackups} disabled={cleaning || restoring !== null}>
           ↩ {backups ? t("regHideRestore") : t("regRestoreBtn")}
         </button>
         {data && (
@@ -355,7 +355,7 @@ export default function RegClean({ admin }: { admin: boolean }) {
                   <span style={{ color: "var(--yellow)", fontSize: 13 }}>
                     ⚠ {t("regConfirmClean")} ({sel.size})
                   </span>
-                  <button className="btn danger" disabled={cleaning} onClick={doClean}>
+                  <button className="btn danger" disabled={cleaning || restoring !== null} onClick={doClean}>
                     {cleaning ? <><Spinner /> {t("regClean")}</> : t("regConfirmBtn")}
                   </button>
                   <button className="btn small ghost" onClick={() => setConfirmClean(false)} disabled={cleaning}>{t("cancel")}</button>

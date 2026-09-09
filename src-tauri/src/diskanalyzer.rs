@@ -68,6 +68,19 @@ pub fn fmt_size(bytes: u64) -> String {
 }
 
 /// Iterative BFS walk. Skips symlinks and SKIP_DIRS.
+#[cfg(windows)]
+pub(crate) fn is_reparse_point(p: &Path) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0400_0000;
+    p.symlink_metadata()
+        .map(|m| m.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0)
+        .unwrap_or(false)
+}
+#[cfg(not(windows))]
+fn is_reparse_point(_p: &Path) -> bool {
+    false
+}
+
 fn walk(root: &Path) -> Vec<FileInfo> {
     let mut stack = vec![root.to_path_buf()];
     let mut out = Vec::new();
@@ -96,7 +109,11 @@ fn walk(root: &Path) -> Vec<FileInfo> {
             }
 
             if meta.is_dir() {
-                stack.push(path);
+                // A junction's symlink_metadata reports is_dir()==true; the
+                // reparse attribute is what actually distinguishes it.
+                if !is_reparse_point(&path) {
+                    stack.push(path);
+                }
             } else if meta.is_file() {
                 if out.len() >= MAX_FILES {
                     // Cap reached: the collected set cannot grow anymore, so
@@ -256,6 +273,12 @@ pub fn delete_items(paths: Vec<String>) -> Value {
             errors.push(format!("{raw}: path is protected"));
             continue;
         }
+        if is_reparse_point(p) {
+            errors.push(format!(
+                "{raw}: refusing to delete a symlink/junction — delete its target explicitly instead"
+            ));
+            continue;
+        }
         let res = if p.is_dir() {
             std::fs::remove_dir_all(p)
         } else {
@@ -334,14 +357,21 @@ pub fn move_items(paths: Vec<String>, dest_dir: String) -> Value {
         }
 
         // Try atomic rename first (same drive = instant)
-        let res = std::fs::rename(&src, &dst).or_else(|_| {
-            // Cross-drive: copy then remove
-            if src.is_dir() {
-                copy_dir(&src, &dst).and_then(|_| std::fs::remove_dir_all(&src))
-            } else {
-                copy_file(&src, &dst).and_then(|_| std::fs::remove_file(&src))
-            }
-        });
+        let res: Result<(), std::io::Error> = if is_reparse_point(&src) {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "refusing to move a symlink/junction",
+            ))
+        } else {
+            std::fs::rename(&src, &dst).or_else(|_| {
+                // Cross-drive: copy then remove
+                if src.is_dir() {
+                    copy_dir(&src, &dst).and_then(|_| std::fs::remove_dir_all(&src))
+                } else {
+                    copy_file(&src, &dst).and_then(|_| std::fs::remove_file(&src))
+                }
+            })
+        };
 
         match res {
             Ok(_) => moved += 1,
@@ -918,6 +948,13 @@ pub fn organize_apply(items: Vec<Value>) -> Value {
 
         if is_protected(&src_path) || is_protected(&dest_path) {
             errors.push(format!("{}: path is protected", src));
+            continue;
+        }
+        if is_reparse_point(&src_path) || is_reparse_point(&dest_path) {
+            errors.push(format!(
+                "{}: refusing to organize through a symlink/junction",
+                src
+            ));
             continue;
         }
 

@@ -51,7 +51,12 @@ if (Test-Path $cbsPath) {
 if ($summary) { $summary } else { "SFC abgeschlossen (Exit: $($job.ExitCode)). Log: $cbsPath" }
 "#.to_string()
     } else {
-        format!("& {} 2>&1 | Out-String", args.join(" "))
+        // DISM output is localized; the exit code is not. Append a marker the
+        // parser reads instead of trusting English phrases.
+        format!(
+            "& {} 2>&1 | Out-String; \"DISM_EXIT:$($LASTEXITCODE)\"",
+            args.join(" ")
+        )
     };
 
     // SFC /scannow and DISM checks/repairs legitimately take minutes, the
@@ -75,6 +80,18 @@ if ($summary) { $summary } else { "SFC abgeschlossen (Exit: $($job.ExitCode)). L
     }))
 }
 
+/// Locale-independent DISM verdict: "DISM_EXIT:<code>" from the script.
+fn dism_exit(lo: &str) -> Option<i64> {
+    let idx = lo.find("dism_exit:")?;
+    let rest = &lo[idx + "dism_exit:".len()..];
+    let tok: String = rest
+        .chars()
+        .skip_while(|c| !c.is_ascii_digit() && *c != '-')
+        .take_while(|c| c.is_ascii_digit() || *c == '-')
+        .collect();
+    tok.parse().ok()
+}
+
 fn parse_result(kind: &str, output: &str) -> &'static str {
     let lo = output.to_lowercase();
     match kind {
@@ -91,31 +108,45 @@ fn parse_result(kind: &str, output: &str) -> &'static str {
                 "unknown"
             }
         }
-        "dism_check" | "dism_scan" => {
-            if lo.contains("no component store corruption detected") {
-                "clean"
-            } else if lo.contains("component store is repairable")
-                || lo.contains("corruption was detected")
-            {
-                "corrupt"
-            } else if lo.contains("the operation completed successfully") {
-                "clean"
-            } else {
-                "unknown"
+        "dism_check" | "dism_scan" => match dism_exit(&lo) {
+            Some(0) => "clean",
+            Some(_) => "corrupt",
+            // Legacy fallback for output without the marker.
+            None => {
+                if lo.contains("no component store corruption detected")
+                    || lo.contains("the operation completed successfully")
+                {
+                    "clean"
+                } else if lo.contains("component store is repairable")
+                    || lo.contains("corruption was detected")
+                {
+                    "corrupt"
+                } else {
+                    "unknown"
+                }
             }
-        }
-        "dism_restore" => {
-            if lo.contains("the restore operation completed successfully")
-                || lo.contains("the operation completed successfully")
-            {
-                "repaired"
-            } else if lo.contains("the source files could not be found") {
-                "error"
-            } else {
-                "unknown"
+        },
+        "dism_restore" => match dism_exit(&lo) {
+            Some(0) => "repaired",
+            Some(_) => "error",
+            None => {
+                if lo.contains("the restore operation completed successfully")
+                    || lo.contains("the operation completed successfully")
+                {
+                    "repaired"
+                } else if lo.contains("the source files could not be found") {
+                    "error"
+                } else {
+                    "unknown"
+                }
             }
-        }
-        "dism_component" if lo.contains("the operation completed successfully") => "clean",
+        },
+        "dism_component" => match dism_exit(&lo) {
+            Some(0) => "clean",
+            Some(_) => "unknown",
+            None if lo.contains("the operation completed successfully") => "clean",
+            _ => "unknown",
+        },
         _ => "unknown",
     }
 }

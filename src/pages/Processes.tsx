@@ -14,14 +14,16 @@ const INTERVALS = [
   { v: 10000, label: "10s" },
 ];
 
-function parseCores(s: string, max: number): number {
-  let mask = 0;
+// BigInt: JS bitwise ops are 32-bit, so `1 << c` wrapped on systems with
+// more than 32 cores and produced silently wrong affinity masks.
+function parseCores(s: string, max: number): bigint {
+  let mask = 0n;
   for (const part of s.split(",").map((x) => x.trim()).filter(Boolean)) {
     const m = part.match(/^(\d+)\s*-\s*(\d+)$/);
     if (m) {
-      for (let c = +m[1]; c <= +m[2] && c < max; c++) mask |= 1 << c;
+      for (let c = +m[1]; c <= +m[2] && c < max; c++) mask |= 1n << BigInt(c);
     } else if (/^\d+$/.test(part) && +part < max) {
-      mask |= 1 << +part;
+      mask |= 1n << BigInt(+part);
     }
   }
   return mask;
@@ -197,7 +199,9 @@ export default function Processes() {
                             <button className="btn small" onClick={() => {
                               const mask = parseCores(affinityText, data.coreCount);
                               if (!mask) { setMsg(t("procCoresInvalid")); return; }
-                              act(() => api.procAffinity(p.pid, mask), `✔ Affinity set (${affinityText})`);
+                              // Decimal string: BigInt masks exceed the JS
+                              // number precision the JSON encoder could carry.
+                              act(() => api.procAffinity(p.pid, mask.toString()), `✔ Affinity set (${affinityText})`);
                               setExpand(null);
                             }}>{t("set")}</button>
                           </div>
