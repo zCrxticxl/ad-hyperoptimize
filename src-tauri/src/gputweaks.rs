@@ -762,8 +762,8 @@ pub fn nv_set_setting(setting: String, value: String) -> Result<Value, String> {
         "nvCtrlPanel-{setting}-{}",
         chrono::Local::now().format("%Y%m%d%H%M%S")
     );
-    safety::append_entry(JournalEntry {
-        id: entry_id.clone(),
+    let entry_id = safety::append_entry(JournalEntry {
+        id: entry_id,
         tweak_id: format!("nvCtrlPanel:{setting}"),
         tweak_name: format!("NVIDIA Control Panel, {setting} = {value}"),
         time: chrono::Local::now().to_rfc3339(),
@@ -772,15 +772,13 @@ pub fn nv_set_setting(setting: String, value: String) -> Result<Value, String> {
         backup_files: vec![],
     })?;
 
-    let mut done: Vec<&ChangeItem> = Vec::new();
-    for item in &items {
+    for (idx, item) in items.iter().enumerate() {
         if let Err(e) = tweaks::apply_item(item) {
-            for d in done.iter().rev() {
+            for d in items[..=idx].iter().rev() {
                 let _ = tweaks::revert_item(d);
             }
             return Err(format!("failed to apply ({e}); changes rolled back"));
         }
-        done.push(item);
     }
 
     Ok(json!({ "restoreToken": entry_id, "setting": setting, "value": value }))

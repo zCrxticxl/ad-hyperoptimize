@@ -419,8 +419,8 @@ pub fn quick_boost_start(process_name: String) -> Result<Value, String> {
         "quickBoost-{pid}-{}",
         chrono::Local::now().format("%Y%m%d%H%M%S")
     );
-    safety::append_entry(JournalEntry {
-        id: entry_id.clone(),
+    let entry_id = safety::append_entry(JournalEntry {
+        id: entry_id,
         tweak_id: "quickBoost".into(),
         tweak_name: format!("Quick Boost ({process_name})"),
         time: chrono::Local::now().to_rfc3339(),
@@ -432,10 +432,11 @@ pub fn quick_boost_start(process_name: String) -> Result<Value, String> {
     // ---- apply; roll back whatever already succeeded if one step fails ----
     // The write-ahead entry is marked reverted so the UI never offers an undo
     // for a boost that failed and was rolled back (mirrors tweaks::apply).
-    let mut done: Vec<&ChangeItem> = Vec::new();
-    for item in &items {
+    // The failing action itself is rolled back too: a killed command can have
+    // partially mutated already.
+    for (idx, item) in items.iter().enumerate() {
         if let Err(e) = tweaks::apply_item(item) {
-            for d in done.iter().rev() {
+            for d in items[..=idx].iter().rev() {
                 let _ = tweaks::revert_item(d);
             }
             let _ = safety::with_journal(|j| {
@@ -446,7 +447,6 @@ pub fn quick_boost_start(process_name: String) -> Result<Value, String> {
             });
             return Err(format!("Quick Boost failed ({e}); changes rolled back"));
         }
-        done.push(item);
     }
 
     // ---- best-effort, non-reversible overlay cleanup ----

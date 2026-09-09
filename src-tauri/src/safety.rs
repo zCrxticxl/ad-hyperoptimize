@@ -62,11 +62,15 @@ fn journal_path() -> PathBuf {
     app_data_dir().join("journal.json")
 }
 
-pub fn load_journal() -> Vec<JournalEntry> {
-    fs::read_to_string(journal_path())
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
+pub fn load_journal() -> Result<Vec<JournalEntry>, String> {
+    let p = journal_path();
+    if !p.exists() {
+        return Ok(Vec::new());
+    }
+    // A broken or unreadable journal must never be silently replaced by an
+    // empty one: the next save would destroy the recovery history.
+    let s = fs::read_to_string(&p).map_err(|e| format!("journal read: {e}"))?;
+    serde_json::from_str(&s).map_err(|e| format!("journal parse: {e}"))
 }
 
 pub fn save_journal(j: &[JournalEntry]) -> Result<(), String> {
@@ -88,16 +92,27 @@ pub fn with_journal<R>(
     let _g = JOURNAL_LOCK
         .lock()
         .map_err(|e| format!("journal lock: {e}"))?;
-    let mut j = load_journal();
+    let mut j = load_journal()?;
     let r = f(&mut j)?;
     save_journal(&j)?;
     Ok(r)
 }
 
-pub fn append_entry(entry: JournalEntry) -> Result<(), String> {
+/// Appends an entry and returns the ACTUAL stored id: collisions (two applies
+/// of the same tweak within one second) get a numeric suffix so every entry
+/// keeps an unambiguous restore token.
+pub fn append_entry(entry: JournalEntry) -> Result<String, String> {
     with_journal(|j| {
-        j.push(entry);
-        Ok(())
+        let mut id = entry.id.clone();
+        let mut n = 1;
+        while j.iter().any(|e| e.id == id) {
+            n += 1;
+            id = format!("{}-{n}", entry.id);
+        }
+        let mut owned = entry;
+        owned.id = id.clone();
+        j.push(owned);
+        Ok(id)
     })
 }
 

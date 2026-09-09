@@ -81,7 +81,8 @@ fn parse_tcp_autotuning(out: &str) -> Option<String> {
 
 /// Extract the current AC/DC index pair from `powercfg /query <scheme>
 /// <subgroup> <setting>` output. Only `0x`-prefixed 8-digit hex tokens are
-/// considered, so localized line labels cannot break the parse.
+/// considered (labels are localized), and the LAST pair wins: some settings
+/// print Minimum/Maximum/Increment rows before the current AC/DC values.
 #[cfg(any(windows, test))]
 fn parse_power_indexes(out: &str) -> Option<(u32, u32)> {
     let hexes: Vec<u32> = out
@@ -93,9 +94,17 @@ fn parse_power_indexes(out: &str) -> Option<(u32, u32)> {
         .map(|t| u32::from_str_radix(&t[2..], 16).ok())
         .collect::<Option<Vec<_>>>()?;
     match hexes.as_slice() {
-        [ac, dc, ..] => Some((*ac, *dc)),
+        [.., ac, dc] => Some((*ac, *dc)),
         _ => None,
     }
+}
+
+/// Pull the raw GUID out of `powercfg /getactivescheme` output.
+#[cfg(any(windows, test))]
+fn parse_active_scheme_guid(out: &str) -> Option<String> {
+    out.split_whitespace()
+        .find(|t| crate::ps::is_guid(t))
+        .map(|s| s.to_string())
 }
 
 /// Run a capture and build the exact revert command for it.
@@ -122,7 +131,9 @@ fn capture_revert(cap: &ShowCapture) -> Option<String> {
                 "HKLM",
                 "SYSTEM\\CurrentControlSet\\Control\\Power",
                 "HibernateEnabled",
-            )?;
+            )
+            .ok()
+            .flatten()?;
             match prev {
                 RegVal::Dword(1) => Some("powercfg /h on".into()),
                 RegVal::Dword(0) => Some("powercfg /h off".into()),
@@ -134,7 +145,9 @@ fn capture_revert(cap: &ShowCapture) -> Option<String> {
                 "HKLM",
                 "SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters",
                 "EnableRSS",
-            )?;
+            )
+            .ok()
+            .flatten()?;
             match prev {
                 RegVal::Dword(1) => Some("netsh int tcp set global rss=enabled".into()),
                 RegVal::Dword(0) => Some("netsh int tcp set global rss=disabled".into()),
@@ -142,15 +155,21 @@ fn capture_revert(cap: &ShowCapture) -> Option<String> {
             }
         }
         ShowCapture::PowerSettingIndex { subgroup, setting } => {
-            let out = crate::ps::exec(
-                "powercfg.exe",
-                &["/query", "scheme_current", subgroup, setting],
-            )
-            .ok()?;
-            parse_power_indexes(&out).map(|(ac, dc)| {
+            // Bind the restore to the scheme that was active at capture time:
+            // writing back via `scheme_current` after the user switched plans
+            // would corrupt the other scheme's independent values.
+            let scheme_out = crate::ps::exec("powercfg.exe", &["/getactivescheme"]).ok()?;
+            let guid = parse_active_scheme_guid(&scheme_out)?;
+            let query_out =
+                crate::ps::exec("powercfg.exe", &["/query", &guid, subgroup, setting]).ok()?;
+            parse_power_indexes(&query_out).map(|(ac, dc)| {
+                // One PowerShell wrapper so run_cmdline executes all three
+                // steps in order and aborts on the first failure; the final
+                // setactive makes the restored indexes effective immediately.
                 format!(
-                    "powercfg /setacvalueindex scheme_current {subgroup} {setting} {ac} ; \
-                     powercfg /setdcvalueindex scheme_current {subgroup} {setting} {dc}"
+                    "powershell -Command \"powercfg /setacvalueindex {guid} {subgroup} {setting} {ac}; \
+                     if ($LASTEXITCODE -eq 0) {{ powercfg /setdcvalueindex {guid} {subgroup} {setting} {dc}; \
+                     if ($LASTEXITCODE -eq 0) {{ powercfg /setactive scheme_current }} }}\""
                 )
             })
         }
@@ -855,8 +874,10 @@ pub fn catalog() -> Vec<Tweak> {
             reversible: true,
             actions: vec![
                 Action::Cmd {
-                    apply: r"powershell -NoProfile -WindowStyle Hidden -Command Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces\*' | ForEach-Object { Set-ItemProperty -Path $_.PSPath -Name TcpAckFrequency -Value 1 -Type DWord -Force -EA SilentlyContinue; Set-ItemProperty -Path $_.PSPath -Name TCPNoDelay -Value 1 -Type DWord -Force -EA SilentlyContinue }",
-                    revert: r"powershell -NoProfile -WindowStyle Hidden -Command Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces\*' | ForEach-Object { Remove-ItemProperty -Path $_.PSPath -Name TcpAckFrequency -EA SilentlyContinue; Remove-ItemProperty -Path $_.PSPath -Name TCPNoDelay -EA SilentlyContinue }",
+                    apply: r"powershell -NoProfile -WindowStyle Hidden -Command $errs = 0; Get-ChildItem 'HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces' | ForEach-Object { try { Set-ItemProperty -Path $_.PSPath -Name TcpAckFrequency -Value 1 -Type DWord -Force -EA Stop; Set-ItemProperty -Path $_.PSPath -Name TCPNoDelay -Value 1 -Type DWord -Force -EA Stop } catch { $errs++ } }; if ($errs -gt 0) { exit 1 }",
+                    // Only removes values that still hold OUR written value (1),
+                    // so an adapter with pre-existing custom settings keeps them.
+                    revert: r"powershell -NoProfile -WindowStyle Hidden -Command $errs = 0; Get-ChildItem 'HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces' | ForEach-Object { $p = Get-ItemProperty -Path $_.PSPath; if ($p.PSObject.Properties['TcpAckFrequency'] -and $p.TcpAckFrequency -eq 1) { try { Remove-ItemProperty -Path $_.PSPath -Name TcpAckFrequency -EA Stop } catch { $errs++ } }; if ($p.PSObject.Properties['TCPNoDelay'] -and $p.TCPNoDelay -eq 1) { try { Remove-ItemProperty -Path $_.PSPath -Name TCPNoDelay -EA Stop } catch { $errs++ } } }; if ($errs -gt 0) { exit 1 }",
                     show: None,
                 },
             ],
@@ -954,15 +975,30 @@ fn hive(root: &str) -> RegKey {
 }
 
 #[cfg(windows)]
-fn reg_read(root: &str, path: &str, name: &str) -> Option<RegVal> {
-    let key = hive(root).open_subkey_with_flags(path, KEY_READ).ok()?;
-    if let Ok(v) = key.get_value::<u32, _>(name) {
-        return Some(RegVal::Dword(v));
+fn reg_read(root: &str, path: &str, name: &str) -> Result<Option<RegVal>, String> {
+    use winreg::enums::RegType;
+    let key = hive(root)
+        .open_subkey_with_flags(path, KEY_READ)
+        .map_err(|e| format!("open {root}\\{path}: {e}"))?;
+    match key.get_raw_value(name) {
+        Ok(rv) => match rv.vtype {
+            RegType::REG_DWORD => {
+                if rv.bytes.len() < 4 {
+                    return Err(format!("read {root}\\{path}\\{name}: malformed DWORD"));
+                }
+                Ok(Some(RegVal::Dword(u32::from_le_bytes(
+                    rv.bytes[..4].try_into().unwrap(),
+                ))))
+            }
+            RegType::REG_SZ => Ok(Some(RegVal::Str(rv.to_string()))),
+            other => Err(format!(
+                "unsupported registry type for '{name}' ({other:?}); \
+                 refusing to overwrite a value we cannot faithfully capture"
+            )),
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(format!("read {root}\\{path}\\{name}: {e}")),
     }
-    if let Ok(v) = key.get_value::<String, _>(name) {
-        return Some(RegVal::Str(v));
-    }
-    None
 }
 
 #[cfg(windows)]
@@ -981,8 +1017,14 @@ fn reg_write(root: &str, path: &str, name: &str, val: &RegVal) -> Result<(), Str
 fn reg_delete(root: &str, path: &str, name: &str) -> Result<(), String> {
     let key = hive(root)
         .open_subkey_with_flags(path, KEY_READ | KEY_SET_VALUE)
-        .map_err(|e| e.to_string())?;
-    key.delete_value(name).map_err(|e| e.to_string())
+        .map_err(|e| format!("open {root}\\{path}: {e}"))?;
+    key.delete_value(name).or_else(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            Ok(()) // already absent: idempotent undo
+        } else {
+            Err(format!("delete {name}: {e}"))
+        }
+    })
 }
 
 // Sentinel returned when a service isn't installed on this machine. Kept out of
@@ -1041,6 +1083,15 @@ fn vals_eq(a: &RegVal, b: &RegVal) -> bool {
 
 // ---------- public API ----------
 
+/// Serializes whole apply/revert transactions. The journal lock only protects
+/// file updates, not the capture→mutate interval: without this, an undo
+/// running between an apply's capture and its mutations marks the entry
+/// reverted while the mutations still land afterwards.
+static ENGINE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+fn engine_guard() -> Result<std::sync::MutexGuard<'static, ()>, String> {
+    ENGINE_LOCK.lock().map_err(|e| format!("engine lock: {e}"))
+}
+
 // Known Windows default startup types for every service we touch in the
 // catalog. Used by the force-revert path when no journal entry is available.
 fn service_default(name: &str) -> &'static str {
@@ -1068,7 +1119,9 @@ fn service_default(name: &str) -> &'static str {
 
 /// Catalog + live status, ready for the UI.
 pub fn list_with_status() -> Value {
-    let journal = safety::load_journal();
+    // Display-only path: a broken journal degrades to "no undo entries"
+    // (force-revert still works); mutating paths fail closed instead.
+    let journal = safety::load_journal().unwrap_or_default();
     let out: Vec<Value> = catalog()
         .iter()
         .map(|t| {
@@ -1115,7 +1168,9 @@ fn detect_status(t: &Tweak) -> &'static str {
                     value,
                 } => {
                     checkable += 1;
-                    if let Some(cur) = reg_read(root, path, name) {
+                    // An unreadable value counts as "not matching" here: the
+                    // detection stays honest instead of failing the listing.
+                    if let Some(cur) = reg_read(root, path, name).ok().flatten() {
                         if vals_eq(&cur, value) {
                             matching += 1;
                         }
@@ -1151,6 +1206,7 @@ fn detect_status(t: &Tweak) -> &'static str {
 /// Apply a tweak: backup → write-ahead journal → mutate. Returns the journal
 /// entry id so the UI can offer instant undo.
 pub fn apply(tweak_id: &str) -> Result<Value, String> {
+    let _engine = engine_guard()?;
     let t = catalog()
         .into_iter()
         .find(|t| t.id == tweak_id)
@@ -1159,13 +1215,20 @@ pub fn apply(tweak_id: &str) -> Result<Value, String> {
         return Err("This tweak needs administrator rights. Restart the app as admin.".into());
     }
 
-    // 1. Registry backups for every key we will touch.
+    // 1. Registry backups for every key we will touch. A missing key is fine
+    //    (the apply creates it), but a full disk or a denied reg.exe must not
+    //    silently skip the advertised backup stage.
     let mut backups = Vec::new();
     for a in &t.actions {
         if let Action::RegSet { root, path, .. } = a {
             match safety::backup_registry_key(root, path) {
                 Ok(f) => backups.push(f),
-                Err(_) => { /* key may not exist yet, journal still holds prev=None */ }
+                Err(e) => {
+                    let msg = e.to_lowercase();
+                    if !(msg.contains("unable to find") || msg.contains("not find")) {
+                        return Err(format!("registry backup failed: {e}"));
+                    }
+                }
             }
         }
     }
@@ -1184,7 +1247,7 @@ pub fn apply(tweak_id: &str) -> Result<Value, String> {
                 root: root.to_string(),
                 path: path.to_string(),
                 name: name.to_string(),
-                prev: reg_read(root, path, name),
+                prev: reg_read(root, path, name)?,
                 new: value.clone(),
             }),
             #[cfg(not(windows))]
@@ -1222,10 +1285,15 @@ pub fn apply(tweak_id: &str) -> Result<Value, String> {
         }
     }
 
-    // 3. Write-ahead journal entry.
-    let entry_id = format!("{}-{}", t.id, chrono::Local::now().format("%Y%m%d%H%M%S"));
-    safety::append_entry(JournalEntry {
-        id: entry_id.clone(),
+    // 3. Write-ahead journal entry (append returns the ACTUAL id: collisions
+    //    with a same-second apply get a suffix so undo tokens stay unique).
+    let entry_id = format!(
+        "{}-{}",
+        t.id,
+        chrono::Local::now().format("%Y%m%d%H%M%S%6f")
+    );
+    let entry_id = safety::append_entry(JournalEntry {
+        id: entry_id,
         tweak_id: t.id.to_string(),
         tweak_name: t.name.to_string(),
         time: chrono::Local::now().to_rfc3339(),
@@ -1234,14 +1302,15 @@ pub fn apply(tweak_id: &str) -> Result<Value, String> {
         backup_files: backups,
     })?;
 
-    // 4. Apply. On failure, roll back what we already changed. The journal
-    // entry is only marked reverted when the rollback fully succeeded;
-    // otherwise it stays open so the UI can offer a retry.
-    let mut done: Vec<&ChangeItem> = Vec::new();
-    for item in &items {
+    // 4. Apply. On failure, roll back everything up to and including the
+    //    failing action (a killed multi-interface command can already have
+    //    written some keys). The journal entry is only marked reverted when
+    //    the rollback fully succeeded; otherwise it stays open so the UI can
+    //    offer a retry.
+    for (idx, item) in items.iter().enumerate() {
         if let Err(e) = apply_item(item) {
             let mut rollback_errs = Vec::new();
-            for d in done.iter().rev() {
+            for d in items[..=idx].iter().rev() {
                 if let Err(re) = revert_item(d) {
                     rollback_errs.push(re);
                 }
@@ -1262,7 +1331,6 @@ pub fn apply(tweak_id: &str) -> Result<Value, String> {
                 rollback_errs.join("; ")
             ));
         }
-        done.push(item);
     }
 
     Ok(json!({ "entryId": entry_id, "status": "applied" }))
@@ -1296,7 +1364,9 @@ pub(crate) fn revert_item(item: &ChangeItem) -> Result<(), String> {
             ..
         } => match prev {
             Some(v) => reg_write(root, path, name, v),
-            None => reg_delete(root, path, name).or(Ok(())), // value didn't exist before
+            // reg_delete itself treats NotFound as success; other failures
+            // propagate so an undo never lies about having restored state.
+            None => reg_delete(root, path, name),
         },
         #[cfg(not(windows))]
         ChangeItem::Registry { .. } => Err("Windows only".into()),
@@ -1315,6 +1385,7 @@ pub(crate) fn revert_item(item: &ChangeItem) -> Result<(), String> {
 /// journal entry, if the journal is gone for those, return an error telling
 /// the user to apply-then-undo.
 pub fn revert(tweak_id: &str) -> Result<Value, String> {
+    let _engine = engine_guard()?;
     // ── 1. Journal path (precise: uses saved previous values + reg backups) ──
     // Find, execute and mark atomically: a concurrent revert of the same
     // entry sees it as already-reverted and does nothing.
@@ -1383,7 +1454,7 @@ pub fn revert(tweak_id: &str) -> Result<Value, String> {
                 // value either didn't exist before (deletion → absent = default)
                 // or was at the Windows built-in default which also wins when
                 // the key is absent. reg_delete returns Ok(()) if already gone.
-                reg_delete(root, path, name).or(Ok(()))
+                reg_delete(root, path, name)
             }
             #[cfg(not(windows))]
             Action::RegSet { .. } => Ok(()),
@@ -1409,6 +1480,7 @@ pub fn revert(tweak_id: &str) -> Result<Value, String> {
 /// (Quick Boost on two different games at once) each get an independent,
 /// unambiguous undo handle.
 pub fn revert_entry(entry_id: &str) -> Result<Value, String> {
+    let _engine = engine_guard()?;
     let id = safety::with_journal(|journal| {
         let entry = journal
             .iter_mut()
@@ -1433,7 +1505,9 @@ pub fn revert_entry(entry_id: &str) -> Result<Value, String> {
 }
 
 pub fn history() -> Value {
-    serde_json::to_value(safety::load_journal()).unwrap_or(Value::Null)
+    safety::load_journal()
+        .map(|j| serde_json::to_value(j).unwrap_or(Value::Null))
+        .unwrap_or_else(|e| json!({ "error": e }))
 }
 
 #[cfg(test)]
