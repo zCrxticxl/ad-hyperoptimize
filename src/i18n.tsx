@@ -521,6 +521,8 @@ const de = {
   ctxmenuDisableAllBloat: "Alle unnötigen deaktivieren",
   ctxmenuReenableAll: "Alle wieder aktivieren",
   ctxmenuDisableAllConfirm: "Alle unnötigen Kontextmenüeinträge deaktivieren?",
+  ctxmenuReenableAllConfirm: "Wirklich alle deaktivierten Kontextmenü-Einträge wieder aktivieren?",
+  updatesRestorePointDone: "✓ Wiederherstellungspunkt erstellt. Treiber-Updates können jetzt sicher installiert werden.",
   ctxmenuOn: "Aktiv",
   ctxmenuOff: "Aus",
   ctxmenuAdminTag: "Admin",
@@ -1886,6 +1888,8 @@ const en: typeof de = {
   ctxmenuDisableAllBloat: "Disable All Bloat",
   ctxmenuReenableAll: "Re-enable All",
   ctxmenuDisableAllConfirm: "Disable all unnecessary context menu entries?",
+  ctxmenuReenableAllConfirm: "Really re-enable all disabled context menu entries?",
+  updatesRestorePointDone: "Restore point created. Driver updates are now safe to install.",
   ctxmenuOn: "On",
   ctxmenuOff: "Off",
   ctxmenuAdminTag: "Admin",
@@ -2784,7 +2788,16 @@ const LangContext = createContext<LangCtx>({
 
 export function LangProvider({ children }: { children: React.ReactNode }) {
   const [lang, setLangState] = useState<Lang>(() => {
-    try { return (localStorage.getItem("lang") as Lang) ?? "de"; } catch { return "de"; }
+    // First run: follow the system locale instead of assuming German.
+    try {
+      const saved = localStorage.getItem("lang") as Lang | null;
+      if (saved) return saved;
+      const nav = (navigator.language || "").toLowerCase();
+      const supported: Lang[] = ["de", "en", "es", "fr", "pt", "pl", "ru", "tr", "sv"];
+      return supported.find((l) => nav.startsWith(l)) ?? "en";
+    } catch {
+      return "en";
+    }
   });
   const setLang = (l: Lang) => {
     try { localStorage.setItem("lang", l); } catch {}

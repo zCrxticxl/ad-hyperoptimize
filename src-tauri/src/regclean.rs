@@ -158,7 +158,7 @@ fn extract_exe_path(cmd: &str) -> Option<String> {
 
     // .exe marker: take everything up to and including .exe
     let lower = s.to_lowercase();
-    if let Some(pos) = lower.find(".exe") {
+    if let Some(pos) = lower.rfind(".exe") {
         return Some(s[..pos + 4].to_string());
     }
     for ext in &[".cmd", ".bat", ".msi", ".vbs"] {
@@ -500,10 +500,9 @@ pub fn clean(entries: Vec<Value>) -> Result<Value, String> {
     #[cfg(windows)]
     {
         // 1. Prepare backup dir + a per-cleanup folder for the .reg exports.
-        let ts = chrono::Local::now().format("%Y%m%d_%H%M%S").to_string();
-        let backup_dir = dirs::config_dir()
-            .unwrap_or_else(|| std::path::PathBuf::from("."))
-            .join("PCOptSuite")
+        let ts = chrono::Local::now().format("%Y%m%d_%H%M%S%6f").to_string();
+        let backup_dir = crate::safety::app_data_dir()
+            .join("regclean")
             .join("regclean");
         let reg_dir = backup_dir.join(&ts);
         std::fs::create_dir_all(&reg_dir).map_err(|e| format!("backup dir: {e}"))?;
@@ -691,12 +690,20 @@ pub fn restore(backup_path: String) -> Result<Value, String> {
 
 /// List available cleanup backups (newest first) for the restore UI.
 pub fn list_backups() -> Value {
-    let dir = dirs::config_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("PCOptSuite")
-        .join("regclean");
+    // New backups live under the shared data dir; pre-unification backups
+    // live under the old config_dir location and must stay listable.
+    let mut dirs = vec![crate::safety::app_data_dir().join("regclean")];
+    if let Some(legacy) = dirs::config_dir() {
+        let legacy = legacy.join("PCOptSuite").join("regclean");
+        if legacy != dirs[0] {
+            dirs.push(legacy);
+        }
+    }
     let mut out: Vec<Value> = Vec::new();
-    if let Ok(rd) = std::fs::read_dir(&dir) {
+    for dir in dirs {
+        let Ok(rd) = std::fs::read_dir(&dir) else {
+            continue;
+        };
         for e in rd.flatten() {
             let path = e.path();
             let is_backup = path.extension().and_then(|x| x.to_str()) == Some("json")

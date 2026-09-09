@@ -68,7 +68,9 @@ pub fn memory() -> Value {
 pub fn disk() -> Value {
     const SZ: usize = 256 * 1024 * 1024;
     const CHUNK: usize = 4 * 1024 * 1024;
-    let path = std::env::temp_dir().join("pcopt_bench.tmp");
+    // Unique per process/run: concurrent benchmarks overwrote each other.
+    let path = std::env::temp_dir().join(format!("pcopt_bench_{}_{}.tmp",
+        std::process::id(), chrono::Local::now().format("%Y%m%d%H%M%S%6f")));
     let data = vec![0x7Eu8; CHUNK];
 
     let write_mbs = (|| -> Result<f64, std::io::Error> {
@@ -118,10 +120,21 @@ pub fn run(kind: &str) -> Result<Value, String> {
         _ => return Err(format!("unknown benchmark '{kind}'")),
     };
     result["time"] = json!(chrono::Local::now().to_rfc3339());
-    let mut hist: Vec<Value> = fs::read_to_string(history_path())
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default();
+    // A corrupt history file must never be silently replaced (that would
+    // wipe previous results); surface it instead.
+    let raw = fs::read_to_string(history_path());
+    let mut hist: Vec<Value> = match raw {
+        Err(_) => Vec::new(), // no history yet: start fresh
+        Ok(s) => match serde_json::from_str(&s) {
+            Ok(h) => h,
+            Err(e) => {
+                result["historyError"] = json!(format!(
+                    "history file is corrupt, previous results kept on disk: {e}"
+                ));
+                return Ok(result);
+            }
+        },
+    };
     hist.push(result.clone());
     if let Err(e) = fs::write(
         history_path(),

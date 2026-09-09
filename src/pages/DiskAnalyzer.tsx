@@ -23,7 +23,7 @@ type Tab         = "largest" | "duplicates" | "temp" | "organizer";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-const ts = (s: number) => s ? new Date(s * 1000).toLocaleDateString("de-DE") : "-";
+const ts = (s: number) => (s ? new Date(s * 1000).toLocaleDateString() : "-");
 
 function BarMini({ pct, color = "var(--accent)" }: { pct: number; color?: string }) {
   return (

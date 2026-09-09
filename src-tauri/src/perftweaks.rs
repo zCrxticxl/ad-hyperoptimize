@@ -325,12 +325,14 @@ pub fn ram_info() -> Value {
     let free_mb = sys.free_memory() / 1024 / 1024;
 
     // Standby + modified from perf counters (best-effort)
+    // Win32_PerfFormattedData counter names are locale-independent,
+    // unlike Get-Counter's English display paths.
     let standby_mb = ps::run(
-        "try { [math]::Round((Get-Counter '\\Memory\\Standby Cache Total Bytes' -EA Stop).CounterSamples[0].CookedValue/1MB) } catch { 0 }"
+        "try { $m = Get-CimInstance Win32_PerfFormattedData_PerfOS_Memory -EA Stop; [math]::Round(($m.StandbyCacheCoreBytes + $m.StandbyCacheNormalPriorityCacheBytes + $m.StandbyCacheReserveBytes)/1MB) } catch { 0 }"
     ).ok().and_then(|s| s.trim().parse::<u64>().ok()).unwrap_or(0);
 
     let modified_mb = ps::run(
-        "try { [math]::Round((Get-Counter '\\Memory\\Modified Page List Bytes' -EA Stop).CounterSamples[0].CookedValue/1MB) } catch { 0 }"
+        "try { [math]::Round((Get-CimInstance Win32_PerfFormattedData_PerfOS_Memory -EA Stop).ModifiedPageListBytes/1MB) } catch { 0 }"
     ).ok().and_then(|s| s.trim().parse::<u64>().ok()).unwrap_or(0);
 
     json!({

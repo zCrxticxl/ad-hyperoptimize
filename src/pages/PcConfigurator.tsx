@@ -25,12 +25,16 @@ const GPU_TDP_FALLBACK: Record<string, number> = { integrated: 15, budget: 130, 
 
 type PriceablePart = { id: string; name: string; priceNew: number | null; priceUsed: number; buyQuery: string };
 
+// Module-level cache: the board model never changes while the app runs,
+// so revisiting the page must not re-run the 5-30s full scan.
+let cachedBoard: { vendor?: string; model?: string } | null = null;
+
 export default function PcConfigurator() {
   const { t, lang } = useLang();
   const hw = useHwProfile();
   const [tab, setTab] = useState<"analysis" | "configurator">("analysis");
   const [cfgMode, setCfgMode] = useState<"upgrade" | "build">("upgrade");
-  const [board, setBoard] = useState<{ vendor?: string; model?: string } | null>(null);
+  const [board, setBoard] = useState<{ vendor?: string; model?: string } | null>(cachedBoard);
 
   const [selMobo, setSelMobo] = useState("");
   const [selCpu, setSelCpu] = useState("");
@@ -40,8 +44,18 @@ export default function PcConfigurator() {
   const [selPsu, setSelPsu] = useState("");
 
   useEffect(() => {
-    api.fullScan(false)
-      .then((env: any) => setBoard({ vendor: env?.data?.board?.Manufacturer, model: env?.data?.board?.Product }))
+    // The board model never changes while the app runs; cache the scan so
+    // revisiting the page is instant instead of re-scanning (5-30s).
+    if (cachedBoard) {
+      setBoard(cachedBoard);
+      return;
+    }
+    api
+      .fullScan(false)
+      .then((env: any) => {
+        cachedBoard = { vendor: env?.data?.board?.Manufacturer, model: env?.data?.board?.Product };
+        setBoard(cachedBoard);
+      })
       .catch(() => setBoard(null));
   }, []);
 
@@ -80,7 +94,9 @@ export default function PcConfigurator() {
   const curGpuScore = gpuScoreOf(hw).score;
   const curRamScore = ramScoreOf(hw);
   const curStorageScore = storageScoreOf(hw);
-  const inferredRamType: "DDR4" | "DDR5" = hw.ram.speedMhz >= 4000 ? "DDR5" : "DDR4";
+  // DDR5 starts at JEDEC 4800, but high-end DDR4 OC kits reach 5000+;
+  // only speeds typical of DDR5 (5600+) are unambiguous.
+  const inferredRamType: "DDR4" | "DDR5" = hw.ram.speedMhz >= 5600 ? "DDR5" : "DDR4";
 
   const cpuObj = CPUS.find((c) => c.id === selCpu) ?? null;
   const gpuObj = GPUS.find((g) => g.id === selGpu) ?? null;

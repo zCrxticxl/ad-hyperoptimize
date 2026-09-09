@@ -114,7 +114,7 @@ static TWEAKS: &[PrivacyTweak] = &[
         description: "Removes app suggestions, sponsored content, and tips from the Start menu.",
         risk:        "Low",
         apply:       r#"$p='HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager'; Set-ItemProperty -Path $p -Name SystemPaneSuggestionsEnabled -Value 0 -Type DWord -ErrorAction SilentlyContinue; Set-ItemProperty -Path $p -Name SoftLandingEnabled -Value 0 -Type DWord -ErrorAction SilentlyContinue; Set-ItemProperty -Path $p -Name SubscribedContent-338388Enabled -Value 0 -Type DWord -ErrorAction SilentlyContinue; Set-ItemProperty -Path $p -Name SubscribedContent-338389Enabled -Value 0 -Type DWord -ErrorAction SilentlyContinue; Set-ItemProperty -Path $p -Name SubscribedContent-338393Enabled -Value 0 -Type DWord -ErrorAction SilentlyContinue"#,
-        revert:      r#"$p='HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager'; Set-ItemProperty -Path $p -Name SystemPaneSuggestionsEnabled -Value 1 -Type DWord -ErrorAction SilentlyContinue; Set-ItemProperty -Path $p -Name SoftLandingEnabled -Value 1 -Type DWord -ErrorAction SilentlyContinue"#,
+        revert:      r#"$p='HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager'; Set-ItemProperty -Path $p -Name SystemPaneSuggestionsEnabled -Value 1 -Type DWord -ErrorAction SilentlyContinue; Set-ItemProperty -Path $p -Name SoftLandingEnabled -Value 1 -Type DWord -ErrorAction SilentlyContinue; Set-ItemProperty -Path $p -Name 'SubscribedContent-338388Enabled' -Value 1 -Type DWord -ErrorAction SilentlyContinue; Set-ItemProperty -Path $p -Name 'SubscribedContent-338389Enabled' -Value 1 -Type DWord -ErrorAction SilentlyContinue; Set-ItemProperty -Path $p -Name 'SubscribedContent-338393Enabled' -Value 1 -Type DWord -ErrorAction SilentlyContinue"#,
         check:       "(Get-ItemProperty 'HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager' -ErrorAction SilentlyContinue).SystemPaneSuggestionsEnabled -eq 0",
     },
     PrivacyTweak {
@@ -170,7 +170,7 @@ static TWEAKS: &[PrivacyTweak] = &[
         description: "Prevents collection of typing and handwriting data used to improve autocorrect and Cortana.",
         risk:        "Low",
         apply:       r#"$p='HKCU:\SOFTWARE\Microsoft\InputPersonalization'; if(!(Test-Path $p)){New-Item -Path $p -Force|Out-Null}; Set-ItemProperty -Path $p -Name RestrictImplicitInkCollection -Value 1 -Type DWord; Set-ItemProperty -Path $p -Name RestrictImplicitTextCollection -Value 1 -Type DWord; $p2='HKCU:\SOFTWARE\Microsoft\InputPersonalization\TrainedDataStore'; if(!(Test-Path $p2)){New-Item -Path $p2 -Force|Out-Null}; Set-ItemProperty -Path $p2 -Name HarvestContacts -Value 0 -Type DWord"#,
-        revert:      r#"$p='HKCU:\SOFTWARE\Microsoft\InputPersonalization'; Set-ItemProperty -Path $p -Name RestrictImplicitInkCollection -Value 0 -Type DWord; Set-ItemProperty -Path $p -Name RestrictImplicitTextCollection -Value 0 -Type DWord"#,
+        revert:      r#"$p='HKCU:\SOFTWARE\Microsoft\InputPersonalization'; Set-ItemProperty -Path $p -Name RestrictImplicitInkCollection -Value 0 -Type DWord; Set-ItemProperty -Path $p -Name RestrictImplicitTextCollection -Value 0 -Type DWord; Set-ItemProperty -Path 'HKCU:\SOFTWARE\Microsoft\InputPersonalization\TrainedDataStore' -Name HarvestContacts -Value 1 -Type DWord -ErrorAction SilentlyContinue"#,
         check:       "(Get-ItemProperty 'HKCU:\\SOFTWARE\\Microsoft\\InputPersonalization' -ErrorAction SilentlyContinue).RestrictImplicitInkCollection -eq 1",
     },
 
@@ -182,7 +182,7 @@ static TWEAKS: &[PrivacyTweak] = &[
         description: "Disables the Windows Location Service (lfsvc). Apps can no longer retrieve GPS/network location.",
         risk:        "Medium",
         apply:       r#"Stop-Service -Name lfsvc -Force -ErrorAction SilentlyContinue; Set-Service -Name lfsvc -StartupType Disabled -ErrorAction SilentlyContinue; $p='HKLM:\SYSTEM\CurrentControlSet\Services\lfsvc\Service\Configuration'; if(Test-Path $p){ Set-ItemProperty -Path $p -Name Status -Value 0 -Type DWord -ErrorAction SilentlyContinue }"#,
-        revert:      "Set-Service -Name lfsvc -StartupType Manual -ErrorAction SilentlyContinue",
+        revert:      "Set-Service -Name lfsvc -StartupType Manual -ErrorAction SilentlyContinue; $p='HKLM:\\SYSTEM\\CurrentControlSet\\Services\\lfsvc\\Service\\Configuration'; if(Test-Path $p){ Set-ItemProperty -Path $p -Name Status -Value 1 -Type DWord -ErrorAction SilentlyContinue }",
         check:       "(Get-Service -Name lfsvc -ErrorAction SilentlyContinue).StartType -eq 'Disabled'",
     },
 

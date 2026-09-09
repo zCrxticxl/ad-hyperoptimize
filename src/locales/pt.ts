@@ -385,6 +385,8 @@ export const ui: Partial<UiText> = {
   ctxmenuDisableAllBloat: "Desativar tudo o que é inútil",
   ctxmenuReenableAll: "Reativar tudo",
   ctxmenuDisableAllConfirm: "Desativar todas as entradas inúteis do menu de contexto?",
+  ctxmenuReenableAllConfirm: "Realmente reativar todas as entradas desativadas do menu de contexto?",
+  updatesRestorePointDone: "Ponto de restauração criado. As atualizações de drivers agora podem ser instaladas com segurança.",
   ctxmenuOn: "Ativo",
   ctxmenuOff: "Inativo",
   ctxmenuAdminTag: "Admin",

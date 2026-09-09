@@ -385,6 +385,8 @@ export const ui: Partial<UiText> = {
   ctxmenuDisableAllBloat: "Tüm Gereksizleri Devre Dışı Bırak",
   ctxmenuReenableAll: "Tümünü Yeniden Etkinleştir",
   ctxmenuDisableAllConfirm: "Gereksiz tüm bağlam menüsü girişleri devre dışı bırakılsın mı?",
+  ctxmenuReenableAllConfirm: "Devre dışı bırakılan tüm bağlam menüsü girdileri gerçekten yeniden etkinleştirilsin mi?",
+  updatesRestorePointDone: "Geri yükleme noktası oluşturuldu. Sürücü güncellemeleri artık güvenle yüklenebilir.",
   ctxmenuOn: "Açık",
   ctxmenuOff: "Kapalı",
   ctxmenuAdminTag: "Yönetici",

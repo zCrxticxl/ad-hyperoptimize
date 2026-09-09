@@ -104,10 +104,9 @@ fn query_boot_events(limit: usize) -> (Vec<Value>, bool) {
 $logName = 'Microsoft-Windows-Diagnostics-Performance/Operational'
 $wasDisabled = $false
 $logInfo = Get-WinEvent -ListLog $logName -ErrorAction SilentlyContinue
-if ($logInfo -and -not $logInfo.IsEnabled) {{
-    $wasDisabled = $true
-    wevtutil sl $logName /e:true 2>$null
-}}
+# Read-only: the log stays as the user configured it. Enabling a
+# disabled diagnostic log is a persistent system change with no undo.
+$wasDisabled = $logInfo -and -not $logInfo.IsEnabled
 $events = Get-WinEvent -FilterHashtable @{{LogName=$logName; Id=100}} `
     -MaxEvents {limit} -ErrorAction SilentlyContinue
 $results = @()

@@ -15,6 +15,41 @@ type NvData = {
 
 type SettingKey = "powerManagementMode" | "maxPreRenderedFrames" | "lowLatencyMode" | "threadedOptimization";
 
+type RowProps = {
+  setting: SettingKey;
+  label: string;
+  value: string | undefined;
+  options: [string, string][];
+  busy: string | null;
+  tokens: Record<SettingKey, string | null>;
+  setSetting: (setting: SettingKey, v: string) => void;
+  undoSetting: (setting: SettingKey) => void;
+  t: (key: "revert") => string;
+  Spinner: React.ComponentType;
+};
+
+function Row({ setting, label, value, options, busy, tokens, setSetting, undoSetting, t, Spinner }: RowProps) {
+  return (
+    <div className="row" style={{ padding: "10px 0", borderBottom: "1px solid var(--border)", gap: 12, alignItems: "center" }}>
+      <div style={{ flex: 1, fontWeight: 600, fontSize: 13 }}>{label}</div>
+      <select
+        value={value ?? options[0][0]}
+        disabled={busy === setting}
+        onChange={(e) => setSetting(setting, e.target.value)}
+        style={{ minWidth: 200 }}
+      >
+        {options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+      </select>
+      {tokens[setting] && (
+        <button className="btn small ghost" disabled={busy === setting} onClick={() => undoSetting(setting)}>
+          {busy === setting ? <Spinner /> : t("revert")}
+        </button>
+      )}
+    </div>
+  );
+}
+
+
 export default function NvidiaControlPanel() {
   const { t } = useLang();
   const [data, setData] = useState<NvData | null>(null);
@@ -79,26 +114,7 @@ export default function NvidiaControlPanel() {
     finally { setOpening(false); }
   };
 
-  const Row = ({
-    setting, label, value, options,
-  }: { setting: SettingKey; label: string; value: string | undefined; options: [string, string][] }) => (
-    <div className="row" style={{ padding: "10px 0", borderBottom: "1px solid var(--border)", gap: 12, alignItems: "center" }}>
-      <div style={{ flex: 1, fontWeight: 600, fontSize: 13 }}>{label}</div>
-      <select
-        value={value ?? options[0][0]}
-        disabled={busy === setting}
-        onChange={(e) => setSetting(setting, e.target.value)}
-        style={{ minWidth: 200 }}
-      >
-        {options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-      </select>
-      {tokens[setting] && (
-        <button className="btn small ghost" disabled={busy === setting} onClick={() => undoSetting(setting)}>
-          {busy === setting ? <Spinner /> : t("revert")}
-        </button>
-      )}
-    </div>
-  );
+
 
   return (
     <>
@@ -121,6 +137,12 @@ export default function NvidiaControlPanel() {
           )}
 
           <Row
+          busy={busy}
+          tokens={tokens}
+          setSetting={setSetting}
+          undoSetting={undoSetting}
+          t={t}
+          Spinner={Spinner}
             setting="powerManagementMode"
             label={t("nvcpPowerMode")}
             value={data.powerManagementMode}
@@ -130,6 +152,12 @@ export default function NvidiaControlPanel() {
             ]}
           />
           <Row
+          busy={busy}
+          tokens={tokens}
+          setSetting={setSetting}
+          undoSetting={undoSetting}
+          t={t}
+          Spinner={Spinner}
             setting="maxPreRenderedFrames"
             label={t("nvcpPrerender")}
             value={data.maxPreRenderedFrames}
@@ -141,6 +169,12 @@ export default function NvidiaControlPanel() {
             ]}
           />
           <Row
+          busy={busy}
+          tokens={tokens}
+          setSetting={setSetting}
+          undoSetting={undoSetting}
+          t={t}
+          Spinner={Spinner}
             setting="lowLatencyMode"
             label={t("nvcpLowLatency")}
             value={data.lowLatencyMode}
@@ -151,6 +185,12 @@ export default function NvidiaControlPanel() {
             ]}
           />
           <Row
+          busy={busy}
+          tokens={tokens}
+          setSetting={setSetting}
+          undoSetting={undoSetting}
+          t={t}
+          Spinner={Spinner}
             setting="threadedOptimization"
             label={t("nvcpThreadedOpt")}
             value={data.threadedOptimization}

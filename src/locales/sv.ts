@@ -385,6 +385,8 @@ export const ui: Partial<UiText> = {
   ctxmenuDisableAllBloat: "Inaktivera allt onödigt",
   ctxmenuReenableAll: "Återaktivera alla",
   ctxmenuDisableAllConfirm: "Inaktivera alla onödiga snabbmenyposter?",
+  ctxmenuReenableAllConfirm: "Verkligen återaktivera alla inaktiverade snabbmenyobjekt?",
+  updatesRestorePointDone: "Återställningspunkt skapad. Drivrutinsuppdateringar kan nu installeras säkert.",
   ctxmenuOn: "På",
   ctxmenuOff: "Av",
   ctxmenuAdminTag: "Admin",

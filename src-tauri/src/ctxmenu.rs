@@ -176,10 +176,10 @@ pub fn toggle_entry(path: String, enable: bool) -> Result<String, String> {
     let script = if enable {
         format!(
             r#"
-if (Test-Path '{bak}') {{
-    Rename-Item -Path '{bak}' -NewName ('{path}' | Split-Path -Leaf) -Force -ErrorAction Stop
+if (Test-Path -LiteralPath '{bak}') {{
+    Rename-Item -LiteralPath '{bak}' -NewName ('{path}' | Split-Path -Leaf) -Force -ErrorAction Stop
     "Enabled"
-}} elseif (Test-Path '{path}') {{ "Already enabled" }}
+}} elseif (Test-Path -LiteralPath '{path}') {{ "Already enabled" }}
 else {{ "Key not found" }}
 "#
         )
@@ -187,10 +187,10 @@ else {{ "Key not found" }}
         let leaf_bak = format!("{}-bak", path.split('\\').next_back().unwrap_or("key"));
         format!(
             r#"
-if (Test-Path '{path}') {{
-    Rename-Item -Path '{path}' -NewName '{leaf_bak}' -Force -ErrorAction Stop
+if (Test-Path -LiteralPath '{path}') {{
+    Rename-Item -LiteralPath '{path}' -NewName '{leaf_bak}' -Force -ErrorAction Stop
     "Disabled"
-}} elseif (Test-Path '{bak}') {{ "Already disabled" }}
+}} elseif (Test-Path -LiteralPath '{bak}') {{ "Already disabled" }}
 else {{ "Key not found, may not be installed" }}
 "#
         )

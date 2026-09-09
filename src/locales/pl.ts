@@ -385,6 +385,8 @@ export const ui: Partial<UiText> = {
   ctxmenuDisableAllBloat: "Wyłącz cały zbędny balast",
   ctxmenuReenableAll: "Włącz wszystko ponownie",
   ctxmenuDisableAllConfirm: "Wyłączyć wszystkie niepotrzebne wpisy menu kontekstowego?",
+  ctxmenuReenableAllConfirm: "Naprawdę ponownie włączyć wszystkie wyłączone wpisy menu kontekstowego?",
+  updatesRestorePointDone: "Punkt przywracania utworzony. Aktualizacje sterowników można teraz bezpiecznie zainstalować.",
   ctxmenuOn: "Włączone",
   ctxmenuOff: "Wyłączone",
   ctxmenuAdminTag: "Admin",

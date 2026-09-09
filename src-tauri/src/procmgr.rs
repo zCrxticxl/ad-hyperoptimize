@@ -19,6 +19,10 @@ const PROTECTED: &[&str] = &[
     "dwm.exe",
     "fontdrvhost.exe",
     "memory compression",
+    "msmpeng.exe",
+    "tiworker.exe",
+    "searchindexer.exe",
+    "searchapplication.exe",
 ];
 
 fn is_protected(name: &str) -> bool {

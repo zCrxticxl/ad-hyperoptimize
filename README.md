@@ -40,6 +40,16 @@ No registry-cleaner snake oil. Only documented, measurable tweaks, journaled, ba
 
 This project is source-available under the included non-commercial license. Personal and other non-commercial use is allowed; commercial use, redistribution in paid offerings, and enterprise deployment need a separate agreement. See [COMMERCIAL-LICENSING.md](COMMERCIAL-LICENSING.md). Security reports are handled under [SECURITY.md](SECURITY.md); please do not report vulnerabilities publicly.
 
+### Update signature verification
+
+The built-in updater verifies every package against a minisign key embedded in the app. The public key fingerprint is:
+
+```
+75A816CD47EDE457
+```
+
+If this fingerprint ever changes in a release, treat it as a supply-chain warning and verify through a second channel (GitHub release notes, project website) before updating.
+
 ---
 
 ## Why another optimizer?

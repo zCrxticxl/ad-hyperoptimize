@@ -167,10 +167,11 @@ pub fn check_winget_package(package_id: String) -> Value {
     }
     let script = format!(
         r#"
-$out = winget upgrade --id '{package_id}' --source winget --accept-source-agreements 2>&1 | Out-String
+$pidEsc = '{package_id}'.Replace("'", "''")
+$out = winget upgrade --id $pidEsc --source winget --accept-source-agreements 2>&1 | Out-String
 if ($out -match 'No applicable update') {{
     [PSCustomObject]@{{ available=$false; current=''; newVersion='' }}
-}} elseif ($out -match '{package_id}\s+([\S]+)\s+([\S]+)') {{
+}} elseif ($out -match [regex]::Escape($pidEsc) + '\s+([\S]+)\s+([\S]+)') {{
     [PSCustomObject]@{{ available=$true; current=$Matches[1]; newVersion=$Matches[2] }}
 }} else {{
     # try install to see if it's not installed at all

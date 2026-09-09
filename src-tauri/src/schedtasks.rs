@@ -182,7 +182,13 @@ pub fn toggle(path: String, name: String, enable: bool) -> Result<Value, String>
     }
     // Path/name are embedded in single-quoted PS strings and come from the
     // renderer, reject anything that could terminate the quotes.
-    if !crate::ps::is_safe_ident(&path) || !crate::ps::is_safe_ident(&name) {
+    // Task paths/names never contain wildcards; blocking them here keeps
+    // wildcard-expanding cmdlets (Test-Path, schtasks quoting) safe.
+    if !crate::ps::is_safe_ident(&path)
+        || !crate::ps::is_safe_ident(&name)
+        || path.contains(['*', '?', '[', ']'])
+        || name.contains(['*', '?', '[', ']'])
+    {
         return Err("Invalid task path or name".into());
     }
     let action = if enable {

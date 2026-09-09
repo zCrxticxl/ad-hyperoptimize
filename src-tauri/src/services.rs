@@ -160,8 +160,9 @@ pub fn set_startup(name: String, startup_type: String) -> Result<Value, String> 
         return Err(format!("Invalid startup type: {startup_type}"));
     }
     // Service names come from the renderer and are embedded in a single-quoted
-    // PS string.
-    if !ps::is_safe_ident(&name) {
+    // PS string. Wildcards are never valid service names and would be
+    // resolved by wildcard-aware cmdlets downstream.
+    if !ps::is_safe_ident(&name) || name.contains(['*', '?', '[', ']']) {
         return Err(format!("Invalid service name: {name}"));
     }
     let script =
@@ -177,7 +178,7 @@ pub fn control(name: String, action: String) -> Result<Value, String> {
         "restart" => format!("Restart-Service -Name '{name}' -Force -ErrorAction Stop"),
         _ => return Err(format!("Unknown action: {action}")),
     };
-    if !ps::is_safe_ident(&name) {
+    if !ps::is_safe_ident(&name) || name.contains(['*', '?', '[', ']']) {
         return Err(format!("Invalid service name: {name}"));
     }
     ps::run(&cmd)?;

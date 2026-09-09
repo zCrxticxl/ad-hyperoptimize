@@ -154,9 +154,11 @@ fn compute_profile(mut data: Value) -> Value {
     let is_amd_gpu = gpu_name.contains("amd") || gpu_name.contains("radeon");
     let is_intel_gpu = gpu_name.contains("intel") && !gpu_name.contains("core");
     let is_arc = gpu_name.contains("arc");
+    // The VRAM heuristic only applies to unidentified vendors: a driver
+    // query failure on an RTX 4090 must not reclassify it as integrated.
     let is_integrated = (is_intel_gpu && !is_arc)
         || (gpu_name.contains("vega") && !gpu_name.contains("radeon rx vega"))
-        || gpu_vram < 512;
+        || (!is_nvidia && !is_amd_gpu && !is_arc && gpu_vram < 512);
 
     // detect older architecture by name patterns
     let is_older_nvidia = is_nvidia

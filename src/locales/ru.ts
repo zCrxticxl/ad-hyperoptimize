@@ -385,6 +385,8 @@ export const ui: Partial<UiText> = {
   ctxmenuDisableAllBloat: "Отключить весь ненужный",
   ctxmenuReenableAll: "Снова включить всё",
   ctxmenuDisableAllConfirm: "Отключить все ненужные пункты контекстного меню?",
+  ctxmenuReenableAllConfirm: "Действительно снова включить все отключённые пункты контекстного меню?",
+  updatesRestorePointDone: "Точка восстановления создана. Обновления драйверов теперь можно безопасно установить.",
   ctxmenuOn: "Включено",
   ctxmenuOff: "Отключено",
   ctxmenuAdminTag: "Админ",

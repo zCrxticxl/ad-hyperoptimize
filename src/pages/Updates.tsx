@@ -373,7 +373,10 @@ export default function Updates({ admin }: { admin: boolean }) {
                       {t("updatesDriverConfirm")} {drivers.count} {t("updatesDriverQuestion")}
                     </span>
                     <button className="btn ghost" onClick={async () => {
-                      try { await api.createRestorePoint("Before driver updates"); }
+                      try {
+                        await api.createRestorePoint("Before driver updates");
+                        setDrvResult({ error: t("updatesRestorePointDone") });
+                      }
                       catch (e: any) { setDrvResult({ error: `${t("updatesRestorePoint")}: ${String(e)}` }); }
                     }}>{t("updatesRestorePoint")}</button>
                     <button className="btn" style={{ background: "var(--red)" }} onClick={async () => {

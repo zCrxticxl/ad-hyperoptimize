@@ -31,6 +31,7 @@ export default function CtxMenuCleaner({ admin }: { admin: boolean }) {
   };
 
   const enableAll = async () => {
+    if (!window.confirm(t("ctxmenuReenableAllConfirm"))) return;
     setBulkBusy(true);
     try { setLog(await api.ctxmenuEnableAll()); await load(); }
     catch (e: any) { setLog(String(e)); }
