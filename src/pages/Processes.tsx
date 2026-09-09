@@ -79,7 +79,7 @@ export default function Processes() {
       <h1 className="page-title">{t("procTitle")}</h1>
       <div className="page-sub">{t("procSub")}</div>
 
-      <Card title={`${t("procCard")} ${data ? `(${data.processes.length}, ${t("procShown")})` : ""}`}>
+      <Card title={`${t("procCard")} ${data ? `(${data.processes?.length ?? 0}, ${t("procShown")})` : ""}`}>
         <div className="row" style={{ marginBottom: 10 }}>
           <input
             className="select"

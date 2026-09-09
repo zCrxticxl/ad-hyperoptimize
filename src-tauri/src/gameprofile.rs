@@ -187,9 +187,13 @@ fn get_process_names() -> Vec<String> {
     String::from_utf8_lossy(&out.stdout)
         .lines()
         .filter_map(|line| {
-            line.split(',')
-                .next()
-                .map(|s| s.trim_matches('"').to_lowercase())
+            let first = if line.starts_with('"') {
+                // tasklist /fo csv quotes fields containing commas
+                line[1..].split('"').next()
+            } else {
+                line.split(',').next()
+            };
+            first.map(|s| s.trim_matches('"').to_lowercase())
         })
         .collect()
 }

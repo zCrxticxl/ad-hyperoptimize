@@ -195,7 +195,7 @@ pub fn update_apps(id: Option<String>) -> Result<Value, String> {
     // winget writes errors to stdout (not stderr), exec_capture returns the
     // status + both streams, and enforces the long timeout + tree kill so a
     // hung installer can never wedge the command or leak children.
-    let (status, stdout, _stderr) = ps::exec_capture("winget.exe", &argrefs)?;
+    let (status, stdout, stderr) = ps::exec_capture("winget.exe", &argrefs)?;
     let stdout = stdout
         .lines()
         .map(|l| l.rsplit('\r').next().unwrap_or("").to_string())
@@ -204,15 +204,19 @@ pub fn update_apps(id: Option<String>) -> Result<Value, String> {
 
     if !status.success() {
         // Extract last meaningful lines from stdout as the error message
-        let err_lines: Vec<&str> = stdout
+        let mut err_lines: Vec<String> = stdout
             .lines()
             .filter(|l| !l.trim().is_empty())
             .rev()
             .take(6)
+            .map(|l| l.to_string())
             .collect::<Vec<_>>()
             .into_iter()
             .rev()
             .collect();
+        if !stderr.trim().is_empty() {
+            err_lines.push(stderr.trim().to_string());
+        }
         let msg = if err_lines.is_empty() {
             format!("winget exited with code {}", status)
         } else {

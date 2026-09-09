@@ -230,7 +230,9 @@ pub fn start(app: AppHandle, st: &MonitorState) -> Result<(), String> {
 
 pub fn stop(st: &MonitorState) {
     st.running.store(false, Ordering::SeqCst);
-    let handle = st.thread.lock().unwrap().take();
+    // Poison recovery instead of unwrap: a panicked monitor thread must not
+    // crash the app when the user stops monitoring.
+    let handle = st.thread.lock().unwrap_or_else(|e| e.into_inner()).take();
     if let Some(h) = handle {
         let _ = h.join();
     }

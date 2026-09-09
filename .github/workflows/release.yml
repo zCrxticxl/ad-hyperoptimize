@@ -60,6 +60,34 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      # Release notes come from the matching CHANGELOG.md section (single source
+      # of truth, same content the app shows). Never fails: on any problem it
+      # falls back to the tag's commit message via the expression below.
+      - name: Extract release notes from CHANGELOG.md
+        shell: pwsh
+        env:
+          HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $notes = ''
+          try {
+            $ver = $env:GITHUB_REF_NAME.TrimStart('v')
+            if (Test-Path 'CHANGELOG.md') {
+              $collecting = $false
+              $out = New-Object System.Collections.Generic.List[string]
+              foreach ($line in Get-Content 'CHANGELOG.md') {
+                if ($line -match '^##\s+v?([0-9][^\s]*)') {
+                  if ($collecting) { break }
+                  if ($Matches[1].TrimStart('v') -eq $ver) { $collecting = $true; continue }
+                }
+                if ($collecting) { $out.Add($line) }
+              }
+              $notes = ($out -join "`n").Trim()
+            }
+          } catch { $notes = '' }
+          if ([string]::IsNullOrWhiteSpace($notes)) { $notes = $env:HEAD_COMMIT_MESSAGE }
+          "RELEASE_NOTES<<__CHANGELOG_EOF__`n$notes`n__CHANGELOG_EOF__" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
       - name: Build & publish release
         uses: tauri-apps/tauri-action@v0
         env:
@@ -69,7 +97,7 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'AD HyperOptimize ${{ github.ref_name }}'
-          releaseBody: "${{ github.event.head_commit.message }}"
+          releaseBody: ${{ env.RELEASE_NOTES || github.event.head_commit.message }}
           releaseDraft: false
           prerelease: false
 

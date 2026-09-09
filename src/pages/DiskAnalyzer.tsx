@@ -226,7 +226,11 @@ function LargestTab({ path, drives, currentRoot }: LargestTabProps) {
   const [filter, setFilter]       = useState("");
   const [sel, setSel]             = useState<Set<string>>(new Set());
 
+  const pathRef = useRef(path);
+  pathRef.current = path;
+
   const load = useCallback(() => {
+    const scanPath = path;
     setLoading(true);
     setScanned(0);
     setSel(new Set());
@@ -236,6 +240,7 @@ function LargestTab({ path, drives, currentRoot }: LargestTabProps) {
     listen<{ scanned: number; files?: FileEntry[]; done: boolean }>(
       "disk-scan-progress",
       (evt) => {
+        if (pathRef.current !== scanPath) return; // stale scan from another drive
         const p = evt.payload;
         setScanned(p.scanned);
         if (p.files && p.files.length > 0) {
@@ -253,12 +258,14 @@ function LargestTab({ path, drives, currentRoot }: LargestTabProps) {
     ).then(fn => { unlisten = fn; });
 
     // Full result arrives when scan completes
-    api.diskLargest(path, 50)
-      .then(setData)
-      .catch((e: any) => setErr(String(e)))
+    api.diskLargest(scanPath, 50)
+      .then(data => { if (pathRef.current === scanPath) setData(data); })
+      .catch((e: any) => { if (pathRef.current === scanPath) setErr(String(e)); })
       .finally(() => {
-        setLoading(false);
-        setScanned(0);
+        if (pathRef.current === scanPath) {
+          setLoading(false);
+          setScanned(0);
+        }
         unlisten?.();
       });
   }, [path]);
@@ -446,7 +453,7 @@ function DuplicatesTab({ path, drives, currentRoot }: DuplicatesTabProps) {
       {!data && !loading && (
         <div style={{ textAlign: "center", padding: "40px 0" }}>
           <div className="muted" style={{ marginBottom: 14 }}>SHA-256 · Min. 100 KB · Only size-matched candidates are hashed</div>
-          <button className="btn" onClick={load}>🔍 {t("diskScanDupes")}</button>
+          <button className="btn" onClick={load} disabled={loading}>🔍 {t("diskScanDupes")}</button>
         </div>
       )}
       {loading && <><Spinner /> <span className="muted">{t("diskHashing")}</span></>}
@@ -457,7 +464,7 @@ function DuplicatesTab({ path, drives, currentRoot }: DuplicatesTabProps) {
               <div key={String(l)} className="stat-chip"><div className="chip-val">{v}</div><div className="chip-lbl">{l}</div></div>
             ))}
             <button className="btn small ghost" onClick={selectAllCopies} style={{ marginLeft: 4 }}>{t("diskSelectCopies")}</button>
-            <button className="btn small ghost" onClick={load}>↻ {t("diskRescan")}</button>
+            <button className="btn small ghost" onClick={load} disabled={loading}>↻ {t("diskRescan")}</button>
           </div>
           {data.groups.length === 0 && <div className="muted" style={{ textAlign: "center", padding: 30 }}>✓ {t("diskNoDuplicates")}</div>}
 

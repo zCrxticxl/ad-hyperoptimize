@@ -173,7 +173,7 @@ static TWEAKS: &[Tweak] = &[
         name: "Disable App Suggestions / Tips",
         desc: "Removes suggested apps in Start and 'Did you know?' tips.",
         cat: "Ads & Clutter",
-        check: r#"(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager' -Name SubscribedContent-338389Enabled -EA SilentlyContinue).'SubscribedContent-338389Enabled' -eq 0"#,
+        check: r#"$p='HKCU:\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager'; (@('SubscribedContent-338389Enabled','SubscribedContent-338388Enabled','SubscribedContent-353698Enabled','SystemPaneSuggestionsEnabled','SoftLandingEnabled') | ForEach-Object { (Get-ItemProperty $p -Name $_ -EA SilentlyContinue).$_ -eq 0 }) -notcontains $false"#,
         apply: r#"$p='HKCU:\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager'; @('SubscribedContent-338389Enabled','SubscribedContent-338388Enabled','SubscribedContent-353698Enabled','SystemPaneSuggestionsEnabled','SoftLandingEnabled') | ForEach-Object { Set-ItemProperty $p $_ 0 -Type DWord -EA Stop }; 'Applied'"#,
         undo:  r#"$p='HKCU:\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager'; @('SubscribedContent-338389Enabled','SubscribedContent-338388Enabled','SubscribedContent-353698Enabled','SystemPaneSuggestionsEnabled','SoftLandingEnabled') | ForEach-Object { Set-ItemProperty $p $_ 1 -Type DWord -EA SilentlyContinue }"#,
         capture: &[

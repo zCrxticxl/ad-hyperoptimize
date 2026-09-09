@@ -73,6 +73,9 @@ fn walk(root: &Path) -> Vec<FileInfo> {
     let mut out = Vec::new();
 
     while let Some(dir) = stack.pop() {
+        if out.len() >= MAX_FILES {
+            break;
+        }
         let Ok(rd) = std::fs::read_dir(&dir) else {
             continue;
         };
@@ -96,7 +99,10 @@ fn walk(root: &Path) -> Vec<FileInfo> {
                 stack.push(path);
             } else if meta.is_file() {
                 if out.len() >= MAX_FILES {
-                    continue;
+                    // Cap reached: the collected set cannot grow anymore, so
+                    // stop walking instead of enumerating the rest of the
+                    // drive for nothing.
+                    break;
                 }
                 let name = path
                     .file_name()
@@ -277,17 +283,21 @@ fn copy_file(src: &Path, dst: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Recursively copy a directory tree.
+/// Copy a directory tree iteratively (explicit stack, no recursion).
 fn copy_dir(src: &Path, dst: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dst)?;
-    let rd = std::fs::read_dir(src)?;
-    for entry in rd.flatten() {
-        let m = entry.path().symlink_metadata()?;
-        let d = dst.join(entry.file_name());
-        if m.is_dir() {
-            copy_dir(&entry.path(), &d)?;
-        } else {
-            copy_file(&entry.path(), &d)?;
+    let mut stack = vec![(src.to_path_buf(), dst.to_path_buf())];
+    while let Some((s, d)) = stack.pop() {
+        let rd = std::fs::read_dir(&s)?;
+        for entry in rd.flatten() {
+            let m = entry.path().symlink_metadata()?;
+            let target = d.join(entry.file_name());
+            if m.is_dir() {
+                std::fs::create_dir_all(&target)?;
+                stack.push((entry.path(), target));
+            } else {
+                copy_file(&entry.path(), &target)?;
+            }
         }
     }
     Ok(())

@@ -66,7 +66,7 @@ export default function PrivacyCenter({ admin, focusId }: { admin: boolean; focu
     filter ? tweaks.filter(t => t.category === filter) : tweaks,
     [tweaks, filter]);
 
-  const doApply = async (tw: PTweak) => {
+  const doApply = async (tw: PTweak, refreshAfter = true) => {
     setBusy(tw.id);
     push(`Applying ${tw.name}…`);
     try {
@@ -75,7 +75,7 @@ export default function PrivacyCenter({ admin, focusId }: { admin: boolean; focu
       else if (res?.warning) push(`⚠ ${tw.name}: applied with warning, ${res.warning}`);
       else push(`✔ ${tw.name} ${t("active")}`);
     } catch (e: any) { push(`✘ ${tw.name}: ${e}`); setErr(String(e)); }
-    finally { setBusy(null); refresh(); }
+    finally { setBusy(null); if (refreshAfter) refresh(); }
   };
 
   const doRevert = async (tw: PTweak) => {
@@ -92,7 +92,8 @@ export default function PrivacyCenter({ admin, focusId }: { admin: boolean; focu
 
   const applyAll = async () => {
     const pending = tweaks.filter(t => !t.applied);
-    for (const t of pending) await doApply(t);
+    for (const t of pending) await doApply(t, false);
+    refresh();
   };
 
   const totalApplied = tweaks.filter(t => t.applied).length;

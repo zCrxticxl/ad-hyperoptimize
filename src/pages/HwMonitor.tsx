@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { Card, Spinner } from "../components/ui";
 import { useLang } from "../i18n";
@@ -110,7 +110,7 @@ function GpuCard({ data }: { data: any }) {
             {g.memUsedMb != null && (
               <tr>
                 <td className="muted">{t("hwmonVram")}</td>
-                <td>{g.memUsedMb} / {g.memTotalMb} MB ({Math.round(g.memUsedMb / g.memTotalMb * 100)}%)</td>
+                <td>{g.memUsedMb} / {g.memTotalMb} MB{g.memTotalMb > 0 && ` (${Math.round(g.memUsedMb / g.memTotalMb * 100)}%)`}</td>
               </tr>
             )}
             {g.powerW != null && <tr><td className="muted">{t("hwmonPowerDraw")}</td><td>{g.powerW} W</td></tr>}
@@ -198,6 +198,18 @@ export default function HwMonitor() {
   const [busy, setBusy] = useState(false);
   const [ts, setTs] = useState<string>("");
   const [err, setErr] = useState("");
+  const timer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const errStreak = useRef(0);
+
+  // Auto-refresh stops after 3 consecutive failures so a broken backend is not
+  // polled (and the error not re-flashed) every 10s; a successful load — e.g.
+  // via the manual "refresh now" link — resumes it.
+  const startPolling = () => {
+    if (timer.current === null) timer.current = setInterval(load, 10_000);
+  };
+  const stopPolling = () => {
+    if (timer.current !== null) { clearInterval(timer.current); timer.current = null; }
+  };
 
   const load = async () => {
     setBusy(true);
@@ -206,8 +218,12 @@ export default function HwMonitor() {
       setData(d);
       setTs(new Date().toLocaleTimeString());
       setErr("");
+      errStreak.current = 0;
+      startPolling();
     } catch (e: any) {
       setErr(String(e));
+      errStreak.current += 1;
+      if (errStreak.current >= 3) stopPolling();
     } finally {
       setBusy(false);
     }
@@ -215,8 +231,8 @@ export default function HwMonitor() {
 
   useEffect(() => {
     load();
-    const id = setInterval(load, 10_000);
-    return () => clearInterval(id);
+    startPolling();
+    return () => stopPolling();
   }, []);
 
   return (

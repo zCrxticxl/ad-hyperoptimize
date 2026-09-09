@@ -41,15 +41,19 @@ use serde_json::Value;
 use tauri::{AppHandle, Manager, State};
 
 struct AppState {
-    monitor: monitor::MonitorState,
+    monitor: std::sync::Arc<monitor::MonitorState>,
     game_switcher: gameprofile::SharedState,
     boosted_pid: std::sync::Mutex<Option<u32>>,
 }
 
 // ---- diagnostics ----
-#[tauri::command]
-fn cmd_is_admin() -> bool {
-    ps::is_admin()
+#[tauri::command(async)]
+async fn cmd_is_admin() -> bool {
+    // PowerShell spawn is slow (~0.5-2s); must not run on the main thread
+    // or every admin check freezes the UI.
+    tauri::async_runtime::spawn_blocking(ps::is_admin)
+        .await
+        .unwrap_or(false)
 }
 
 #[tauri::command(async)]
@@ -97,9 +101,12 @@ async fn cmd_network_diag() -> Value {
 }
 
 // ---- monitoring ----
-#[tauri::command]
-fn cmd_start_monitor(app: AppHandle, state: State<'_, AppState>) {
-    let _ = monitor::start(app, &state.monitor);
+#[tauri::command(async)]
+async fn cmd_start_monitor(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    let monitor = state.monitor.clone();
+    tauri::async_runtime::spawn_blocking(move || monitor::start(app, &monitor))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -323,8 +330,10 @@ async fn cmd_wpr_cancel() -> Result<String, String> {
 
 // ---- profiles ----
 #[tauri::command(async)]
-fn cmd_profile_list() -> Value {
-    profiles::list()
+async fn cmd_profile_list() -> Value {
+    tauri::async_runtime::spawn_blocking(profiles::list)
+        .await
+        .unwrap_or_else(|_| serde_json::json!({ "error": "profile list task panicked" }))
 }
 
 #[tauri::command(async)]
@@ -343,8 +352,10 @@ async fn cmd_profile_revert(id: String) -> Result<Value, String> {
 
 // ---- startup manager ----
 #[tauri::command(async)]
-fn cmd_startup_list() -> Value {
-    startup::list()
+async fn cmd_startup_list() -> Value {
+    tauri::async_runtime::spawn_blocking(startup::list)
+        .await
+        .unwrap_or_else(|_| serde_json::json!({ "error": "startup list task panicked" }))
 }
 
 #[tauri::command(async)]
@@ -382,8 +393,10 @@ async fn cmd_proc_affinity(pid: u32, mask: u64) -> Result<Value, String> {
 }
 
 #[tauri::command(async)]
-fn cmd_perm_priority_list() -> Value {
-    procmgr::perm_list()
+async fn cmd_perm_priority_list() -> Value {
+    tauri::async_runtime::spawn_blocking(procmgr::perm_list)
+        .await
+        .unwrap_or_else(|_| serde_json::json!({ "error": "perm priority list task panicked" }))
 }
 
 #[tauri::command(async)]
@@ -955,11 +968,15 @@ fn validate_open_path(path: &str) -> Result<(), String> {
     }
     let upper = path.to_ascii_uppercase();
     let is_url = upper.starts_with("HTTP://") || upper.starts_with("HTTPS://");
+    let is_unc = upper.starts_with("\\\\");
+    if is_unc && upper.contains('@') {
+        return Err("UNC paths with embedded credentials are not allowed".into());
+    }
     let is_abs = (upper.len() >= 3
         && upper.as_bytes()[0].is_ascii_alphabetic()
         && upper.as_bytes()[1] == b':'
         && upper.as_bytes()[2] == b'\\')
-        || upper.starts_with("\\\\");
+        || is_unc;
     if !is_url && !is_abs {
         return Err("path must be an http(s) URL or an absolute local path".into());
     }
@@ -1354,7 +1371,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .manage(AppState {
-            monitor: monitor::MonitorState::default(),
+            monitor: std::sync::Arc::new(monitor::MonitorState::default()),
             game_switcher: gameprofile::new_state(),
             boosted_pid: std::sync::Mutex::new(None),
         })

@@ -54,14 +54,14 @@ export default function ServicesManager({ admin, focusId }: { admin: boolean; fo
   const runCount    = useMemo(() => services.filter(s => s.status === "Running").length, [services]);
   const bloatActive = useMemo(() => services.filter(s => s.isBloat && s.status === "Running").length, [services]);
 
-  const doSetStartup = async (svc: Service, startupType: string) => {
+  const doSetStartup = async (svc: Service, startupType: string, refreshAfter = true) => {
     setBusy(svc.name + "_startup");
     push(`${svc.displayName}: → ${startupType}…`);
     try {
       await api.serviceSetStartup(svc.name, startupType);
       push(`✔ ${svc.displayName}: ${startupType}`);
     } catch (e: any) { push(`✘ ${svc.displayName}: ${e}`); setErr(String(e)); }
-    finally { setBusy(null); refresh(); }
+    finally { setBusy(null); if (refreshAfter) refresh(); }
   };
 
   const doControl = async (svc: Service, action: string) => {
@@ -76,8 +76,9 @@ export default function ServicesManager({ admin, focusId }: { admin: boolean; fo
 
   const disableBloat = async () => {
     for (const s of services.filter(s => s.isBloat && s.startType !== "Disabled")) {
-      await doSetStartup(s, "Disabled");
+      await doSetStartup(s, "Disabled", false);
     }
+    refresh();
   };
 
   return (

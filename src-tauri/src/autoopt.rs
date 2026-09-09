@@ -154,11 +154,7 @@ pub fn apply_selected(items: Vec<Value>) -> Value {
 
         let result: Result<String, String> = match module.as_str() {
             "tweak" => tweaks::apply(&id).map(|_| format!("OK: {}", name)),
-            "privacy" => match privacy::apply(id.clone()) {
-                Ok(v) if v["ok"].as_bool().unwrap_or(false) => Ok(format!("OK: {}", name)),
-                Ok(v) => Err(v["warning"].as_str().unwrap_or("apply failed").to_string()),
-                Err(e) => Err(format!("{:?}", e)),
-            },
+            "privacy" => privacy::apply(id.clone()).map(|_| format!("OK: {}", name)),
             "debloater_tweak" => debloater::apply_tweak(id.clone()),
             other => Err(format!("Unknown module: {}", other)),
         };

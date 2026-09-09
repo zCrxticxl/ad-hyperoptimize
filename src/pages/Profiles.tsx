@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { api } from "../api";
-import { Card, Badge, Spinner, ActionBtn } from "../components/ui";
+import { Card, Badge, Spinner } from "../components/ui";
 import { useLang } from "../i18n";
 
 function delta(before?: number, after?: number) {
@@ -19,6 +19,7 @@ export default function Profiles() {
   const [profiles, setProfiles] = useState<any[] | null>(null);
   const [result, setResult] = useState<any | null>(null);
   const [confirm, setConfirm] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
   const load = () => api.profileList().then(setProfiles);
   useEffect(() => {
@@ -26,14 +27,32 @@ export default function Profiles() {
   }, []);
 
   const run = async (id: string, withBench: boolean) => {
+    if (busy) return;
+    setBusy(true);
     setResult({ running: true, withBench });
     try {
       setResult(await api.profileApply(id, withBench));
     } catch (e: any) {
       setResult({ error: String(e) });
+    } finally {
+      setConfirm(null);
+      await load();
+      setBusy(false);
     }
-    setConfirm(null);
-    load();
+  };
+
+  const revert = async (id: string) => {
+    if (busy) return;
+    setBusy(true);
+    setResult({ running: true, withBench: false });
+    try {
+      setResult(await api.profileRevert(id));
+    } catch (e: any) {
+      setResult({ error: String(e) });
+    } finally {
+      await load();
+      setBusy(false);
+    }
   };
 
   const b = result?.benchBefore;
@@ -72,21 +91,20 @@ export default function Profiles() {
               ) : (
                 <button
                   className="btn small"
-                  disabled={result?.running}
+                  disabled={busy}
                   onClick={() => setConfirm(p.id)}
                 >
                   {t("profilesApply")}
                 </button>
               )}
               {p.appliedCount > 0 && (
-                <ActionBtn
-                  label={t("profRevertBtn")}
+                <button
                   className="btn small ghost"
-                  onRun={async () => {
-                    setResult(await api.profileRevert(p.id));
-                    load();
-                  }}
-                />
+                  disabled={busy}
+                  onClick={() => revert(p.id)}
+                >
+                  {t("profRevertBtn")}
+                </button>
               )}
             </div>
           </Card>

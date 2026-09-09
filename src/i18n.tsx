@@ -429,6 +429,7 @@ const de = {
   homeTools: "Werkzeuge",
   homeTool: "Werkzeug",
   homeRecents: "Zuletzt verwendet",
+  homeWhatsNew: "Was ist neu",
   catDescOverview: "Systemzustand auf einen Blick und Ein-Klick-Optimierung.",
   catDescPerformance: "Mehr FPS, weniger Latenz, Gaming- und GPU-Tweaks.",
   catDescCleanup: "Speicher freigeben, Apps entfernen, Ballast loswerden.",
@@ -736,7 +737,13 @@ const de = {
   modeSwitchExpert: "Zum Expert-Modus wechseln",
   adminHint: "Einige Werkzeuge erfordern Administratorrechte, App als Administrator neu starten, um sie freizuschalten.",
   navSettings: "Einstellungen",
+  navChangelog: "Änderungsverlauf",
   toolDescSettings: "Sprache, Modus und App-Verhalten.",
+  toolDescChangelog: "Neue Funktionen und frühere Versionen.",
+  changelogTitle: "Änderungsverlauf",
+  changelogSub: "Was neu ist und was sich in früheren Versionen geändert hat.",
+  changelogCurrent: "Aktuell",
+  settingsViewChangelog: "Änderungsverlauf anzeigen",
   settingsTitle: "Einstellungen",
   settingsSub: "Sprache, Anzeige-Modus und App-Daten verwalten.",
   settingsAppearance: "Darstellung",
@@ -1784,6 +1791,7 @@ const en: typeof de = {
   homeTools: "tools",
   homeTool: "tool",
   homeRecents: "Recently used",
+  homeWhatsNew: "What's new",
   catDescOverview: "System health at a glance and one-click optimization.",
   catDescPerformance: "More FPS, less latency, gaming and GPU tweaks.",
   catDescCleanup: "Free up space, remove apps, cut the bloat.",
@@ -2091,7 +2099,13 @@ const en: typeof de = {
   modeSwitchExpert: "Switch to Expert mode",
   adminHint: "Some tools require administrator rights, restart the app as admin to unlock them.",
   navSettings: "Settings",
+  navChangelog: "Changelog",
   toolDescSettings: "Language, mode and app behavior.",
+  toolDescChangelog: "What's new and changes from earlier releases.",
+  changelogTitle: "Changelog",
+  changelogSub: "What's new and what changed in earlier releases.",
+  changelogCurrent: "Current",
+  settingsViewChangelog: "View changelog",
   settingsTitle: "Settings",
   settingsSub: "Manage language, display mode and app data.",
   settingsAppearance: "Appearance",
@@ -2770,7 +2784,9 @@ export function LangProvider({ children }: { children: React.ReactNode }) {
     try { localStorage.setItem("lang", l); } catch {}
     setLangState(l);
   };
-  const t = (key: keyof typeof de): string => TRANSLATIONS[lang][key] ?? de[key] ?? key;
+  // Missing translations fall back to English before German.
+  const t = (key: keyof typeof de): string =>
+    TRANSLATIONS[lang][key] ?? en[key] ?? de[key] ?? key;
 
   return (
     <LangContext.Provider value={{ lang, setLang, t }}>

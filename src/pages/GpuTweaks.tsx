@@ -56,6 +56,7 @@ export default function GpuTweaks({ admin, focusId }: { admin: boolean; focusId?
   const [data, setData]   = useState<ScanData | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy]   = useState<string | null>(null);
+  const [lastLog, setLastLog] = useState<Record<string, string>>({});
   const [log, setLog]     = useState<string[]>([]);
   const [open, setOpen]   = useState<string | null>(null);
   const [err, setErr]     = useState("");
@@ -79,6 +80,10 @@ export default function GpuTweaks({ admin, focusId }: { admin: boolean; focusId?
 
   const push = (m: string) =>
     setLog((l) => [`[${new Date().toLocaleTimeString()}] ${m}`, ...l.slice(0, 49)]);
+  const pushFor = (id: string, m: string) => {
+    push(m);
+    setLastLog((prev) => ({ ...prev, [id]: m }));
+  };
 
   const refresh = () => {
     setLoading(true);
@@ -94,12 +99,12 @@ export default function GpuTweaks({ admin, focusId }: { admin: boolean; focusId?
   const doApply = async (tw: GpuTweak) => {
     if (!data) return;
     setBusy(tw.id);
-    push(`Applying: ${tw.name}…`);
+    pushFor(tw.id, `Applying: ${tw.name}…`);
     try {
       await api.gpuTweakApply(tw.id, data.driverKey);
-      push(`✔ ${tw.name} ${t("gpuLogApplied")}${tw.reboot ? ` ${t("gpuRebootLog")}` : ""}`);
+      pushFor(tw.id, `✔ ${tw.name} ${t("gpuLogApplied")}${tw.reboot ? ` ${t("gpuRebootLog")}` : ""}`);
     } catch (e: any) {
-      push(`✘ ${tw.name}: ${e}`);
+      pushFor(tw.id, `✘ ${tw.name}: ${e}`);
     } finally {
       setBusy(null);
       setPendingApply(null);
@@ -110,12 +115,12 @@ export default function GpuTweaks({ admin, focusId }: { admin: boolean; focusId?
   const doRevert = async (tw: GpuTweak) => {
     if (!data) return;
     setBusy(tw.id);
-    push(`Reverting: ${tw.name}…`);
+    pushFor(tw.id, `Reverting: ${tw.name}…`);
     try {
       await api.gpuTweakRevert(tw.id, data.driverKey);
-      push(`↩ ${tw.name} ${t("gpuLogReset")}`);
+      pushFor(tw.id, `↩ ${tw.name} ${t("gpuLogReset")}`);
     } catch (e: any) {
-      push(`✘ ${tw.name}: ${e}`);
+      pushFor(tw.id, `✘ ${tw.name}: ${e}`);
     } finally {
       setBusy(null);
       refresh();
@@ -338,9 +343,9 @@ export default function GpuTweaks({ admin, focusId }: { admin: boolean; focusId?
                           )}
                         </div>
                       )}
-                      {log.length > 0 && log[0].startsWith(tw.id + ":") && (
+                      {lastLog[tw.id] && (
                         <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
-                          {log[0].replace(tw.id + ":", "").trim()}
+                          {lastLog[tw.id]}
                         </div>
                       )}
                     </div>

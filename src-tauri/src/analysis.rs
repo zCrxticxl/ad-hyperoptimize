@@ -33,6 +33,34 @@ struct Finding {
     params: Value,
 }
 
+/// Well-known power scheme GUIDs — locale-invariant, unlike the plan name
+/// that `powercfg /getactivescheme` prints around them.
+const PLAN_HIGH_PERFORMANCE: &str = "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c";
+const PLAN_ULTIMATE: &str = "e9a42b02-d5df-448d-aa00-03f14749eb61";
+const PLAN_BALANCED: &str = "381b4222-f694-41f0-9685-ff5bb260df2e";
+const PLAN_POWER_SAVER: &str = "a1841308-3541-4fab-bc81-f71556f20b4a";
+
+/// Decide from `powercfg /getactivescheme` output whether the active plan is
+/// a performance plan. Known stock GUIDs decide directly; OEM/custom schemes
+/// (unknown GUID) fall back to name matching so vendor gaming plans on
+/// English/German systems are still recognized.
+fn plan_is_suboptimal(raw: &str) -> bool {
+    let guid = raw
+        .split_whitespace()
+        .find(|t| crate::ps::is_guid(t))
+        .map(|g| g.to_ascii_lowercase());
+    match guid.as_deref() {
+        Some(PLAN_HIGH_PERFORMANCE) | Some(PLAN_ULTIMATE) => false,
+        Some(PLAN_BALANCED) | Some(PLAN_POWER_SAVER) => true,
+        _ => {
+            let name = raw.to_lowercase();
+            !(name.contains("high performance")
+                || name.contains("ultimate")
+                || name.contains("h\u{00f6}chstleistung"))
+        }
+    }
+}
+
 fn f(
     severity: u8,
     code: &'static str,
@@ -290,11 +318,7 @@ pub fn analyze(scan: &Value, security: &Value, cleanup: &Value) -> Value {
 
     // Non-power-plan (not High Performance or Ultimate)
     if let Some(plan) = scan["power_plan"].as_str() {
-        let plan_lower = plan.to_lowercase();
-        if !plan_lower.contains("high performance")
-            && !plan_lower.contains("ultimate")
-            && !plan_lower.contains("h\u{00f6}chstleistung")
-        {
+        if plan_is_suboptimal(plan) {
             let plan_trimmed = plan.trim();
             findings.push(f(2, "suboptimal_power_plan", "Suboptimal power plan active",
                 format!("Active power plan: '{plan_trimmed}'. Balanced/Power Saver plans throttle CPU frequency and increase latency."),

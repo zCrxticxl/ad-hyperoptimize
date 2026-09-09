@@ -46,7 +46,7 @@ export default function GameProfiles() {
       showToast(`🔁 ${t("gameprofToastGameClosed")}`);
     });
     return () => { unSub1.then(f => f()); unSub2.then(f => f()); };
-  }, []);
+  }, [t]);
 
   const filtered = useMemo(() =>
     games.filter(g =>

@@ -4,3 +4,8 @@ src-tauri/target/
 src-tauri/gen/
 *.log
 *.key
+
+# Local agent/tooling working directories
+.omo/
+.opencode/
+.playwright-mcp/

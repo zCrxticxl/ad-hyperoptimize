@@ -3,13 +3,16 @@ import { api } from "../api";
 import { Card, Spinner } from "../components/ui";
 import { useLang, LANG_NAMES, Lang } from "../i18n";
 import type { Mode } from "../App";
+import { CURRENT_VERSION } from "./Changelog";
 
 export default function Settings({
   mode,
   setMode,
+  onOpenChangelog,
 }: {
   mode: Mode;
   setMode: (m: Mode) => void;
+  onOpenChangelog: () => void;
 }) {
   const { t, lang, setLang } = useLang();
   const [clearing, setClearing] = useState(false);
@@ -86,7 +89,7 @@ export default function Settings({
         <div className="row" style={{ gap: 20 }}>
           <div>
             <div className="muted" style={{ fontSize: 12 }}>{t("settingsVersion")}</div>
-            <div style={{ fontWeight: 700 }}>v1.4.0</div>
+            <div style={{ fontWeight: 700 }}>v{CURRENT_VERSION}</div>
           </div>
           <div>
             <div className="muted" style={{ fontSize: 12 }}>{t("settingsMode")}</div>
@@ -96,6 +99,9 @@ export default function Settings({
         <div className="muted" style={{ fontSize: 12, marginTop: 10, lineHeight: 1.5 }}>
           {t("settingsDataNote")}
         </div>
+        <button className="btn ghost small" style={{ marginTop: 12 }} onClick={onOpenChangelog}>
+          {t("settingsViewChangelog")}
+        </button>
       </Card>
     </>
   );

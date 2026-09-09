@@ -40,6 +40,7 @@ export default function SoftwareInstaller() {
   const { t } = useLang();
   const [apps, setApps]       = useState<App[]>([]);
   const [states, setStates]   = useState<Record<string, AppState>>({});
+  const [err, setErr]         = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [cat, setCat]         = useState("all");
   const [loading, setLoading] = useState(true);
@@ -58,21 +59,26 @@ export default function SoftwareInstaller() {
   // load catalog + check installed
   useEffect(() => {
     (async () => {
-      const [catalog, installed] = await Promise.all([
-        api.swCatalog(),
-        api.swCheckInstalled(),
-      ]);
-      setApps(catalog);
-      const init: Record<string, AppState> = {};
-      for (const a of catalog) {
-        init[a.wingetId] = {
-          installed: !!installed[a.wingetId],
-          status: "idle",
-          message: "",
-        };
+      try {
+        const [catalog, installed] = await Promise.all([
+          api.swCatalog(),
+          api.swCheckInstalled(),
+        ]);
+        setApps(catalog);
+        const init: Record<string, AppState> = {};
+        for (const a of catalog) {
+          init[a.wingetId] = {
+            installed: !!installed[a.wingetId],
+            status: "idle",
+            message: "",
+          };
+        }
+        setStates(init);
+      } catch (e: any) {
+        setErr(String(e));
+      } finally {
+        setLoading(false);
       }
-      setStates(init);
-      setLoading(false);
     })();
   }, []);
 
@@ -149,6 +155,7 @@ export default function SoftwareInstaller() {
   return (
     <>
       <h1 className="page-title">📦 {t("softinstTitle")}</h1>
+      {err && <div style={{ color: "var(--red)", marginBottom: 10, fontSize: 13 }}>⚠ {err}</div>}
       <div className="page-sub">
         {t("softinstSub")}
       </div>

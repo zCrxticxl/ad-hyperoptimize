@@ -332,7 +332,6 @@ export default function Security({ mode }: { mode: Mode }) {
                     try { if (r.toggle) await r.toggle(!r.on); }
                     catch (e: any) { setTaskMsg({ text: String(e), ok: false }); }
                     finally { setBusy(false); }
-                    load(true);
                   }}
                   >
                     {r.on ? t("secDisable") : t("secEnable")}

@@ -72,7 +72,7 @@ export function useHwProfile(): HwProfile | null {
           _cached = p as HwProfile;
           _listeners.forEach(fn => fn(_cached!));
         })
-        .catch(() => { _loading = false; })
+        .catch(() => {})
         .finally(() => { _loading = false; });
     }
 

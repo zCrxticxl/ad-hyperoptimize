@@ -211,8 +211,10 @@ export const fmtAge = (iso: string) => {
 };
 
 export const fmtBytes = (b: number) => {
-  if (b >= 1e9) return (b / 1e9).toFixed(2) + " GB";
-  if (b >= 1e6) return (b / 1e6).toFixed(1) + " MB";
-  if (b >= 1e3) return (b / 1e3).toFixed(0) + " KB";
+  // 1024-based: matches Windows Explorer, which is what users compare against.
+  if (b >= 1024 ** 4) return (b / 1024 ** 4).toFixed(2) + " TB";
+  if (b >= 1024 ** 3) return (b / 1024 ** 3).toFixed(2) + " GB";
+  if (b >= 1024 ** 2) return (b / 1024 ** 2).toFixed(1) + " MB";
+  if (b >= 1024) return (b / 1024).toFixed(0) + " KB";
   return b + " B";
 };

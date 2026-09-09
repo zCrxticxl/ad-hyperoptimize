@@ -56,6 +56,7 @@ export default function Debloater({ admin, focusId }: { admin: boolean; focusId?
   const { t } = useLang();
   const [tweaks, setTweaks]       = useState<Tweak[]>([]);
   const [loading, setLoading]     = useState(true);
+  const [err, setErr]             = useState("");
   const [busy, setBusy]           = useState<Record<string, boolean>>({});
   const [log, setLog]             = useState<{ msg: string; ok: boolean } | null>(null);
   const [applyingAll, setApplyingAll] = useState(false);
@@ -71,7 +72,10 @@ export default function Debloater({ admin, focusId }: { admin: boolean; focusId?
 
   const refresh = () => {
     setLoading(true);
-    api.debloaterTweaksList().then(d => { setTweaks(d?.tweaks ?? []); setLoading(false); });
+    api.debloaterTweaksList()
+      .then(d => { setTweaks(d?.tweaks ?? []); })
+      .catch((e: any) => setErr(String(e)))
+      .finally(() => setLoading(false));
   };
 
   const applied   = tweaks.filter(t => t.applied).length;
@@ -153,6 +157,7 @@ export default function Debloater({ admin, focusId }: { admin: boolean; focusId?
   return (
     <>
       <h1 className="page-title">🚀 {t("debloatTitle")}</h1>
+      {err && <div style={{ color: "var(--red)", marginBottom: 10, fontSize: 13 }}>⚠ {err}</div>}
       <div className="page-sub">
         {t("debloatSub")}
         {!admin && <span style={{ color: "var(--orange)" }}> · {t("debloatAdminRequired")}</span>}

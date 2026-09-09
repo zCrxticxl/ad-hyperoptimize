@@ -107,14 +107,31 @@ fn expand_env(s: &str) -> String {
     ];
     let mut result = s.to_string();
     for (var, f) in pairs {
-        if result.to_uppercase().contains(var.to_uppercase().as_str()) {
-            let val = f();
-            // case-insensitive replace
-            let upper_result = result.to_uppercase();
-            if let Some(pos) = upper_result.find(&var.to_uppercase()) {
-                result = format!("{}{}{}", &result[..pos], val, &result[pos + var.len()..]);
+        // Case-insensitive replace of ALL occurrences. Chars are compared
+        // one by one (uppercased) instead of slicing byte offsets from a
+        // separately-uppercased string, whose byte layout can diverge from
+        // the original for non-ASCII characters.
+        let val = f();
+        let var_chars: Vec<char> = var.chars().map(|c| c.to_ascii_uppercase()).collect();
+        let mut out = String::with_capacity(result.len());
+        let hay: Vec<char> = result.chars().collect();
+        let mut i = 0usize;
+        while i < hay.len() {
+            if i + var_chars.len() <= hay.len() {
+                let matches = hay[i..i + var_chars.len()]
+                    .iter()
+                    .zip(&var_chars)
+                    .all(|(a, b)| a.to_ascii_uppercase() == *b);
+                if matches {
+                    out.push_str(&val);
+                    i += var_chars.len();
+                    continue;
+                }
             }
+            out.push(hay[i]);
+            i += 1;
         }
+        result = out;
     }
     result
 }
@@ -535,13 +552,22 @@ pub fn clean(entries: Vec<Value>) -> Result<Value, String> {
                     Err("invalid key path".into())
                 }
             } else if !related.is_empty() {
-                // Delete all related values (MUI cache group)
+                // Delete all related values (MUI cache group); a value that
+                // cannot be deleted must surface instead of silently
+                // counting the group as cleaned.
                 hive(root)
                     .open_subkey_with_flags(key_path, KEY_READ | KEY_SET_VALUE)
                     .map_err(|e| e.to_string())
-                    .map(|k| {
+                    .and_then(|k| {
+                        let mut first_err = None;
                         for rv in &related {
-                            let _ = k.delete_value(rv);
+                            if let Err(e) = k.delete_value(rv) {
+                                first_err.get_or_insert(e.to_string());
+                            }
+                        }
+                        match first_err {
+                            Some(e) => Err(e),
+                            None => Ok(()),
                         }
                     })
             } else {

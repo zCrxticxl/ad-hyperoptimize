@@ -45,9 +45,16 @@ export default function PcConfigurator() {
       .catch(() => setBoard(null));
   }, []);
 
-  // reset cross-mode-only selections so e.g. a build-mode motherboard pick
-  // doesn't silently leak into upgrade mode's forced-mobo flow.
-  useEffect(() => { setSelMobo(""); }, [cfgMode]);
+  // Socket compatibility differs between modes; a CPU/RAM/... pick valid in
+  // one mode can silently leak into the other mode's price and score.
+  useEffect(() => {
+    setSelMobo("");
+    setSelCpu("");
+    setSelGpu("");
+    setSelRam("");
+    setSelStorage("");
+    setSelPsu("");
+  }, [cfgMode]);
 
   const bottleneck = useMemo(() => (hw ? analyzeBottleneck(hw) : null), [hw]);
   const priority = useMemo(() => (bottleneck ? upgradePriority(bottleneck) : []), [bottleneck]);

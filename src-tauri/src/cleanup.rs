@@ -90,23 +90,28 @@ fn cat_paths(id: &str) -> Vec<PathBuf> {
     }
 }
 
-fn walk(dir: &Path, min_age: Duration, files: &mut Vec<(PathBuf, u64)>) {
-    let Ok(rd) = fs::read_dir(dir) else { return };
-    let now = SystemTime::now();
-    for entry in rd.flatten() {
-        let p = entry.path();
-        let Ok(md) = entry.metadata() else { continue };
-        if md.is_dir() {
-            walk(&p, min_age, files);
-        } else if md.is_file() {
-            let old_enough = md
-                .modified()
-                .ok()
-                .and_then(|m| now.duration_since(m).ok())
-                .map(|age| age >= min_age)
-                .unwrap_or(false);
-            if old_enough || min_age.is_zero() {
-                files.push((p, md.len()));
+fn walk(root: &Path, min_age: Duration, files: &mut Vec<(PathBuf, u64)>) {
+    // Iterative BFS: an explicit stack instead of recursion, so hostile
+    // deep temp trees cannot overflow the call stack.
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(rd) = fs::read_dir(&dir) else { continue };
+        let now = SystemTime::now();
+        for entry in rd.flatten() {
+            let p = entry.path();
+            let Ok(md) = entry.metadata() else { continue };
+            if md.is_dir() {
+                stack.push(p);
+            } else if md.is_file() {
+                let old_enough = md
+                    .modified()
+                    .ok()
+                    .and_then(|m| now.duration_since(m).ok())
+                    .map(|age| age >= min_age)
+                    .unwrap_or(false);
+                if old_enough || min_age.is_zero() {
+                    files.push((p, md.len()));
+                }
             }
         }
     }

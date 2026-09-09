@@ -81,14 +81,14 @@ export default function Reports() {
       <div className="grid grid-2 mt">
         <Card title={t("repSystemRestorePoints")}>
           {!restorePts ? (
-            <button className="btn ghost small" onClick={() => api.listRestorePoints().then(setRestorePts)}>{t("repLoadRestorePoints")}</button>
+            <button className="btn ghost small" onClick={() => api.listRestorePoints().then(setRestorePts).catch((e: any) => setRestorePts({ error: String(e) }))}>{t("repLoadRestorePoints")}</button>
           ) : (
             <RawJson label={t("repRestorePoints")} data={restorePts} />
           )}
         </Card>
         <Card title={t("repComponentHealth")}>
           {!health ? (
-            <button className="btn ghost small" onClick={() => api.componentHealth().then(setHealth)}>{t("repCheckComponentStore")}</button>
+            <button className="btn ghost small" onClick={() => api.componentHealth().then(setHealth).catch((e: any) => setHealth({ error: String(e) }))}>{t("repCheckComponentStore")}</button>
           ) : (
             <RawJson label={t("repDismOutput")} data={health} />
           )}
@@ -97,7 +97,7 @@ export default function Reports() {
 
       <Card title={t("repEventLogCorrelation")} style={{ marginTop: 14 }}>
         {!logs ? (
-          <button className="btn ghost small" onClick={() => api.eventLogs().then(setLogs)}>{t("repAnalyzeEventLogs")}</button>
+          <button className="btn ghost small" onClick={() => api.eventLogs().then(setLogs).catch((e: any) => setLogs({ error: String(e) }))}>{t("repAnalyzeEventLogs")}</button>
         ) : (
           <RawJson label={t("repCriticalEvents")} data={logs} />
         )}

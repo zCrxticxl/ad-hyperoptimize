@@ -123,10 +123,12 @@ pub fn run(kind: &str) -> Result<Value, String> {
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default();
     hist.push(result.clone());
-    let _ = fs::write(
+    if let Err(e) = fs::write(
         history_path(),
         serde_json::to_string_pretty(&hist).unwrap_or_default(),
-    );
+    ) {
+        result["historyError"] = json!(format!("result not saved to history: {e}"));
+    }
     Ok(result)
 }
 

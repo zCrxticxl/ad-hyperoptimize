@@ -27,6 +27,7 @@ export default function PowerPlan({ admin }: { admin: boolean }) {
   const [data, setData] = useState<any>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [log, setLog] = useState("");
+  const [err, setErr] = useState("");
   const [newName, setNewName] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   const profile = useHwProfile();
@@ -39,7 +40,10 @@ export default function PowerPlan({ admin }: { admin: boolean }) {
     "e9a42b02-d5df-448d-aa00-03f14749eb61": t("pwrDescUltimate"),
   };
 
-  const load = async () => setData(await api.powerplanList());
+  const load = async () => {
+    try { setData(await api.powerplanList()); }
+    catch (e: any) { setErr(String(e)); }
+  };
   useEffect(() => { load(); }, []);
 
   const act = async (label: string, fn: () => Promise<string>) => {
@@ -58,6 +62,7 @@ export default function PowerPlan({ admin }: { admin: boolean }) {
   return (
     <>
       <h1 className="page-title">🔋 {t("pwrTitle")}</h1>
+      {err && <div style={{ color: "var(--red)", marginBottom: 10, fontSize: 13 }}>⚠ {err}</div>}
       <div className="page-sub">
         {t("pwrSub")}
         {!admin && <span style={{ color: "var(--orange)" }}> · {t("pwrAdminRequiredHint")}</span>}

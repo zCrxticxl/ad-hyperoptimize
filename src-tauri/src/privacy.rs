@@ -281,10 +281,8 @@ pub fn apply(id: String) -> Result<Value, String> {
         .iter()
         .find(|t| t.id == id)
         .ok_or_else(|| format!("Unknown tweak: {id}"))?;
-    match ps::run(t.apply) {
-        Ok(_) => Ok(json!({ "ok": true,  "id": id })),
-        Err(e) => Ok(json!({ "ok": false, "id": id, "warning": e })),
-    }
+    ps::run(t.apply)?;
+    Ok(json!({ "ok": true, "id": id }))
 }
 
 pub fn revert(id: String) -> Result<Value, String> {
@@ -292,8 +290,6 @@ pub fn revert(id: String) -> Result<Value, String> {
         .iter()
         .find(|t| t.id == id)
         .ok_or_else(|| format!("Unknown tweak: {id}"))?;
-    match ps::run(t.revert) {
-        Ok(_) => Ok(json!({ "ok": true,  "id": id })),
-        Err(e) => Ok(json!({ "ok": false, "id": id, "warning": e })),
-    }
+    ps::run(t.revert)?;
+    Ok(json!({ "ok": true, "id": id }))
 }

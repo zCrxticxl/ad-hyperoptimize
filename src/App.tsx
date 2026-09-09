@@ -39,6 +39,7 @@ import GameProfiles from "./pages/GameProfiles";
 import SoftwareInstaller from "./pages/SoftwareInstaller";
 import PcConfigurator from "./pages/PcConfigurator";
 import Settings from "./pages/Settings";
+import Changelog, { CURRENT_VERSION } from "./pages/Changelog";
 
 /**
  * `basic: true` marks a tool as safe and self-explanatory enough for Beginner
@@ -93,6 +94,7 @@ export const buildNav: NavBuilder = (t) => [
     { id: "updates", icon: "🔄", label: t("navUpdates"), desc: t("toolDescUpdates"), basic: true, keywords: "update upgrade version aktualisieren" },
     { id: "softinstaller", icon: "📥", label: t("navSoftInstaller"), desc: t("toolDescSoftInstaller"), keywords: "install software apps winget" },
     { id: "pcconfig", icon: "🛠️", label: t("navPcConfig"), desc: t("toolDescPcConfig"), keywords: "pc build configurator upgrade bottleneck" },
+    { id: "changelog", icon: "📜", label: t("navChangelog"), desc: t("toolDescChangelog"), basic: true, keywords: "changelog changes release notes version update neu neuigkeiten versionsverlauf" },
     { id: "settings", icon: "⚙️", label: t("navSettings"), desc: t("toolDescSettings"), basic: true, keywords: "settings einstellungen options options sprache language" },
   ] },
   { id: "reports", group: t("navGrpReports"), icon: "📊", desc: t("catDescReports"), accent: "slate", items: [
@@ -159,7 +161,8 @@ function renderTool(page: string, mode: Mode, admin: boolean | null, go: (id: st
     case "restorepoints": return <RestorePointManager admin={!!admin} />;
     case "softinstaller": return <SoftwareInstaller />;
     case "pcconfig": return <PcConfigurator />;
-    case "settings": return <Settings mode={mode} setMode={setMode} />;
+    case "changelog": return <Changelog />;
+    case "settings": return <Settings mode={mode} setMode={setMode} onOpenChangelog={() => go("changelog")} />;
     default: return null;
   }
 }
@@ -321,7 +324,7 @@ function AppInner() {
       if (e.key === "/" && !typing && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault();
         searchRef.current?.focus();
-      } else if (e.key === "Escape" && query) {
+      } else if (e.key === "Escape" && query && !typing) {
         setQuery("");
       }
     };
@@ -465,6 +468,11 @@ function AppInner() {
                 <span>{hiddenCount} {plural(hiddenCount, t("navMoreInExpertOne"), t("navMoreInExpert"))}</span>
               </button>
             )}
+            <button className="home-changelog" onClick={() => openTool("changelog")} title={t("settingsViewChangelog")}>
+              <span aria-hidden="true">✨</span>
+              <span className="home-changelog-text">{t("homeWhatsNew")} · <b>v{CURRENT_VERSION}</b></span>
+              <span className="home-changelog-cta">{t("settingsViewChangelog")} →</span>
+            </button>
           </>
         ) : route.kind === "category" && activeGroup ? (
           <>

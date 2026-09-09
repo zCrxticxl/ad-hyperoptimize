@@ -31,7 +31,8 @@ export default function Dashboard({ mode, go }: { mode: Mode; go: (p: string, ta
     tone === "good" ? "var(--green)" : tone === "warn" ? "var(--yellow)" : tone === "bad" ? "var(--red)" : "var(--muted)";
   const findings = analysis?.findings ?? [];
   const visibleFindings = showAll ? findings : findings.slice(0, 5);
-  const critical = findings.filter((finding: any) => finding.severity >= 4).length;
+  const critical = findings.filter((finding: any) => finding.severity >= 5).length;
+  const high = findings.filter((finding: any) => finding.severity === 4).length;
   const actionable = findings.filter((finding: any) => finding.tweakIds?.length > 0).length;
   const severityLabels = ["", t("dashSevInfo"), t("dashSevLow"), t("dashSevMedium"), t("dashSevHigh"), t("dashSevCritical")];
 
@@ -58,7 +59,7 @@ export default function Dashboard({ mode, go }: { mode: Mode; go: (p: string, ta
 
     <section className="dashboard-stats">
       <div className="overview-stat"><span className="overview-icon blue">⌁</span><div><b>{findings.length}</b><span>{t("dashFindings")}</span></div></div>
-      <div className="overview-stat"><span className={`overview-icon ${critical ? "red" : "green"}`}>{critical ? "!" : "✓"}</span><div><b>{critical}</b><span>{t("dashSevHigh")}</span></div></div>
+      <div className="overview-stat"><span className={`overview-icon ${high + critical ? "red" : "green"}`}>{high + critical ? "!" : "✓"}</span><div><b>{high + critical}</b><span>{t("dashSevHigh")}/{t("dashSevCritical")}</span></div></div>
       <button className="overview-stat action" onClick={() => go("optimize")}><span className="overview-icon violet">↗</span><div><b>{actionable}</b><span>{t("dashFixInOptimize")}</span></div><span className="stat-arrow">→</span></button>
     </section>
 

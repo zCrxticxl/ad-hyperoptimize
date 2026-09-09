@@ -109,6 +109,7 @@ export default function GameBooster({ admin }: { admin: boolean }) {
                 onClick={() => act(async () => {
                   const r = await api.gameboostStart(g.Id);
                   setBoosted(g.Id);
+                  refresh();
                   return r;
                 })}
               >
@@ -121,6 +122,7 @@ export default function GameBooster({ admin }: { admin: boolean }) {
                 onClick={() => act(async () => {
                   const r = await api.gameboostStop();
                   setBoosted(null);
+                  refresh();
                   return r;
                 })}
               >

@@ -27,7 +27,7 @@ export default function Monitor() {
         const next = [...s, {
           t: m.t,
           cpu: m.cpuTotal,
-          mem: (m.memUsedMb / m.memTotalMb) * 100,
+          mem: m.memTotalMb > 0 ? (m.memUsedMb / m.memTotalMb) * 100 : 0,
           rx: m.netRxKbs,
           tx: m.netTxKbs,
         }];
@@ -74,7 +74,7 @@ export default function Monitor() {
       <div className="grid grid-4">
         <Card title={t("monCpu")}><div className="stat-big">{latest?.cpuTotal.toFixed(1) ?? "-"}%</div>
           <div className="stat-sub">{latest?.freqMhz ? `${latest.freqMhz} MHz` : ""}</div></Card>
-        <Card title={t("monMemory")}><div className="stat-big">{latest ? ((latest.memUsedMb / latest.memTotalMb) * 100).toFixed(0) : "-"}%</div>
+        <Card title={t("monMemory")}><div className="stat-big">{latest && latest.memTotalMb > 0 ? ((latest.memUsedMb / latest.memTotalMb) * 100).toFixed(0) : "-"}%</div>
           <div className="stat-sub">{latest ? `${(latest.memUsedMb / 1024).toFixed(1)} / ${(latest.memTotalMb / 1024).toFixed(1)} GB` : ""}</div></Card>
         <Card title={t("monNetDown")}><div className="stat-big">{latest ? fmtRate(latest.netRxKbs) : "-"}</div></Card>
         <Card title={t("monNetUp")}><div className="stat-big">{latest ? fmtRate(latest.netTxKbs) : "-"}</div></Card>

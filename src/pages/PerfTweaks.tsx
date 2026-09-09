@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import { Card, Spinner } from "../components/ui";
 import { HwWarnings, RiskBadge, RiskNotice } from "../components/HwWarnings";
@@ -33,11 +33,11 @@ function TimerCard({ admin }: { admin: boolean }) {
   const minRisk = profile?.tweakRisks?.["timer_resolution_min"];
   const minNeedsAck = !!minRisk && !riskAck;
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setData(await api.timerGet());
-  };
+  }, []);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [load]);
 
   const apply = async (val100ns: number) => {
     setBusy(true);
@@ -124,8 +124,8 @@ function MsiCard({ admin }: { admin: boolean }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [log, setLog] = useState("");
 
-  const load = async () => setData(await api.msiList());
-  useEffect(() => { load(); }, []);
+  const load = useCallback(async () => setData(await api.msiList()), []);
+  useEffect(() => { load(); }, [load]);
 
   const toggle = async (dev: any) => {
     setBusy(dev.regPath);
@@ -190,8 +190,8 @@ function NetCard({ admin }: { admin: boolean }) {
     { key: "lsoV2",      label: t("perfNetLsoV2"),      hint: t("perfNetLsoV2Hint"),      keyword: "*LsoV2IPv4",              offVal: 0, onVal: 1 },
   ];
 
-  const load = async () => setData(await api.netAdapters());
-  useEffect(() => { load(); }, []);
+  const load = useCallback(async () => setData(await api.netAdapters()), []);
+  useEffect(() => { load(); }, [load]);
 
   const tweak = async (adapter: string, keyword: string, value: number) => {
     setBusy(true);
@@ -290,8 +290,8 @@ function RamCard({ admin }: { admin: boolean }) {
   const [busy, setBusy] = useState(false);
   const [log, setLog] = useState("");
 
-  const load = async () => setData(await api.ramInfo());
-  useEffect(() => { load(); }, []);
+  const load = useCallback(async () => setData(await api.ramInfo()), []);
+  useEffect(() => { load(); }, [load]);
 
   const flush = async () => {
     setBusy(true);
@@ -360,12 +360,12 @@ function PagefileCard({ admin }: { admin: boolean }) {
   const profile = useHwProfile();
   const pfRisk = profile?.tweakRisks?.["pagefile_disable"];
 
-  const load = async () => {
+  const load = useCallback(async () => {
     const d = await api.pagefileInfo();
     setData(d);
     if (d?.files?.length > 0) setCustomPath(d.files[0].path);
-  };
-  useEffect(() => { load(); }, []);
+  }, []);
+  useEffect(() => { load(); }, [load]);
 
   const act = async (fn: () => Promise<string>) => {
     setBusy(true);

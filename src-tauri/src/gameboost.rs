@@ -169,8 +169,12 @@ if ($errors) {{ "Boosted with warnings: " + ($errors -join '; ') }}
 else {{ "Game boost active for PID {pid}" }}
 "#
     );
+    // Only persist the pre-boost state after the boost actually applied;
+    // otherwise a failed boost leaves a stale file that makes boost_stop
+    // "restore" values that were never changed.
+    let out = ps::run(&script).map(|s| s.trim().to_string())?;
     save_boost_state(&prev_plan, prev_toast.as_deref())?;
-    ps::run(&script).map(|s| s.trim().to_string())
+    Ok(out)
 }
 
 /// Persist the pre-boost state for exact restore in boost_stop.
@@ -223,7 +227,7 @@ pub fn boost_stop() -> Result<String, String> {
     // A captured DWORD value is a plain number, anything else is rejected so
     // a tampered registry value can never inject script; we fall back to
     // ensuring the property is absent.
-    let toast_restore = match prev_toast.as_deref() {
+    let toast_restore = match prev_toast.as_deref().map(str::trim) {
         Some(v) if !v.is_empty() && v.chars().all(|c| c.is_ascii_digit()) => format!(
             "Set-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Notifications\\Settings' NOC_GLOBAL_SETTING_TOASTS_ENABLED {v} -Type DWord -EA Stop"
         ),

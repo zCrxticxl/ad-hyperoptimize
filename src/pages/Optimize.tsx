@@ -15,6 +15,7 @@ export default function Optimize({ mode, admin, focusId, onSwitchExpert }: { mod
   const [rpStatus, setRpStatus] = useState("");
   const [confirm, setConfirm] = useState<string | null>(null);
   const [riskAck, setRiskAck] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
   const profile = useHwProfile();
   const focusHandled = useRef(false);
   const [focusHidden, setFocusHidden] = useState(false);
@@ -54,19 +55,25 @@ export default function Optimize({ mode, admin, focusId, onSwitchExpert }: { mod
   const cats = [...new Set(visible.map((tw) => tw.category))];
 
   const doApply = async (tw: any) => {
+    if (busy) return;
+    setBusy(tw.id);
     push(interp(t("optApplyingLog"), { name: tw.name }));
     try {
       await api.applyTweak(tw.id);
       push(interp(t("optAppliedLog"), { name: tw.name }));
     } catch (e: any) {
       push(interp(t("optErrLog"), { name: tw.name, err: String(e) }));
+    } finally {
+      setConfirm(null);
+      setRiskAck(null);
+      await refresh();
+      setBusy(null);
     }
-    setConfirm(null);
-    setRiskAck(null);
-    refresh();
   };
 
   const doRevert = async (tw: any) => {
+    if (busy) return;
+    setBusy(tw.id);
     const label = tw.undoable ? t("optRevertingLog") : t("optForceResetLog");
     push(interp(label, { name: tw.name }));
     try {
@@ -78,8 +85,10 @@ export default function Optimize({ mode, admin, focusId, onSwitchExpert }: { mod
       }
     } catch (e: any) {
       push(interp(t("optErrLog"), { name: tw.name, err: String(e) }));
+    } finally {
+      await refresh();
+      setBusy(null);
     }
-    refresh();
   };
 
   const statusLabel = (status: string) =>
@@ -153,8 +162,8 @@ export default function Optimize({ mode, admin, focusId, onSwitchExpert }: { mod
                       <button className="btn small ghost" onClick={() => { setConfirm(null); setRiskAck(null); }}>{t("cancel")}</button>
                     ) : (
                       <>
-                        <button className="btn small danger" onClick={() => doApply(tw)}>{applyTrigger.confirmLabel}</button>
-                        <button className="btn small ghost" onClick={() => { setConfirm(null); setRiskAck(null); }}>{t("cancel")}</button>
+                        <button className="btn small danger" disabled={busy !== null} onClick={() => doApply(tw)}>{applyTrigger.confirmLabel}</button>
+                        <button className="btn small ghost" disabled={busy !== null} onClick={() => { setConfirm(null); setRiskAck(null); }}>{t("cancel")}</button>
                       </>
                     )
                   ) : (
@@ -171,6 +180,7 @@ export default function Optimize({ mode, admin, focusId, onSwitchExpert }: { mod
                 {tw.canUndo && (
                   <button
                     className="btn small ghost"
+                    disabled={busy !== null}
                     title={tw.undoable ? t("optUndoTooltip") : t("optResetTooltip")}
                     onClick={() => doRevert(tw)}
                   >

@@ -46,6 +46,15 @@ pub enum ShowCapture {
     TcpAutotuning,
     /// Registry `HibernateEnabled`, revert restores hibernation exactly.
     HibernateState,
+    /// Registry `Tcpip\Parameters\EnableRSS` (what `netsh rss=` writes),
+    /// locale-independent unlike parsing `netsh int tcp show global` output.
+    RssEnabled,
+    /// `powercfg /query` current AC/DC values for one setting; the query
+    /// labels are localized but the `0x…` index values are not.
+    PowerSettingIndex {
+        subgroup: &'static str,
+        setting: &'static str,
+    },
 }
 
 /// Extract the active power scheme GUID from `powercfg /getactivescheme`
@@ -66,6 +75,25 @@ fn parse_tcp_autotuning(out: &str) -> Option<String> {
         "disabled" | "highlyrestricted" | "restricted" | "normal" | "experimental" => {
             Some(format!("netsh int tcp set global autotuninglevel={v}"))
         }
+        _ => None,
+    }
+}
+
+/// Extract the current AC/DC index pair from `powercfg /query <scheme>
+/// <subgroup> <setting>` output. Only `0x`-prefixed 8-digit hex tokens are
+/// considered, so localized line labels cannot break the parse.
+#[cfg(any(windows, test))]
+fn parse_power_indexes(out: &str) -> Option<(u32, u32)> {
+    let hexes: Vec<u32> = out
+        .lines()
+        .filter_map(|l| {
+            l.split_whitespace()
+                .find(|t| t.starts_with("0x") && t.len() == 10)
+        })
+        .map(|t| u32::from_str_radix(&t[2..], 16).ok())
+        .collect::<Option<Vec<_>>>()?;
+    match hexes.as_slice() {
+        [ac, dc, ..] => Some((*ac, *dc)),
         _ => None,
     }
 }
@@ -100,6 +128,31 @@ fn capture_revert(cap: &ShowCapture) -> Option<String> {
                 RegVal::Dword(0) => Some("powercfg /h off".into()),
                 _ => None,
             }
+        }
+        ShowCapture::RssEnabled => {
+            let prev = reg_read(
+                "HKLM",
+                "SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters",
+                "EnableRSS",
+            )?;
+            match prev {
+                RegVal::Dword(1) => Some("netsh int tcp set global rss=enabled".into()),
+                RegVal::Dword(0) => Some("netsh int tcp set global rss=disabled".into()),
+                _ => None,
+            }
+        }
+        ShowCapture::PowerSettingIndex { subgroup, setting } => {
+            let out = crate::ps::exec(
+                "powercfg.exe",
+                &["/query", "scheme_current", subgroup, setting],
+            )
+            .ok()?;
+            parse_power_indexes(&out).map(|(ac, dc)| {
+                format!(
+                    "powercfg /setacvalueindex scheme_current {subgroup} {setting} {ac} ; \
+                     powercfg /setdcvalueindex scheme_current {subgroup} {setting} {dc}"
+                )
+            })
         }
     }
 }
@@ -525,7 +578,10 @@ pub fn catalog() -> Vec<Tweak> {
                 Action::Cmd {
                     apply: "powercfg /setacvalueindex scheme_current 2a737441-1930-4402-8d77-b2bebba308a3 48e6b7a6-50f5-4782-a5d4-53bb8f07e226 0",
                     revert: "powercfg /setacvalueindex scheme_current 2a737441-1930-4402-8d77-b2bebba308a3 48e6b7a6-50f5-4782-a5d4-53bb8f07e226 1",
-                    show: None,
+                    show: Some(ShowCapture::PowerSettingIndex {
+                        subgroup: "2a737441-1930-4402-8d77-b2bebba308a3",
+                        setting: "48e6b7a6-50f5-4782-a5d4-53bb8f07e226",
+                    }),
                 },
                 Action::Cmd { apply: "powercfg /setactive scheme_current", revert: "powercfg /setactive scheme_current", show: None },
             ],
@@ -568,7 +624,10 @@ pub fn catalog() -> Vec<Tweak> {
                 Action::Cmd {
                     apply: "powercfg /setacvalueindex scheme_current 54533251-82be-4824-96c1-47b60b740d00 0cc5b647-c1df-4637-891a-dec35c318583 100",
                     revert: "powercfg /setacvalueindex scheme_current 54533251-82be-4824-96c1-47b60b740d00 0cc5b647-c1df-4637-891a-dec35c318583 0",
-                    show: None,
+                    show: Some(ShowCapture::PowerSettingIndex {
+                        subgroup: "54533251-82be-4824-96c1-47b60b740d00",
+                        setting: "0cc5b647-c1df-4637-891a-dec35c318583",
+                    }),
                 },
                 Action::Cmd { apply: "powercfg /setactive scheme_current", revert: "powercfg /setactive scheme_current", show: None },
             ],
@@ -876,8 +935,8 @@ pub fn catalog() -> Vec<Tweak> {
             actions: vec![
                 Action::Cmd {
                     apply:  "netsh int tcp set global rss=enabled",
-                    revert: "netsh int tcp set global rss=default",
-                    show: None,
+                    revert: "netsh int tcp set global rss=disabled",
+                    show: Some(ShowCapture::RssEnabled),
                 },
             ],
         },
@@ -992,16 +1051,18 @@ fn service_default(name: &str) -> &'static str {
         "MapsBroker" => "Automatic",
         "TrkWks" => "Automatic",
         "WSearch" => "Automatic",
-        // These are Manual by default, our tweak sets them to Disabled.
+        // Tweaks set these to Disabled. Manual is the factory default for
+        // most editions; RemoteRegistry ships Disabled on Home SKUs (and
+        // Manual on Pro/Enterprise), so Disabled is the safe revert for it.
         "XblAuthManager"
         | "XblGameSave"
         | "XboxNetApiSvc"
-        | "RemoteRegistry"
         | "lfsvc"
         | "Fax"
         | "wisvc"
         | "diagnosticshub.standardcollector.service"
         | "WMPNetworkSvc" => "Manual",
+        "RemoteRegistry" => "Disabled",
         _ => "Manual", // safe fallback
     }
 }
@@ -1141,7 +1202,15 @@ pub fn apply(tweak_id: &str) -> Result<Value, String> {
             } => {
                 let revert_actual = match show {
                     #[cfg(windows)]
-                    Some(cap) => capture_revert(cap).unwrap_or_else(|| revert.to_string()),
+                    Some(cap) => capture_revert(cap).ok_or_else(|| {
+                        // A wrong revert is worse than no apply: without the
+                        // pre-apply state the undo would restore a guess.
+                        format!(
+                            "could not capture the previous state for an exact revert; \
+                             '{}' was NOT applied and nothing was changed",
+                            t.name
+                        )
+                    })?,
                     #[cfg(not(windows))]
                     Some(_) => revert.to_string(),
                     None => revert.to_string(),
@@ -1166,23 +1235,33 @@ pub fn apply(tweak_id: &str) -> Result<Value, String> {
         backup_files: backups,
     })?;
 
-    // 4. Apply. On failure, roll back what we already changed and mark the
-    // write-ahead entry reverted, so the UI never offers an undo for a tweak
-    // that was never applied.
+    // 4. Apply. On failure, roll back what we already changed. The journal
+    // entry is only marked reverted when the rollback fully succeeded;
+    // otherwise it stays open so the UI can offer a retry.
     let mut done: Vec<&ChangeItem> = Vec::new();
     for item in &items {
-        let res = apply_item(item);
-        if let Err(e) = res {
+        if let Err(e) = apply_item(item) {
+            let mut rollback_errs = Vec::new();
             for d in done.iter().rev() {
-                let _ = revert_item(d);
-            }
-            let _ = safety::with_journal(|j| {
-                if let Some(en) = j.iter_mut().find(|en| en.id == entry_id) {
-                    en.reverted = true;
+                if let Err(re) = revert_item(d) {
+                    rollback_errs.push(re);
                 }
-                Ok(())
-            });
-            return Err(format!("apply failed ({e}); changes rolled back"));
+            }
+            if rollback_errs.is_empty() {
+                let _ = safety::with_journal(|j| {
+                    if let Some(en) = j.iter_mut().find(|en| en.id == entry_id) {
+                        en.reverted = true;
+                    }
+                    Ok(())
+                });
+                return Err(format!("apply failed ({e}); all changes were rolled back"));
+            }
+            return Err(format!(
+                "apply failed ({e}); ROLLBACK INCOMPLETE: {} step(s) could not be \
+                 reverted ({}) — the journal entry stays open, use Undo to retry",
+                rollback_errs.len(),
+                rollback_errs.join("; ")
+            ));
         }
         done.push(item);
     }
