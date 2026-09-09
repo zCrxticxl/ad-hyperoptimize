@@ -20,7 +20,14 @@ export default function Optimize({ mode, admin, focusId, onSwitchExpert }: { mod
   const focusHandled = useRef(false);
   const [focusHidden, setFocusHidden] = useState(false);
 
-  const refresh = () => api.listTweaks().then(setTweaks);
+  const refresh = () =>
+    api
+      .listTweaks()
+      .then(setTweaks)
+      .catch((e) => {
+        // Never reject: callers rely on refresh() inside finally to reset busy.
+        setLog((l) => [...l.slice(-200), `[${new Date().toLocaleTimeString()}] ${String(e)}`]);
+      });
   useEffect(() => { refresh(); }, []);
 
   // Deep-link from the Dashboard: expand + scroll to the relevant tweak once.
