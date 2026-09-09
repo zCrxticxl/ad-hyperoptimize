@@ -20,7 +20,11 @@ function SelfUpdateCard() {
   const [errMsg, setErrMsg]         = useState("");
   const updateRef = useRef<any>(null);
 
-  useEffect(() => { getVersion().then(setCurrentVer).catch(() => {}); }, []);
+  // Auto-check on mount so the install CTA is ready without an extra click.
+  useEffect(() => {
+    getVersion().then(setCurrentVer).catch(() => {});
+    checkUpdate();
+  }, []);
 
   const checkUpdate = async () => {
     setStatus("checking"); setErrMsg(""); setNotes(""); setNewVer(""); setProgress(0);
@@ -116,10 +120,10 @@ function SelfUpdateCard() {
           {status === "checking" ? <><Spinner /> {t("updChecking")}</> : t("updCheckBtn")}
         </button>
         {status === "available" && (
-          <button className="btn small" onClick={installUpdate}>{t("updDownloadBtn")}</button>
+          <button className="btn small glow" onClick={installUpdate}>{t("updDownloadBtn")}</button>
         )}
         {status === "ready" && (
-          <button className="btn small" onClick={() => relaunch()}>{t("updRestartBtn")}</button>
+          <button className="btn small glow" onClick={() => relaunch()}>{t("updRestartBtn")}</button>
         )}
       </div>
     </Card>
