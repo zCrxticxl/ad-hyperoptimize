@@ -21,7 +21,7 @@ No registry-cleaner snake oil. Only documented, measurable tweaks, journaled, ba
 
 <img src="assets/screenshot-home.png" alt="AD HyperOptimize home: pick a category instead of a wall of tools" width="90%"/>
 
-<sup>The v1.4 dashboard. Pick a category; every tool explains itself.</sup>
+<sup>The v1.6 dashboard. Pick a category; every tool explains itself.</sup>
 
 <table>
 <tr>
@@ -91,12 +91,13 @@ Because most Windows "optimizers" are placebo generators. AD HyperOptimize takes
 - 📑 **Process Manager**, list / kill / priority / affinity / persistent priorities
 - 🚦 **Startup**, run-key + folder entries, reversible toggles
 - 🔧 **Services**, bloat-aware service audit, startup type + start/stop
-- ⏰ **Scheduled Tasks**, disable/enable bloat tasks
+- ⏰ **Scheduled Tasks**, disable/enable bloat tasks; sortable by name, creation date and last run, with third-party tasks (anything outside `\Microsoft\`) detected, filterable and shown with author + executable
 - 💿 **Drivers**, list, age/unsigned flags, winget + Windows Update installs
 - 🥾 **Boot Optimizer**, bcdedit tweaks with exact undo
-- 🔄 **Updates**, winget app updates + Windows Update driver installs
+- 🔄 **Updates**, winget app updates + Windows Update driver installs, plus the built-in app self-updater: checks on page open, one-click download & install
 - 📥 **Software Installer**, curated winget catalog with live per-app status
 - 🛠️ **PC Configurator**, hardware bottleneck analysis + build/upgrade guidance
+- 📜 **Changelog**, in-app release notes, a "What's new" bar on the home screen, and a changelog link in Settings — all generated automatically from `CHANGELOG.md`
 - ⚙️ **Settings**, language, Beginner/Expert mode, clear scan cache
 
 **Analysis**
@@ -108,6 +109,7 @@ Because most Windows "optimizers" are placebo generators. AD HyperOptimize takes
 - 🕘 **Recently used**, quick access to your last tools on the home screen
 - ⌨️ **Keyboard**, `/` focuses the search, `Esc` clears it
 - 🔰 **Beginner ⇄ Expert mode**, same engine, two levels of detail
+- 🌍 **9 languages**, Deutsch, English, Español, Français, Português, Polski, Русский, Türkçe, Svenska — switchable instantly, missing strings fall back to English
 
 ## 🛟 Safety model (the important part)
 
@@ -160,7 +162,7 @@ npm run tauri build   # NSIS .exe + .msi in src-tauri/target/release/bundle/
 src/                      # React + TS frontend
 ├── App.tsx               # Shell: topbar + category launcher, search, mode, recents
 ├── api.ts                # Typed invoke() wrappers + metrics event stream
-├── pages/                # 36 tool pages (Dashboard, Optimize, Security, Debloater, …)
+├── pages/                # 37 tool pages (Dashboard, Optimize, Security, Debloater, …)
 └── components/           # ui primitives, HwWarnings, Onboarding
 
 src-tauri/src/
