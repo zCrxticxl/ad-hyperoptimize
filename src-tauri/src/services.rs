@@ -107,9 +107,11 @@ static BLOAT: &[BloatEntry] = &[
 pub fn list() -> Value {
     let script = r#"
 $descMap = @{}
+$pathMap = @{}
 try {
-    Get-WmiObject Win32_Service -ErrorAction SilentlyContinue | ForEach-Object {
+    Get-CimInstance Win32_Service -ErrorAction SilentlyContinue | ForEach-Object {
         if ($_.Description) { $descMap[$_.Name] = $_.Description }
+        if ($_.PathName)    { $pathMap[$_.Name] = $_.PathName }
     }
 } catch {}
 Get-Service -ErrorAction SilentlyContinue | ForEach-Object {
@@ -119,6 +121,7 @@ Get-Service -ErrorAction SilentlyContinue | ForEach-Object {
         status      = $_.Status.ToString()
         startType   = $_.StartType.ToString()
         description = if ($descMap[$_.Name]) { $descMap[$_.Name] } else { '' }
+        path        = if ($pathMap[$_.Name]) { $pathMap[$_.Name] } else { '' }
     }
 } | ConvertTo-Json -Compress -Depth 2
 "#;
@@ -143,6 +146,21 @@ Get-Service -ErrorAction SilentlyContinue | ForEach-Object {
             } else {
                 s["isBloat"] = json!(false);
             }
+            // Origin: executables outside the Windows directory belong to
+            // installed software. No path (rare) counts as inbox.
+            let raw_path = s["path"]
+                .as_str()
+                .unwrap_or("")
+                .trim_matches('"')
+                .to_lowercase();
+            let normalized = raw_path.replace("%systemroot%", "c:\\windows");
+            s["origin"] = json!(
+                if normalized.starts_with("c:\\windows\\") || normalized.is_empty() {
+                    "windows"
+                } else {
+                    "thirdparty"
+                }
+            );
             s
         })
         .collect();

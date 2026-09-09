@@ -7,6 +7,7 @@ import { useFeatureFocus } from "../hooks/useFeatureFocus";
 type Service = {
   name: string; displayName: string; status: string;
   startType: string; description: string; isBloat: boolean; bloatReason: string;
+  origin: "windows" | "thirdparty";
 };
 
 const STATUS_CLS: Record<string, string> = {
@@ -18,7 +19,7 @@ export default function ServicesManager({ admin, focusId }: { admin: boolean; fo
   const { t } = useLang();
   const [services, setServices] = useState<Service[]>([]);
   const [loading, setLoading]   = useState(true);
-  const [tab, setTab]           = useState<"bloat" | "all">("bloat");
+  const [tab, setTab]           = useState<"bloat" | "third" | "all">("bloat");
   const [search, setSearch]     = useState("");
   const [busy, setBusy]         = useState<string | null>(null);
   const [err, setErr]           = useState("");
@@ -38,7 +39,9 @@ export default function ServicesManager({ admin, focusId }: { admin: boolean; fo
   useEffect(() => { refresh(); }, []);
 
   const visible = useMemo(() => {
-    let list = tab === "bloat" ? services.filter(s => s.isBloat) : services;
+    let list = tab === "bloat" ? services.filter(s => s.isBloat)
+      : tab === "third" ? services.filter(s => s.origin === "thirdparty")
+      : services;
     if (search.trim()) {
       const q = search.toLowerCase();
       list = list.filter(s =>
@@ -51,6 +54,7 @@ export default function ServicesManager({ admin, focusId }: { admin: boolean; fo
   }, [services, tab, search]);
 
   const bloatCount  = useMemo(() => services.filter(s => s.isBloat).length, [services]);
+  const thirdCount  = useMemo(() => services.filter(s => s.origin === "thirdparty").length, [services]);
   const runCount    = useMemo(() => services.filter(s => s.status === "Running").length, [services]);
   const bloatActive = useMemo(() => services.filter(s => s.isBloat && s.status === "Running").length, [services]);
 
@@ -94,15 +98,19 @@ export default function ServicesManager({ admin, focusId }: { admin: boolean; fo
           <div className="stat-card"><div className="stat-val">{services.length}</div><div className="stat-lbl">{t("svcTotal")}</div></div>
           <div className="stat-card"><div className="stat-val" style={{ color: "var(--green)" }}>{runCount}</div><div className="stat-lbl">{t("svcRunning")}</div></div>
           <div className="stat-card"><div className="stat-val" style={{ color: "var(--yellow)" }}>{bloatCount}</div><div className="stat-lbl">{t("svcBloat")}</div></div>
+          <div className="stat-card"><div className="stat-val" style={{ color: "var(--accent)" }}>{thirdCount}</div><div className="stat-lbl">{t("schedThird")}</div></div>
           <div className="stat-card"><div className="stat-val" style={{ color: bloatActive > 0 ? "var(--red)" : "var(--green)" }}>{bloatActive}</div><div className="stat-lbl">{t("svcBloatActive")}</div></div>
         </div>
       )}
 
       <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
-        <button className={`btn ${tab === "bloat" ? "" : "ghost"}`} onClick={() => setTab("bloat")}>
+        <button className={`btn small ${tab === "bloat" ? "" : "ghost"}`} onClick={() => setTab("bloat")}>
           {t("svcBloatTab")} ({bloatCount})
         </button>
-        <button className={`btn ${tab === "all" ? "" : "ghost"}`} onClick={() => setTab("all")}>
+        <button className={`btn small ${tab === "third" ? "" : "ghost"}`} onClick={() => setTab("third")}>
+          {t("schedThird")} ({thirdCount})
+        </button>
+        <button className={`btn small ${tab === "all" ? "" : "ghost"}`} onClick={() => setTab("all")}>
           {t("svcAllTab")} ({services.length})
         </button>
         <input
@@ -113,7 +121,7 @@ export default function ServicesManager({ admin, focusId }: { admin: boolean; fo
           style={{ flex: 1, minWidth: 160 }}
         />
         {tab === "bloat" && (
-          <button className="btn" disabled={!!busy || !admin} onClick={disableBloat}>
+          <button className="btn small" disabled={!!busy || !admin} onClick={disableBloat}>
             {t("svcDisableAll")}
           </button>
         )}
@@ -123,53 +131,61 @@ export default function ServicesManager({ admin, focusId }: { admin: boolean; fo
       {loading && <><Spinner /> <span className="muted">{t("svcLoading")}</span></>}
 
       {!loading && (
-        <Card title={tab === "bloat" ? `${t("svcBloatTab")} (${bloatCount})` : `${t("svcAllTab")} (${services.length})`}>
-          {visible.length === 0 && (
-            <div className="muted" style={{ padding: "20px 0", textAlign: "center" }}>
-              {search ? t("svcNoResults") : t("svcNoBloat")}
-            </div>
-          )}
-          {visible.map(svc => {
-            const key    = svc.name;
-            const isBusy = busy === key + "_startup" || busy === key + "_ctrl";
-            const running = svc.status === "Running";
-            return (
-              <div className="svc-row" key={key} data-focus-id={svc.name}>
-                <div className="svc-main">
-                  <span className="svc-name">{svc.displayName}</span>
-                  <span className="muted svc-sname">({svc.name})</span>
-                  {svc.isBloat && <Badge cls="risk-Medium">Bloat</Badge>}
-                  <Badge cls={STATUS_CLS[svc.status] ?? "st-unknown"}>{svc.status}</Badge>
-                </div>
-                {svc.description && <div className="svc-desc muted">{svc.description}</div>}
-                {svc.isBloat && svc.bloatReason && (
-                  <div className="svc-desc" style={{ color: "var(--yellow)", fontSize: 11 }}>ℹ {svc.bloatReason}</div>
-                )}
-                <div className="svc-controls">
-                  <select
-                    className="sel"
-                    value={svc.startType}
-                    disabled={!!busy || isBusy || !admin}
-                    onChange={e => doSetStartup(svc, e.target.value)}
-                  >
-                    {START_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
-                  </select>
-                  {running ? (
-                    <button className="btn small ghost" disabled={!!busy || isBusy || !admin} onClick={() => doControl(svc, "stop")}>
-                      {isBusy ? <Spinner /> : t("svcStop")}
-                    </button>
-                  ) : (
-                    <button className="btn small" disabled={!!busy || isBusy || !admin || svc.startType === "Disabled"} onClick={() => doControl(svc, "start")}>
-                      {isBusy ? <Spinner /> : t("svcStart")}
-                    </button>
-                  )}
-                  <button className="btn small ghost" disabled={!!busy || isBusy || !admin || !running} onClick={() => doControl(svc, "restart")}>
-                    {isBusy ? <Spinner /> : "↺"}
-                  </button>
-                </div>
-              </div>
-            );
-          })}
+        <Card title={`${t(tab === "bloat" ? "svcBloatTab" : tab === "third" ? "schedThird" : "svcAllTab")} · ${visible.length}`}>
+          <table className="tbl svc-tbl">
+            <tbody>
+              {visible.map(svc => {
+                const isBusy = busy === svc.name + "_startup" || busy === svc.name + "_ctrl";
+                const running = svc.status === "Running";
+                const tip = [svc.description, svc.bloatReason].filter(Boolean).join("\n");
+                return (
+                  <tr key={svc.name} data-focus-id={svc.name} style={{ opacity: svc.status === "Stopped" ? 0.72 : 1 }}>
+                    <td style={{ maxWidth: 0 }}>
+                      <div className="svc-cell-name" title={tip}>
+                        <span className="svc-name">{svc.displayName}</span>
+                        <span className="muted svc-sname">({svc.name})</span>
+                      </div>
+                      {svc.isBloat && (
+                        <span className="svc-badge risk-Medium" title={svc.bloatReason}>Bloat</span>
+                      )}
+                      {svc.origin === "thirdparty" && (
+                        <span className="svc-badge svc-third" title={t("schedThird")}>{t("schedThird")}</span>
+                      )}
+                      <Badge cls={STATUS_CLS[svc.status] ?? "st-unknown"}>{svc.status}</Badge>
+                    </td>
+                    <td className="svc-cell-ctl">
+                      <select
+                        className="sel"
+                        value={svc.startType}
+                        disabled={!!busy || isBusy || !admin}
+                        onChange={e => doSetStartup(svc, e.target.value)}
+                        title={svc.startType}
+                      >
+                        {START_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+                      </select>
+                      {running ? (
+                        <button className="btn small ghost" disabled={!!busy || isBusy || !admin} onClick={() => doControl(svc, "stop")}>
+                          {isBusy ? <Spinner /> : t("svcStop")}
+                        </button>
+                      ) : (
+                        <button className="btn small" disabled={!!busy || isBusy || !admin || svc.startType === "Disabled"} onClick={() => doControl(svc, "start")}>
+                          {isBusy ? <Spinner /> : t("svcStart")}
+                        </button>
+                      )}
+                      <button className="btn small ghost" disabled={!!busy || isBusy || !admin || !running} onClick={() => doControl(svc, "restart")} title="↺">
+                        {isBusy ? <Spinner /> : "↺"}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+              {visible.length === 0 && (
+                <tr><td colSpan={2} className="muted" style={{ textAlign: "center", padding: "20px 0" }}>
+                  {search ? t("svcNoResults") : tab === "bloat" ? t("svcNoBloat") : "—"}
+                </td></tr>
+              )}
+            </tbody>
+          </table>
         </Card>
       )}
 
