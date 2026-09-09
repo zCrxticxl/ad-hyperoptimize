@@ -4,6 +4,39 @@ All notable changes to AD HyperOptimize are documented here. The in-app
 changelog is generated from this file, and each GitHub release uses the matching
 section below as its release notes.
 
+## v1.6.3 — Security & reliability hardening (external audit response)
+
+An independent audit against v1.5.0 reported ~218 findings. All Critical and
+High findings are closed in this release; the actionable Medium tier is done
+as well.
+
+### Security
+- Every PowerShell child now runs with forced UTF-8 output encoding: localized Windows (CP1252, CP936, …) no longer corrupts service names, file paths and process names into replacement characters.
+- MSI-mode toggle rejects wildcard device paths — a single `*` could have flipped MSI on every device, including the boot storage controller.
+- Disk Analyzer, Uninstaller and file organization refuse symlink/junction paths and skip reparse points while scanning, so a link can never pull protected system folders into a delete or move.
+- The debloater's restore script escapes every field of its state file and whitelists startup types.
+- Hosts-file edits require administrator rights and serialize on a lock (no more lost-update races).
+- Winget package ids are quote- and regex-escaped; scheduled-task and service identifiers reject wildcard characters.
+- Force-revert no longer deletes registry values it cannot prove it created: it restores from the newest backup or refuses with the exact key path.
+- Quick Boost validates the captured process priority and HAGS value before writing them back.
+- The updater minisign fingerprint (75A816CD47EDE457) is now published in the README for out-of-band verification.
+
+### Undo & journal engine
+- Registry captures are type-faithful: exotic value types are restored in their original representation instead of being degraded or deleted.
+- Interrupted applies no longer count as applied, and a partial undo resumes exactly where it stopped instead of re-running finished steps.
+- Nagle undo is built from a per-adapter snapshot taken before the change: pre-existing custom values are restored verbatim, later-added adapters are never touched.
+- Restore tokens are collision-proof; a failed backup now aborts instead of skipping silently; the power-scheme undo works and no longer targets the wrong plan.
+- Privacy tweaks and the timer-resolution task are journaled and undoable.
+- Registry Cleaner runs reg.exe with a hard timeout and keeps its backups in the same data folder as the journal (old backups are still found).
+
+### Fixes
+- No more flashing console window during game detection (every 3 seconds on some systems).
+- Disk health verdicts are locale-independent (exit codes instead of English DISM phrases); Wi-Fi detection no longer reports every Ethernet system.
+- Affinity masks work beyond 32 cores; the PC Configurator no longer re-scans on every visit and no longer recommends DDR5 for high-clocked DDR4 kits.
+- Context-menu wildcards, benchmark temp files, boot-log read access, RAM counters on localized Windows, protected-process list: all corrected.
+- Pending backend errors no longer leave pages spinning forever (Profiles, RegClean, Optimize, Software Installer, Debloater).
+- First-run language now follows the system locale; dates follow the selected language.
+
 ## v1.6.2 — Instant update check, glowing self-update button
 
 ### Updates page
