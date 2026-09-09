@@ -5,6 +5,16 @@ src-tauri/gen/
 *.log
 *.key
 
+# Secrets & local environment — NEVER commit
+.env
+.env.*
+*.pem
+*.pfx
+*.p12
+*.crt
+credentials*.json
+secrets.*
+
 # Local agent/tooling working directories
 .omo/
 .opencode/
