@@ -80,7 +80,8 @@ fn entry_is_valid(entry: &Value) -> Result<(), String> {
 // ── environment variable expansion ─────────────────────────────────────────
 #[cfg(windows)]
 fn expand_env(s: &str) -> String {
-    let pairs: &[(&str, fn() -> String)] = &[
+    type VarSource = (&'static str, fn() -> String);
+    let pairs: &[VarSource] = &[
         ("%SYSTEMROOT%", || {
             std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".into())
         }),
@@ -146,8 +147,8 @@ fn extract_exe_path(cmd: &str) -> Option<String> {
     }
 
     // Quoted: "C:\path\app.exe" ...
-    if s.starts_with('"') {
-        if let Some(end) = s[1..].find('"') {
+    if let Some(stripped) = s.strip_prefix('"') {
+        if let Some(end) = stripped.find('"') {
             let p = s[1..end + 1].to_string();
             if !p.is_empty() {
                 return Some(p);
@@ -365,7 +366,7 @@ fn scan_shell_extensions(out: &mut Vec<Value>) {
         let Ok((clsid, _)) = r else { continue };
         let desc: String = approved.get_value(&clsid).unwrap_or_else(|_| clsid.clone());
         let Ok(server) =
-            clsid_root.open_subkey_with_flags(&format!("{clsid}\\InprocServer32"), KEY_READ)
+            clsid_root.open_subkey_with_flags(format!("{clsid}\\InprocServer32"), KEY_READ)
         else {
             continue;
         };
@@ -688,7 +689,7 @@ pub fn restore(backup_path: String) -> Result<Value, String> {
                 Err(e) => errors.push(format!("{display}: {e}")),
             }
         }
-        return Ok(json!({ "restored": restored, "errors": errors }));
+        Ok(json!({ "restored": restored, "errors": errors }))
     }
     #[cfg(not(windows))]
     {

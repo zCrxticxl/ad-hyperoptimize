@@ -117,10 +117,9 @@ fn open_parent(path: &str) -> Option<(RegKey, String)> {
         (HKEY_LOCAL_MACHINE, r)
     } else if let Some(r) = path.strip_prefix(r"HKCU:\") {
         (HKEY_CURRENT_USER, r)
-    } else if let Some(r) = path.strip_prefix(r"HKCR:\") {
-        (HKEY_CLASSES_ROOT, r)
     } else {
-        return None;
+        let r = path.strip_prefix(r"HKCR:\")?;
+        (HKEY_CLASSES_ROOT, r)
     };
     // Map HKLM:\SOFTWARE\Classes\* → HKEY_CLASSES_ROOT
     // (PowerShell HKLM:\SOFTWARE\Classes is same as HKCR:\)
@@ -185,7 +184,7 @@ else {{ "Key not found" }}
 "#
         )
     } else {
-        let leaf_bak = format!("{}-bak", path.split('\\').last().unwrap_or("key"));
+        let leaf_bak = format!("{}-bak", path.split('\\').next_back().unwrap_or("key"));
         format!(
             r#"
 if (Test-Path '{path}') {{
@@ -198,7 +197,6 @@ else {{ "Key not found, may not be installed" }}
     };
     ps::run(&script)
         .map(|s| s.trim().to_string())
-        .map_err(|e| e)
 }
 
 pub fn disable_all_bloat() -> Result<String, String> {
