@@ -4,6 +4,18 @@ All notable changes to AD HyperOptimize are documented here. The in-app
 changelog is generated from this file, and each GitHub release uses the matching
 section below as its release notes.
 
+## v1.6.4 — Services overview, uninstaller privilege hardening
+
+### Services Manager
+- Services are now categorized by origin like scheduled tasks: anything whose executable lives outside the Windows directory is tagged and filterable as third-party (own tab, summary card, and badge), so installed-software services are immediately distinguishable from inbox ones.
+- The one-card-per-service layout is replaced by a dense table — roughly three times as many services per screen, with description and bloat reason as hover tooltips and start-type/start/stop/restart controls inline.
+
+### Security
+- Closed an admin-escalation path in the App Uninstaller: the per-user (HKCU) uninstall list could be forged by user-level software, and executing such an entry through the cmd.exe fallback would have run it elevated. The fallback is now refused for per-user apps with a clear manual-uninstall message; quoted-exe and MsiExec uninstallers (the overwhelming majority) keep working.
+
+### Fixes
+- Host-target builds compile again (a Windows-only visibility attribute leaked into a cross-platform helper).
+
 ## v1.6.3 — Security & reliability hardening (external audit response)
 
 An independent audit against v1.5.0 reported ~218 findings. All Critical and
