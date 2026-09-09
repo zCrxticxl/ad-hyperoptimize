@@ -4,6 +4,15 @@ All notable changes to AD HyperOptimize are documented here. The in-app
 changelog is generated from this file, and each GitHub release uses the matching
 section below as its release notes.
 
+## v1.6.1 — Single-window admin start, scheduled task sorting
+
+### Fixes
+- Fixed the app starting twice when the UAC prompt was confirmed. The unelevated instance now decides before any window appears: "Yes" launches only the admin window, "No" only the normal one.
+
+### Scheduled Tasks
+- Tasks can now be sorted by name, creation date, and last run (click the column headers; entries without a date sort last).
+- Tasks installed outside \Microsoft\ are marked and filterable as third-party, shown with their author and executable so they can be reviewed and disabled deliberately.
+
 ## v1.6.0 — Exact undo, complete localization, in-app changelog
 
 ### What's new
