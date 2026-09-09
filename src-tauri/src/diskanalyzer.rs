@@ -77,7 +77,7 @@ pub(crate) fn is_reparse_point(p: &Path) -> bool {
         .unwrap_or(false)
 }
 #[cfg(not(windows))]
-fn is_reparse_point(_p: &Path) -> bool {
+pub(crate) fn is_reparse_point(_p: &Path) -> bool {
     false
 }
 
