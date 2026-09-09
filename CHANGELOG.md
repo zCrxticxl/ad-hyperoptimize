@@ -4,6 +4,12 @@ All notable changes to AD HyperOptimize are documented here. The in-app
 changelog is generated from this file, and each GitHub release uses the matching
 section below as its release notes.
 
+## v1.6.2 — Instant update check, glowing self-update button
+
+### Updates page
+- Opening the Updates page now checks for an app update automatically: the install button appears right away, without an extra "check for updates" click.
+- The app self-update actions (download/install and restart) pulse with an accent glow so the one button that updates the app itself stands out. With reduced-motion enabled a static glow is shown instead.
+
 ## v1.6.1 — Single-window admin start, scheduled task sorting
 
 ### Fixes
