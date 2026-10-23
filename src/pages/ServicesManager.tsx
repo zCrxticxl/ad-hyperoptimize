@@ -32,7 +32,11 @@ export default function ServicesManager({ admin, focusId }: { admin: boolean; fo
   const refresh = () => {
     setLoading(true);
     api.servicesList()
-      .then((r: any) => setServices(r.services ?? []))
+      .then((r: any) => {
+        if (r.error) throw new Error(String(r.error));
+        setErr("");
+        setServices(r.services ?? []);
+      })
       .catch(e => setErr(String(e)))
       .finally(() => setLoading(false));
   };
@@ -79,7 +83,9 @@ export default function ServicesManager({ admin, focusId }: { admin: boolean; fo
   };
 
   const disableBloat = async () => {
-    for (const s of services.filter(s => s.isBloat && s.startType !== "Disabled")) {
+    const candidates = services.filter(s => s.isBloat && s.startType !== "Disabled");
+    if (!window.confirm(`Disable ${candidates.length} optional background services? Review the list first; changes may affect features you use.`)) return;
+    for (const s of candidates) {
       await doSetStartup(s, "Disabled", false);
     }
     refresh();

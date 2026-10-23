@@ -5,47 +5,71 @@ use serde_json::{json, Value};
 
 // ── UWP bloatware list ────────────────────────────────────────────────────────
 
+const OPTIONAL_APPS: &[&str] = &[
+    "Microsoft.BingNews",
+    "Microsoft.BingWeather",
+    "Microsoft.BingFinance",
+    "Microsoft.BingSports",
+    "Microsoft.MicrosoftSolitaireCollection",
+    "Microsoft.MixedReality.Portal",
+    "Microsoft.People",
+    "Microsoft.SkypeApp",
+    "Microsoft.Teams",
+    "Microsoft.ZuneMusic",
+    "Microsoft.ZuneVideo",
+    "Microsoft.GetHelp",
+    "Microsoft.Getstarted",
+    "Microsoft.Microsoft3DViewer",
+    "Microsoft.XboxApp",
+    "Microsoft.XboxGameOverlay",
+    "Microsoft.XboxGamingOverlay",
+    "Microsoft.XboxIdentityProvider",
+    "king.com.CandyCrushSaga",
+    "king.com.CandyCrushFriends",
+    "BytedancePte.Ltd.TikTok",
+    "SpotifyAB.SpotifyMusic",
+    "Disney.37853D22215E2",
+    "AmazonVideo.PrimeVideo",
+];
+
 pub fn list_uwp() -> Value {
-    let script = r#"
-$keep = @(
-    'Microsoft.WindowsStore','Microsoft.Windows.Photos','Microsoft.WindowsCalculator',
-    'Microsoft.Windows.SoundRecorder','Microsoft.WindowsNotepad',
-    'Microsoft.MicrosoftEdge','Microsoft.MicrosoftEdge.Stable',
-    'Microsoft.Paint','Microsoft.ScreenSketch','Microsoft.WindowsTerminal',
-    'Microsoft.Windows.Narrator','Microsoft.Windows.Magnifier',
-    'Microsoft.WindowsAlarms','Microsoft.WindowsCamera',
-    'Microsoft.Windows.Search','Microsoft.WindowsSecurity',
-    'Microsoft.WindowsStore','Microsoft.StorePurchaseApp',
-    'Microsoft.Xbox.TCUI'
-)
-$apps = Get-AppxPackage -AllUsers -ErrorAction SilentlyContinue |
-    Where-Object { $_.IsFramework -eq $false -and $_.SignatureKind -ne 'System' } |
-    Where-Object { $_.Name -notin $keep } |
-    Select-Object Name, PackageFullName, Publisher, PackageFamilyName,
-        @{n='sizeMb';e={0}}, @{n='removable';e={$true}} |
-    Sort-Object Name
-$apps | ConvertTo-Json -Compress -Depth 3
-"#;
-    match ps::run_json(script) {
-        Ok(Value::Array(arr)) => json!({ "apps": arr }),
-        Ok(v @ Value::Object(_)) => json!({ "apps": [v] }),
-        _ => json!({ "apps": [] }),
-    }
+    let allowed = OPTIONAL_APPS
+        .iter()
+        .map(|name| format!("'{name}'"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let script = format!(
+        r#"
+$allowed = @({allowed})
+$installed = @(Get-AppxPackage -AllUsers -ErrorAction Stop | Where-Object {{ $_.Name -in $allowed }})
+$provisioned = @(Get-AppxProvisionedPackage -Online -ErrorAction Stop | Where-Object {{ $_.DisplayName -in $allowed }})
+$rows = foreach ($name in $allowed) {{
+    $pkg = $installed | Where-Object {{ $_.Name -eq $name }} | Select-Object -First 1
+    $prov = $provisioned | Where-Object {{ $_.DisplayName -eq $name }} | Select-Object -First 1
+    if ($pkg -or $prov) {{
+        [PSCustomObject]@{{ Name=$name; PackageFullName=$(if ($pkg) {{ $pkg.PackageFullName }} else {{ $null }}); provisioned=[bool]$prov }}
+    }}
+}}
+@{{ apps=@($rows) }} | ConvertTo-Json -Compress -Depth 3
+"#
+    );
+    ps::run_json(&script).unwrap_or_else(|e| json!({ "apps": [], "error": e }))
 }
 
 pub fn remove_uwp(package_full_name: String) -> Result<String, String> {
-    // Sanitize, only allow package name characters
-    if package_full_name.contains('\'') || package_full_name.contains('"') {
+    if !ps::is_safe_ident(&package_full_name) {
         return Err("Invalid package name".into());
     }
     let script = format!(
         r#"
+$pkg = Get-AppxPackage -AllUsers -ErrorAction Stop | Where-Object {{ $_.PackageFullName -eq '{package_full_name}' }} | Select-Object -First 1
+if (-not $pkg) {{ throw 'Package is no longer installed' }}
 try {{
-    Remove-AppxPackage -Package '{package_full_name}' -AllUsers -ErrorAction Stop 2>&1
+    Remove-AppxPackage -Package $pkg.PackageFullName -AllUsers -ErrorAction Stop 2>&1
     "Removed"
 }} catch {{
     try {{
-        Remove-AppxPackage -Package '{package_full_name}' -ErrorAction Stop 2>&1
+        Remove-AppxPackage -Package $pkg.PackageFullName -ErrorAction Stop 2>&1
         "Removed (current user)"
     }} catch {{
         throw $_
@@ -53,12 +77,18 @@ try {{
 }}
 "#
     );
+    let allowed = OPTIONAL_APPS
+        .iter()
+        .any(|name| package_full_name.starts_with(&format!("{name}_")));
+    if !allowed {
+        return Err("Package is not in the optional-app catalog".into());
+    }
     ps::run(&script).map(|s| s.trim().to_string())
 }
 
 pub fn remove_uwp_provisioned(package_name: String) -> Result<String, String> {
-    if package_name.contains('\'') {
-        return Err("Invalid name".into());
+    if !OPTIONAL_APPS.contains(&package_name.as_str()) {
+        return Err("Package is not in the optional-app catalog".into());
     }
     let script = format!(
         r#"
@@ -67,7 +97,7 @@ $pkg = Get-AppxProvisionedPackage -Online -ErrorAction SilentlyContinue |
 if ($pkg) {{
     Remove-AppxProvisionedPackage -Online -PackageName $pkg.PackageName -ErrorAction Stop | Out-Null
     "Removed provisioned package"
-}} else {{ "Not found as provisioned" }}
+}} else {{ throw 'Package is no longer provisioned' }}
 "#
     );
     ps::run(&script).map(|s| s.trim().to_string())

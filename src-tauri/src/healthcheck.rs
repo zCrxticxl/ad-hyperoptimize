@@ -98,34 +98,38 @@ fn parse_result(kind: &str, output: &str) -> &'static str {
         "sfc" => {
             if lo.contains("no integrity violations")
                 || lo.contains("did not find any integrity violations")
+                || lo.contains("keine integritätsverletzungen gefunden")
             {
                 "clean"
-            } else if lo.contains("found corrupt files and successfully repaired") {
+            } else if lo.contains("found corrupt files and successfully repaired")
+                || lo.contains("beschädigte dateien gefunden und erfolgreich repariert")
+            {
                 "repaired"
-            } else if lo.contains("found corrupt files but was unable to fix") {
+            } else if lo.contains("found corrupt files but was unable to fix")
+                || lo.contains("beschädigte dateien gefunden")
+            {
                 "corrupt"
             } else {
                 "unknown"
             }
         }
-        "dism_check" | "dism_scan" => match dism_exit(&lo) {
-            Some(0) => "clean",
-            Some(_) => "corrupt",
-            // Legacy fallback for output without the marker.
-            None => {
-                if lo.contains("no component store corruption detected")
-                    || lo.contains("the operation completed successfully")
-                {
-                    "clean"
-                } else if lo.contains("component store is repairable")
-                    || lo.contains("corruption was detected")
-                {
-                    "corrupt"
-                } else {
-                    "unknown"
-                }
+        "dism_check" | "dism_scan" => {
+            if lo.contains("component store is repairable")
+                || lo.contains("corruption was detected")
+                || lo.contains("komponentenspeicher kann repariert werden")
+                || lo.contains("komponentenspeicher ist reparierbar")
+            {
+                "corrupt"
+            } else if lo.contains("no component store corruption detected")
+                || lo.contains("keine beschädigung des komponentenspeichers erkannt")
+            {
+                "clean"
+            } else if dism_exit(&lo).is_some_and(|code| code != 0) {
+                "error"
+            } else {
+                "unknown"
             }
-        },
+        }
         "dism_restore" => match dism_exit(&lo) {
             Some(0) => "repaired",
             Some(_) => "error",
@@ -148,5 +152,29 @@ fn parse_result(kind: &str, output: &str) -> &'static str {
             _ => "unknown",
         },
         _ => "unknown",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_result;
+
+    #[test]
+    fn dism_success_does_not_hide_repairable_store() {
+        assert_eq!(parse_result("dism_scan", "The component store is repairable\nThe operation completed successfully.\nDISM_EXIT:0"), "corrupt");
+        assert_eq!(
+            parse_result(
+                "dism_scan",
+                "Der Komponentenspeicher ist reparierbar.\nDISM_EXIT:0"
+            ),
+            "corrupt"
+        );
+        assert_eq!(
+            parse_result(
+                "dism_scan",
+                "The operation completed successfully.\nDISM_EXIT:0"
+            ),
+            "unknown"
+        );
     }
 }

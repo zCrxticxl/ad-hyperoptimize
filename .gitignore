@@ -19,3 +19,6 @@ secrets.*
 .omo/
 .opencode/
 .playwright-mcp/
+
+# oh-my-claudecode runtime state
+.omc/

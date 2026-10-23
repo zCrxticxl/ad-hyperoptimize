@@ -19,6 +19,7 @@ type GpuTweak = {
   status: "applied" | "not_applied" | "partial" | "unknown";
   needsDriverKey: boolean;
   driverKeyMissing: boolean;
+  canRevert: boolean;
 };
 
 type ReBar = {
@@ -285,14 +286,14 @@ export default function GpuTweaks({ admin, focusId }: { admin: boolean; focusId?
                         </button>
                         {/* Apply / Revert */}
                         {applied ? (
-                          <button
+                          tw.canRevert ? <button
                             className="btn small ghost"
                             disabled={isBusy || blocked}
                             onClick={() => doRevert(tw)}
                             title={blocked ? t("gpuNoKey") : ""}
                           >
                             {isBusy ? <Spinner /> : t("bootUndo")}
-                          </button>
+                          </button> : <span className="muted" style={{ fontSize: 11 }}>{t("gpuStatusApplied")}</span>
                         ) : awaitingConfirm ? (
                           <button
                             className="btn small"

@@ -16,16 +16,12 @@ fn bloat_catalog() -> HashMap<(String, String), &'static str> {
         ("\\microsoft\\windows\\application experience\\", "startupapptask",
             "Scans startup programs for Microsoft analysis after login."),
         // Autochk
-        ("\\microsoft\\windows\\autochk\\", "proxy",
-            "Forwards Autochk results (disk errors) to Microsoft (telemetry)."),
         // CEIP
         ("\\microsoft\\windows\\customer experience improvement program\\", "consolidator",
             "CEIP telemetry: Sends system usage data to Microsoft. Runs hourly."),
         ("\\microsoft\\windows\\customer experience improvement program\\", "usbceip",
             "Sends USB device data as part of the Customer Experience Improvement Program."),
         // Disk
-        ("\\microsoft\\windows\\diskdiagnostic\\", "microsoft-windows-diskdiagnosticdatacollector",
-            "Collects disk diagnostic data and forwards it to Microsoft."),
         ("\\microsoft\\windows\\diskfootprint\\", "diagnostics",
             "Profiles disk I/O patterns in the background, generates load with no user benefit."),
         // WinSAT
@@ -40,33 +36,17 @@ fn bloat_catalog() -> HashMap<(String, String), &'static str> {
         ("\\microsoft\\windows\\nettrace\\", "gathernetworkinfo",
             "Collects detailed network diagnostic data, background overhead with no discernible benefit."),
         // Power Efficiency
-        ("\\microsoft\\windows\\power efficiency diagnostics\\", "analyzesystem",
-            "Runs power efficiency analysis and sends results to Microsoft."),
         // Family Safety
-        ("\\microsoft\\windows\\shell\\", "familysafetyrefreshtask",
-            "Updates Family Safety / parental control policies from the Microsoft server."),
         // WER
         ("\\microsoft\\windows\\windows error reporting\\", "queuereporting",
             "Sends queued error reports to Microsoft. Unnecessary when Windows Error Reporting is disabled."),
         // Windows Update
-        ("\\microsoft\\windows\\windowsupdate\\", "automatic app update",
-            "Automatically updates Store apps in the background, separate from normal Windows Update."),
-        ("\\microsoft\\windows\\windowsupdate\\", "scheduled start",
-            "Starts Windows Update scans on a fixed schedule. Effect is limited on Win11: the Update Orchestrator and trigger-start of wuauserv run scans independently of this task."),
         // Workplace Join
-        ("\\microsoft\\windows\\workplace join\\", "automatic-device-join",
-            "Automatically registers the device in Azure AD / Workplace Join (enterprise feature)."),
         // PushToInstall
         ("\\microsoft\\windows\\pushtoinstall\\", "logincheck",
             "Checks Push-to-Install Store tasks at login, irrelevant for non-enterprise."),
         // MUI language packs
-        ("\\microsoft\\windows\\mui\\", "lpremove",
-            "Automatically removes unused language packs, may unintentionally delete language packs."),
         // Subscription / license
-        ("\\microsoft\\windows\\subscription\\", "enablelicenseacquisition",
-            "Attempts to reload Windows activation licenses in the background."),
-        ("\\microsoft\\windows\\subscription\\", "licenseacquisition",
-            "License reload task, unnecessary on correctly activated systems."),
         // Device Census
         ("\\microsoft\\windows\\device information\\", "device",
             "Sends detailed device inventory data to Microsoft (Device Census)."),
@@ -78,8 +58,6 @@ fn bloat_catalog() -> HashMap<(String, String), &'static str> {
         ("\\microsoft\\windows\\feedback\\siuf\\", "dmclientonscenariodownload",
             "Feedback/telemetry client task (Siuf, scenario download): downloads feedback-scenario payloads."),
         // Clip
-        ("\\microsoft\\windows\\clip\\", "license validation",
-            "Microsoft Store license validation, runs periodically in the background."),
     ];
 
     entries
@@ -92,7 +70,7 @@ pub fn list() -> Value {
     let catalog = bloat_catalog();
 
     let script = r#"
-$tasks = Get-ScheduledTask -ErrorAction SilentlyContinue | ForEach-Object {
+$tasks = Get-ScheduledTask -ErrorAction Stop | ForEach-Object {
     $created = $null
     $ds = "$($_.Date)"
     if ($ds) { try { $created = [datetime]::Parse($ds).ToUniversalTime().ToString("o") } catch { } }
@@ -144,7 +122,7 @@ $tasks | ConvertTo-Json -Compress -Depth 2
             let key = (path.to_lowercase(), name.to_lowercase());
             let reason = catalog.get(&key).copied().unwrap_or("");
             let is_bloat = !reason.is_empty();
-            let enabled = matches!(state.as_str(), "Ready" | "Running");
+            let enabled = matches!(state.as_str(), "Ready" | "Running" | "Queued");
             // All inbox Windows tasks live under \Microsoft\; anything else
             // (vendor folders or root-level entries) is third-party installed.
             let origin = if path.to_lowercase().starts_with("\\microsoft\\") {
@@ -191,15 +169,80 @@ pub fn toggle(path: String, name: String, enable: bool) -> Result<Value, String>
     {
         return Err("Invalid task path or name".into());
     }
+    let query = format!(
+        "(Get-ScheduledTask -TaskPath '{path}' -TaskName '{name}' -ErrorAction Stop).State.ToString()"
+    );
+    let previous = crate::ps::run(&query)?;
+    let previously_enabled = previous.trim() != "Disabled";
+    if previously_enabled == enable {
+        return Ok(json!({ "name": name, "path": path, "enabled": enable, "alreadySet": true }));
+    }
     let action = if enable {
         "Enable-ScheduledTask"
     } else {
         "Disable-ScheduledTask"
     };
-    let script = format!(
-        r#"{action} -TaskPath '{path}' -TaskName '{name}' -ErrorAction Stop | Out-Null; "OK""#
+    let undo = if enable {
+        "Disable-ScheduledTask"
+    } else {
+        "Enable-ScheduledTask"
+    };
+    let apply_script =
+        format!("{action} -TaskPath '{path}' -TaskName '{name}' -ErrorAction Stop | Out-Null");
+    let revert_script = format!(
+        "powershell -Command {undo} -TaskPath '{path}' -TaskName '{name}' -ErrorAction Stop | Out-Null"
     );
-    crate::ps::run(&script)
-        .map(|_| json!({ "name": name, "path": path, "enabled": enable }))
-        .map_err(|e| format!("Toggle fehlgeschlagen: {e}"))
+    let entry_id = crate::safety::append_entry(crate::safety::JournalEntry {
+        id: format!("task-{}", chrono::Local::now().format("%Y%m%d%H%M%S%6f")),
+        tweak_id: format!("task:{path}{name}"),
+        tweak_name: format!("Scheduled task: {name}"),
+        origin: None,
+        time: chrono::Local::now().to_rfc3339(),
+        items: vec![crate::safety::ChangeItem::Command {
+            applied: format!("powershell -Command {apply_script}"),
+            revert: revert_script,
+        }],
+        reverted: false,
+        backup_files: vec![],
+        completed: false,
+        attempted: 1,
+        reverted_items: 0,
+    })?;
+    let result = crate::ps::run(&apply_script).and_then(|_| {
+        let state = crate::ps::run(&query)?;
+        if (state.trim() != "Disabled") == enable {
+            Ok(())
+        } else {
+            Err(format!("Scheduled task {name} did not change state"))
+        }
+    });
+    crate::safety::with_journal(|entries| {
+        let entry = entries
+            .iter_mut()
+            .find(|entry| entry.id == entry_id)
+            .ok_or("Scheduled task journal entry missing")?;
+        entry.completed = result.is_ok();
+        Ok(())
+    })?;
+    result.map_err(|error| format!("Toggle fehlgeschlagen: {error}"))?;
+    Ok(json!({ "name": name, "path": path, "enabled": enable, "entryId": entry_id }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::bloat_catalog;
+
+    #[test]
+    fn update_and_license_tasks_are_not_bloat_candidates() {
+        let names = [
+            "scheduled start",
+            "automatic app update",
+            "license validation",
+            "licenseacquisition",
+            "automatic-device-join",
+        ];
+        assert!(!bloat_catalog()
+            .keys()
+            .any(|(_, name)| names.contains(&name.as_str())));
+    }
 }

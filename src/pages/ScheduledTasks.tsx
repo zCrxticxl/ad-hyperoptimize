@@ -51,7 +51,11 @@ export default function ScheduledTasks({ admin, focusId }: { admin: boolean; foc
   const load = () =>
     api
       .schedTasksList()
-      .then((r) => setData(r))
+      .then((r) => {
+        if (r.error) throw new Error(String(r.error));
+        setErr("");
+        setData(r);
+      })
       .catch((e) => setErr(String(e)));
 
   useEffect(() => { load(); }, []);

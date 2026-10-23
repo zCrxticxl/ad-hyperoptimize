@@ -393,7 +393,7 @@ export default function Updates({ admin }: { admin: boolean }) {
           )}
           {drvResult && !drvResult.error && (
             <div style={{ marginTop: 10 }}>
-              <div style={{ color: "var(--green)", fontWeight: 600 }}>✔ {drvResult.overall}, {drvResult.installed} drivers</div>
+              <div style={{ color: drvResult.overall === "Succeeded" ? "var(--green)" : "var(--yellow)", fontWeight: 600 }}>{drvResult.overall}, {drvResult.installed} drivers</div>
               {(drvResult.results ?? []).map((r: any, i: number) => (
                 <div key={i} className="mono muted" style={{ fontSize: 11 }}>{r.result} · {r.title}</div>
               ))}

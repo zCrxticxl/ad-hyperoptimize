@@ -95,11 +95,19 @@ fn walk(root: &Path, min_age: Duration, files: &mut Vec<(PathBuf, u64)>) {
     // deep temp trees cannot overflow the call stack.
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
+        if crate::diskanalyzer::is_reparse_point(&dir) {
+            continue;
+        }
         let Ok(rd) = fs::read_dir(&dir) else { continue };
         let now = SystemTime::now();
         for entry in rd.flatten() {
             let p = entry.path();
-            let Ok(md) = entry.metadata() else { continue };
+            if crate::diskanalyzer::is_reparse_point(&p) {
+                continue;
+            }
+            let Ok(md) = p.symlink_metadata() else {
+                continue;
+            };
             if md.is_dir() {
                 stack.push(p);
             } else if md.is_file() {
@@ -154,6 +162,10 @@ pub fn clean(category_ids: Vec<String>) -> Value {
             continue;
         };
         for (path, size) in collect(c.id, c.min_age_hours) {
+            if crate::diskanalyzer::has_reparse_ancestor(&path) {
+                skipped += 1;
+                continue;
+            }
             match fs::remove_file(&path) {
                 Ok(_) => {
                     freed += size;
@@ -171,9 +183,16 @@ pub fn clean(category_ids: Vec<String>) -> Value {
 }
 
 fn remove_empty_dirs(dir: &Path, remove_self: bool) -> std::io::Result<bool> {
+    if crate::diskanalyzer::is_reparse_point(dir) {
+        return Ok(false);
+    }
     let mut empty = true;
     for entry in fs::read_dir(dir)? {
         let p = entry?.path();
+        if crate::diskanalyzer::is_reparse_point(&p) {
+            empty = false;
+            continue;
+        }
         if p.is_dir() {
             if !remove_empty_dirs(&p, true).unwrap_or(false) {
                 empty = false;
@@ -186,4 +205,45 @@ fn remove_empty_dirs(dir: &Path, remove_self: bool) -> std::io::Result<bool> {
         fs::remove_dir(dir)?;
     }
     Ok(empty)
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::walk;
+    use std::fs;
+    use std::process::Command;
+    use std::time::Duration;
+
+    #[test]
+    fn cleanup_scan_does_not_follow_junctions() {
+        let root = std::env::temp_dir().join(format!(
+            "ad-hyperoptimize-cleanup-test-{}",
+            rand::random::<u64>()
+        ));
+        let scan_root = root.join("scan");
+        let outside = root.join("outside");
+        let junction = scan_root.join("junction");
+        fs::create_dir_all(&scan_root).unwrap();
+        fs::create_dir(&outside).unwrap();
+        fs::write(outside.join("keep.txt"), "keep").unwrap();
+
+        let output = Command::new("cmd.exe")
+            .args(["/C", "mklink", "/J"])
+            .arg(&junction)
+            .arg(&outside)
+            .output()
+            .unwrap();
+        if !output.status.success() {
+            fs::remove_dir_all(&root).unwrap();
+            panic!(
+                "junction creation failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        let mut files = Vec::new();
+        walk(&scan_root, Duration::ZERO, &mut files);
+        fs::remove_dir(&junction).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+        assert!(files.is_empty());
+    }
 }

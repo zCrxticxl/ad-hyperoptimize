@@ -37,7 +37,7 @@ export default function Optimize({ mode, admin, focusId, onSwitchExpert }: { mod
     focusHandled.current = true;
     // Beginner mode filters out non-Low tweaks, surface an honest hint instead
     // of a silent no-op when the linked tweak is not visible here.
-    if (mode === "beginner" && !tweaks.some((tw) => tw.id === focusId && tw.risk === "Low")) {
+    if (mode === "beginner" && !tweaks.some((tw) => tw.id === focusId && tw.performancePotential && profile?.tweakRisks?.[tw.id]?.severity !== "danger")) {
       setFocusHidden(true);
       return;
     }
@@ -58,7 +58,7 @@ export default function Optimize({ mode, admin, focusId, onSwitchExpert }: { mod
 
   const push = (m: string) => setLog((l) => [...l.slice(-200), `[${new Date().toLocaleTimeString()}] ${m}`]);
 
-  const visible = (tweaks ?? []).filter((tw) => mode === "expert" || tw.risk === "Low");
+  const visible = (tweaks ?? []).filter((tw) => mode === "expert" || (tw.performancePotential && profile?.tweakRisks?.[tw.id]?.severity !== "danger"));
   const cats = [...new Set(visible.map((tw) => tw.category))];
 
   const doApply = async (tw: any) => {

@@ -61,7 +61,9 @@ export default function Reports() {
               <tr key={h.id ?? i}>
                 <td className="muted">{new Date(h.time).toLocaleString()}</td>
                 <td>{h.tweak_name}</td>
-                <td style={{ color: h.reverted ? "var(--muted)" : "var(--green)" }}>{h.reverted ? t("repReverted") : t("repApplied")}</td>
+                <td style={{ color: h.reverted ? "var(--muted)" : h.completed === false ? "var(--orange)" : "var(--green)" }}>
+                  {h.reverted ? t("repReverted") : h.completed === false ? t("repIncomplete") : t("repApplied")}
+                </td>
                 <td className="muted">{h.backup_files?.length ?? 0} {t("repRegFiles")}</td>
                 <td>
                   {!h.reverted && h.id && (

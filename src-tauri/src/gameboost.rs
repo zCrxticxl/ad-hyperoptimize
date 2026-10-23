@@ -431,12 +431,13 @@ pub fn quick_boost_start(process_name: String) -> Result<Value, String> {
         id: entry_id,
         tweak_id: "quickBoost".into(),
         tweak_name: format!("Quick Boost ({process_name})"),
+        origin: None,
         time: chrono::Local::now().to_rfc3339(),
         items: items.clone(),
         reverted: false,
         backup_files: vec![],
-        completed: true,
-        attempted: usize::MAX,
+        completed: false,
+        attempted: 0,
         reverted_items: 0,
     })?;
 
@@ -446,19 +447,32 @@ pub fn quick_boost_start(process_name: String) -> Result<Value, String> {
     // The failing action itself is rolled back too: a killed command can have
     // partially mutated already.
     for (idx, item) in items.iter().enumerate() {
+        safety::with_journal(|j| {
+            let entry = j
+                .iter_mut()
+                .find(|entry| entry.id == entry_id)
+                .ok_or("journal entry missing")?;
+            entry.attempted = idx + 1;
+            Ok(())
+        })?;
         if let Err(e) = tweaks::apply_item(item) {
-            for d in items[..=idx].iter().rev() {
-                let _ = tweaks::revert_item(d);
-            }
-            let _ = safety::with_journal(|j| {
-                if let Some(en) = j.iter_mut().find(|en| en.id == entry_id) {
-                    en.reverted = true;
-                }
-                Ok(())
-            });
-            return Err(format!("Quick Boost failed ({e}); changes rolled back"));
+            return match tweaks::rollback_entry_items(&entry_id, &items[..=idx]) {
+                Ok(()) => Err(format!("Quick Boost failed ({e}); changes rolled back")),
+                Err(re) => Err(format!(
+                    "Quick Boost failed ({e}); rollback incomplete ({re}); restore token: {entry_id}"
+                )),
+            };
         }
     }
+
+    safety::with_journal(|j| {
+        let entry = j
+            .iter_mut()
+            .find(|entry| entry.id == entry_id)
+            .ok_or("journal entry missing")?;
+        entry.completed = true;
+        Ok(())
+    })?;
 
     // ---- best-effort, non-reversible overlay cleanup ----
     let killed = kill_known_overlays();

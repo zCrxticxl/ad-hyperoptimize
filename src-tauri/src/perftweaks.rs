@@ -49,6 +49,19 @@ $result | ConvertTo-Json -Compress
 }
 
 pub fn timer_set(target_100ns: u32) -> Result<String, String> {
+    if !matches!(target_100ns, 5000 | 10000) {
+        return Err("Unsupported timer resolution; choose 0.5 or 1 ms".into());
+    }
+    if !ps::is_admin() {
+        return Err("Timer task requires administrator rights".into());
+    }
+    let current = timer_get();
+    if let Some(error) = current["error"].as_str() {
+        return Err(format!("Cannot inspect existing timer request: {error}"));
+    }
+    if current["persistent"] == true {
+        return Err("Timer request already active; reset it before choosing a new value".into());
+    }
     // Steps:
     // 1. Call NtSetTimerResolution now to detect actual hardware minimum
     // 2. Set GlobalTimerResolutionRequests registry key (persists across boots)
@@ -58,36 +71,43 @@ pub fn timer_set(target_100ns: u32) -> Result<String, String> {
     // 6. Sleep 800ms so timer_get() called right after sees the updated value
     let script = format!(
         r#"
+$ErrorActionPreference = "Stop"
 $target = {target_100ns}
 $actual = 0
 $msg = "Applied"
 try {{
     Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public class NtTimerS{{[DllImport("ntdll.dll")]public static extern int NtSetTimerResolution(int desired,bool set,out int actual);}}' -ErrorAction Stop
-    [NtTimerS]::NtSetTimerResolution($target,$true,[ref]$actual)|Out-Null
+    $status = [NtTimerS]::NtSetTimerResolution($target,$true,[ref]$actual)
+    if ($status -ne 0) {{ throw "NtSetTimerResolution failed: $status" }}
     $achievedMs=[math]::Round($actual/10000.0,3)
-    if($actual -gt ($target+1000)){{$msg="Hardware limit: ${{achievedMs}}ms (0.5ms not supported on this CPU)"}}
+    if($actual -gt ($target+1000)){{throw "Hardware limit: ${{achievedMs}}ms"}}
     else{{$msg="Set ${{achievedMs}}ms"}}
-}}catch{{$msg="Applied (NtDll unavailable)"}}
-try{{Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\kernel' -Name 'GlobalTimerResolutionRequests' -Value 1 -Type DWord -Force}}catch{{}}
+}}catch{{throw}}
+Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\kernel' -Name 'GlobalTimerResolutionRequests' -Value 1 -Type DWord -Force -ErrorAction Stop
 $dir="$env:ProgramData\ADHyperOptimize"
 $ps1="$dir\timerres.ps1"
 try{{
     New-Item -Path $dir -ItemType Directory -Force|Out-Null
     @'
-Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public class NtTP{{[DllImport("ntdll.dll")]public static extern int NtSetTimerResolution(int d,bool s,out int a);}}' -EA SilentlyContinue
-$a=0;[NtTP]::NtSetTimerResolution({target_100ns},$true,[ref]$a)|Out-Null;while($true){{Start-Sleep -Seconds 3600}}
+Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public class NtTP{{[DllImport("ntdll.dll")]public static extern int NtSetTimerResolution(int d,bool s,out int a);}}' -EA Stop
+$a=0;$status=[NtTP]::NtSetTimerResolution({target_100ns},$true,[ref]$a);if($status -ne 0 -or $a -gt ({target_100ns}+1000)){{exit 1}};while($true){{Start-Sleep -Seconds 3600}}
 '@|Set-Content -Path $ps1 -Encoding UTF8
     $ta=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-WindowStyle Hidden -NonInteractive -ExecutionPolicy Bypass -File `"$ps1`""
     $tt=New-ScheduledTaskTrigger -AtLogOn
     $ts=New-ScheduledTaskSettingsSet -Hidden -ExecutionTimeLimit (New-TimeSpan -Hours 0)
     $tp=New-ScheduledTaskPrincipal -UserId 'SYSTEM' -RunLevel Highest
-    Register-ScheduledTask -TaskName 'ADHyperOptimize\TimerResolution' -Action $ta -Trigger $tt -Settings $ts -Principal $tp -Force|Out-Null
-    Start-ScheduledTask -TaskPath '\ADHyperOptimize\' -TaskName 'TimerResolution' -EA SilentlyContinue
+    Register-ScheduledTask -TaskPath '\ADHyperOptimize\' -TaskName 'TimerResolution' -Action $ta -Trigger $tt -Settings $ts -Principal $tp -Force -ErrorAction Stop|Out-Null
+    Start-ScheduledTask -TaskPath '\ADHyperOptimize\' -TaskName 'TimerResolution' -ErrorAction Stop
     Start-Sleep -Milliseconds 800
-}}catch{{}}
+    $task = Get-ScheduledTask -TaskPath '\ADHyperOptimize\' -TaskName 'TimerResolution' -ErrorAction Stop
+    if ($task.State -ne 'Running') {{ throw "Timer helper did not stay running: $($task.State)" }}
+}}catch{{throw}}
 $msg
 "#
     );
+    let timer_registry_path = r"SYSTEM\CurrentControlSet\Control\Session Manager\kernel";
+    let previous_global_request =
+        crate::tweaks::reg_read("HKLM", timer_registry_path, "GlobalTimerResolutionRequests")?;
     let entry_id = crate::safety::append_entry(crate::safety::JournalEntry {
         id: format!(
             "timerRes-{}",
@@ -95,56 +115,96 @@ $msg
         ),
         tweak_id: "perftweaks:timer".into(),
         tweak_name: "Timer Resolution task".into(),
+        origin: None,
         time: chrono::Local::now().to_rfc3339(),
-        items: vec![crate::safety::ChangeItem::Command {
-            applied: script.clone(),
-            revert: TIMER_RESET_PS.to_string(),
-        }],
+        items: vec![
+            crate::safety::ChangeItem::Registry {
+                root: "HKLM".into(),
+                path: timer_registry_path.into(),
+                name: "GlobalTimerResolutionRequests".into(),
+                prev: previous_global_request,
+                new: crate::safety::RegVal::Dword(1),
+            },
+            crate::safety::ChangeItem::Command {
+                applied: script.clone(),
+                revert: format!("powershell -Command {TIMER_RESET_PS}"),
+            },
+        ],
         reverted: false,
         backup_files: vec![],
         completed: false,
-        attempted: 1,
+        attempted: 2,
         reverted_items: 0,
-    });
+    })?;
     let res = ps::run(&script).map(|s| s.trim().to_string());
-    if let Ok(id) = entry_id {
-        let ok = res.is_ok();
-        let _ = crate::safety::with_journal(|j| {
-            if let Some(en) = j.iter_mut().find(|en| en.id == id) {
-                en.completed = ok;
-                if !ok {
-                    en.reverted = true;
-                }
-            }
-            Ok(())
-        });
-    }
+    crate::safety::with_journal(|entries| {
+        let entry = entries
+            .iter_mut()
+            .find(|entry| entry.id == entry_id)
+            .ok_or("Timer journal entry missing")?;
+        entry.completed = res.is_ok();
+        Ok(())
+    })?;
     res
 }
 
 pub fn timer_reset() -> Result<String, String> {
-    ps::run(TIMER_RESET_PS).map(|s| s.trim().to_string())
+    let entry = crate::safety::load_journal()?
+        .into_iter()
+        .rev()
+        .find(|entry| entry.tweak_id == "perftweaks:timer" && !entry.reverted);
+    match entry {
+        Some(entry) if entry.items.len() > 1 => {
+            crate::tweaks::revert_entry(&entry.id)?;
+            Ok("Timer request removed and previous state restored".into())
+        }
+        Some(entry) => {
+            ps::run(TIMER_RESET_PS)?;
+            crate::safety::with_journal(|entries| {
+                let saved = entries
+                    .iter_mut()
+                    .find(|saved| saved.id == entry.id)
+                    .ok_or("Legacy timer journal entry missing")?;
+                saved.reverted = true;
+                saved.reverted_items = saved.items.len();
+                Ok(())
+            })?;
+            Ok("Legacy timer request removed; original registry value was not recorded".into())
+        }
+        None => {
+            let current = timer_get();
+            if current["persistent"] != true {
+                return Ok("No AD HyperOptimize timer task is active".into());
+            }
+            ps::run(TIMER_RESET_PS)?;
+            Ok("Legacy timer request removed; original registry value was not recorded".into())
+        }
+    }
 }
 
 /// Undo operations for the persistent timer-resolution task; shared by
 /// timer_reset and the journal entry timer_set writes.
 const TIMER_RESET_PS: &str = r#"
 # Stop and remove the persistent scheduled task
-try { Stop-ScheduledTask  -TaskPath '\ADHyperOptimize\' -TaskName 'TimerResolution' -EA SilentlyContinue } catch {}
-try { Unregister-ScheduledTask -TaskPath '\ADHyperOptimize\' -TaskName 'TimerResolution' -Confirm:$false -EA SilentlyContinue } catch {}
-# Kill any lingering timerres.ps1 powershell processes
-Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -EA SilentlyContinue | Where-Object {
-    $_.CommandLine -like '*timerres*'
-} | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -EA SilentlyContinue }
-# Remove registry key
-try { Remove-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\kernel' -Name 'GlobalTimerResolutionRequests' -EA SilentlyContinue } catch {}
-# Release NtSetTimerResolution in this process
-try {
-    Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public class NtTimerR{[DllImport("ntdll.dll")]public static extern int NtSetTimerResolution(int desired,bool set,out int actual);}' -EA Stop
-    $actual = 0
-    [NtTimerR]::NtSetTimerResolution(156250,$false,[ref]$actual)|Out-Null
-} catch {}
-"Timer reset to default"
+$task = Get-ScheduledTask -TaskPath '\ADHyperOptimize\' -TaskName 'TimerResolution' -ErrorAction SilentlyContinue
+if ($task) {
+    if ($task.State -eq 'Running') {
+        Stop-ScheduledTask -TaskPath '\ADHyperOptimize\' -TaskName 'TimerResolution' -ErrorAction Stop
+    }
+    Unregister-ScheduledTask -TaskPath '\ADHyperOptimize\' -TaskName 'TimerResolution' -Confirm:$false -ErrorAction Stop
+}
+# Remove helper script
+$helper = Join-Path $env:ProgramData 'ADHyperOptimize	imerres.ps1'
+if (Test-Path -LiteralPath $helper) { Remove-Item -LiteralPath $helper -Force -ErrorAction Stop }
+# Remove the setting this tool added; the journal restores a prior value afterwards
+$kernel = 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\kernel'
+if (Get-ItemProperty -Path $kernel -Name 'GlobalTimerResolutionRequests' -ErrorAction SilentlyContinue) {
+    Remove-ItemProperty -Path $kernel -Name 'GlobalTimerResolutionRequests' -ErrorAction Stop
+}
+if (Get-ScheduledTask -TaskPath '\ADHyperOptimize\' -TaskName 'TimerResolution' -ErrorAction SilentlyContinue) {
+    throw 'Timer task still exists after reset'
+}
+"Timer task removed"
 "#;
 
 // ── MSI Mode ─────────────────────────────────────────────────────────────────
@@ -283,24 +343,7 @@ pub fn net_tweak(adapter: String, keyword: String, value: u32) -> Result<String,
 
 // Disable all optimisable properties on all active physical adapters in one shot
 pub fn net_tweak_all_gaming() -> Result<String, String> {
-    let script = r#"
-$changed = 0
-Get-NetAdapter -Physical | Where-Object { $_.Status -eq 'Up' } | ForEach-Object {
-    $n = $_.Name
-    $props = Get-NetAdapterAdvancedProperty -Name $n -ErrorAction SilentlyContinue
-    $keywords = $props.RegistryKeyword
-    foreach ($kw in @('*InterruptModeration','*RSS','*TCPChecksumOffloadIPv4','*LsoV2IPv4','*UDPChecksumOffloadIPv4','*IPChecksumOffloadIPv4')) {
-        if ($keywords -contains $kw) {
-            try {
-                Set-NetAdapterAdvancedProperty -Name $n -RegistryKeyword $kw -RegistryValue 0 -ErrorAction Stop
-                $changed++
-            } catch {}
-        }
-    }
-}
-"$changed properties updated"
-"#;
-    ps::run(script).map(|s| s.trim().to_string())
+    Err("Pauschales Deaktivieren von RSS und Netzwerk-Offloads ist keine sichere Gaming-Optimierung. Einzelne Eigenschaften nur bei einem konkreten Problem ändern.".into())
 }
 
 pub fn net_reset_all() -> Result<String, String> {

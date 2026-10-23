@@ -371,6 +371,22 @@ body { background: radial-gradient(circle at 88% -10%, rgba(109, 141, 255, .14),
 .view-head h1 { font-size: 22px; font-weight: 760; letter-spacing: -.02em; }
 .view-head p { margin-top: 5px; color: var(--muted); font-size: 13px; }
 .view-head.hero { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
+.home-section-head { margin: 0 0 12px; }
+.home-section-head h2 { color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.home-featured-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-bottom: 28px; }
+.home-featured-card { display: flex; align-items: flex-start; gap: 14px; min-width: 0; min-height: 132px; padding: 20px; border: 1px solid var(--border); border-radius: 14px; background: var(--card); color: var(--text); text-align: left; cursor: pointer; transition: transform .16s ease, border-color .16s ease, background-color .16s ease; }
+.home-featured-card:first-child { background: var(--card2); border-color: var(--accent); }
+.home-featured-card:hover { transform: translateY(-2px); border-color: var(--accent); background: var(--card2); }
+.home-featured-card:active { transform: translateY(0); }
+.home-featured-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.home-featured-number { color: var(--accent); font-size: 11px; font-weight: 750; line-height: 1.5; font-variant-numeric: tabular-nums; }
+.home-featured-copy { display: flex; flex: 1; flex-direction: column; gap: 8px; min-width: 0; }
+.home-featured-copy b { font-size: 16px; line-height: 1.25; }
+.home-featured-copy span { color: var(--muted); font-size: 12.5px; line-height: 1.5; }
+.home-featured-arrow { align-self: flex-end; color: var(--accent); font-size: 20px; }
+@media (max-width: 980px) { .home-featured-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 620px) { .home-featured-grid { grid-template-columns: 1fr; } .home-featured-card { min-height: 108px; } }
+@media (prefers-reduced-motion: reduce) { .home-featured-card { transition: none; } .home-featured-card:hover, .home-featured-card:active { transform: none; } }
 .view-head-title { display: flex; align-items: center; gap: 14px; margin-top: 12px; }
 .back-btn { border: 1px solid var(--border); background: var(--bg2); color: var(--muted); cursor: pointer; font: inherit; font-size: 12.5px; padding: 6px 12px; border-radius: 8px; }
 .back-btn:hover { color: var(--text); border-color: var(--accent); }

@@ -299,8 +299,12 @@ pub fn is_guid(s: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_safe_ident, is_safe_regkey_name, run_checked, wait_with_timeout};
+    use super::{is_safe_ident, is_safe_regkey_name};
+    #[cfg(not(windows))]
+    use super::{run_checked, wait_with_timeout};
+    #[cfg(not(windows))]
     use std::process::{Command, Stdio};
+    #[cfg(not(windows))]
     use std::time::Duration;
 
     #[test]

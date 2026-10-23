@@ -69,8 +69,11 @@ pub fn disk() -> Value {
     const SZ: usize = 256 * 1024 * 1024;
     const CHUNK: usize = 4 * 1024 * 1024;
     // Unique per process/run: concurrent benchmarks overwrote each other.
-    let path = std::env::temp_dir().join(format!("pcopt_bench_{}_{}.tmp",
-        std::process::id(), chrono::Local::now().format("%Y%m%d%H%M%S%6f")));
+    let path = std::env::temp_dir().join(format!(
+        "pcopt_bench_{}_{}.tmp",
+        std::process::id(),
+        chrono::Local::now().format("%Y%m%d%H%M%S%6f")
+    ));
     let data = vec![0x7Eu8; CHUNK];
 
     let write_mbs = (|| -> Result<f64, std::io::Error> {

@@ -80,10 +80,10 @@ pub fn clear() -> Result<usize, String> {
     if let Ok(rd) = fs::read_dir(&dir) {
         for entry in rd.flatten() {
             let p = entry.path();
-            if p.extension().and_then(|e| e.to_str()) == Some("json")
-                && fs::remove_file(&p).is_ok() {
-                    removed += 1;
-                }
+            if p.extension().and_then(|e| e.to_str()) == Some("json") && fs::remove_file(&p).is_ok()
+            {
+                removed += 1;
+            }
         }
     }
     Ok(removed)

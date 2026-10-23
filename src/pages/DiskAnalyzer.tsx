@@ -49,6 +49,7 @@ function ActionBar({ selection, selectionSize, drives, currentRoot, onClear, onD
   const { t } = useLang();
   const [confirm, setConfirm] = useState<"delete" | "move" | null>(null);
   const [moveDest, setMoveDest] = useState("");
+  const [customDest, setCustomDest] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<string | null>(null);
 
@@ -70,10 +71,11 @@ function ActionBar({ selection, selectionSize, drives, currentRoot, onClear, onD
   };
 
   const doMove = async () => {
-    if (!moveDest) return;
+    const destination = moveDest === "custom" ? customDest : moveDest;
+    if (!destination) return;
     setBusy(true);
     try {
-      const r = await api.diskMove([...selection], moveDest);
+      const r = await api.diskMove([...selection], destination);
       setResult(`✔ ${r.moved} ${t("diskMoved")}${r.failed ? `, ${r.failed} ${t("diskErrors")}` : ""}`);
       onMoved();
       onClear();
@@ -131,9 +133,9 @@ function ActionBar({ selection, selectionSize, drives, currentRoot, onClear, onD
             <option value="custom">{t("diskCustomPath")}</option>
           </select>
           {moveDest === "custom" && (
-            <CustomPathInput onChange={setMoveDest} />
+            <CustomPathInput value={customDest} onChange={setCustomDest} />
           )}
-          <button className="btn small" onClick={doMove} disabled={busy || !moveDest || moveDest === "custom"}>
+          <button className="btn small" onClick={doMove} disabled={busy || !moveDest || (moveDest === "custom" && !customDest)}>
             {busy ? <Spinner /> : t("diskDoMove")}
           </button>
           <button className="btn small ghost" onClick={() => setConfirm(null)} disabled={busy}>{t("cancel")}</button>
@@ -147,7 +149,7 @@ function ActionBar({ selection, selectionSize, drives, currentRoot, onClear, onD
             onClick={() => setConfirm("delete")}>
             {t("diskDelete")}
           </button>
-          <button className="btn small ghost" onClick={() => { setConfirm("move"); setMoveDest(""); }}>
+          <button className="btn small ghost" onClick={() => { setConfirm("move"); setMoveDest(""); setCustomDest(""); }}>
             {t("diskMove")}
           </button>
           <button className="btn small ghost" onClick={onClear} style={{ marginLeft: "auto" }}>
@@ -159,14 +161,13 @@ function ActionBar({ selection, selectionSize, drives, currentRoot, onClear, onD
   );
 }
 
-function CustomPathInput({ onChange }: { onChange: (v: string) => void }) {
+function CustomPathInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const { t } = useLang();
-  const [val, setVal] = useState("");
   return (
     <input
       placeholder={t("diskPathPlaceholder")}
-      value={val}
-      onChange={e => { setVal(e.target.value); onChange(e.target.value); }}
+      value={value}
+      onChange={e => onChange(e.target.value)}
       style={{ background: "var(--input-bg)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)", padding: "4px 10px", fontSize: 12, width: 180 }}
     />
   );

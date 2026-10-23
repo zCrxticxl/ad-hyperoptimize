@@ -66,8 +66,10 @@ try {
     $sticks  = @(Get-CimInstance Win32_PhysicalMemory -ErrorAction Stop)
     $totalMb = [math]::Round(($sticks | Measure-Object Capacity -Sum).Sum / 1MB)
     $speedMhz = ($sticks | Select-Object -First 1).Speed
-    $out.ram = @{ totalMb=[int]$totalMb; speedMhz=[int]$speedMhz; sticks=$sticks.Count }
-} catch { $out.ram = @{ totalMb=0; speedMhz=0; sticks=0 } }
+    $smbiosType = [int](($sticks | Select-Object -First 1).SMBIOSMemoryType)
+    $ramType = if ($smbiosType -eq 34) { 'DDR5' } elseif ($smbiosType -eq 26) { 'DDR4' } else { '' }
+    $out.ram = @{ totalMb=[int]$totalMb; speedMhz=[int]$speedMhz; sticks=$sticks.Count; ramType=$ramType }
+} catch { $out.ram = @{ totalMb=0; speedMhz=0; sticks=0; ramType='' } }
 
 # ── Storage (three-tier detection) ────────────────────────────────────────────
 $hasNvme = $false; $hasSsd = $false; $hasHdd = $false

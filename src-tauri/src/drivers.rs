@@ -168,19 +168,14 @@ pub fn check_winget_package(package_id: String) -> Value {
     let script = format!(
         r#"
 $pidEsc = '{package_id}'.Replace("'", "''")
-$out = winget upgrade --id $pidEsc --source winget --accept-source-agreements 2>&1 | Out-String
-if ($out -match 'No applicable update') {{
-    [PSCustomObject]@{{ available=$false; current=''; newVersion='' }}
-}} elseif ($out -match [regex]::Escape($pidEsc) + '\s+([\S]+)\s+([\S]+)') {{
+$out = winget upgrade --id $pidEsc --exact --source winget --accept-source-agreements 2>&1 | Out-String
+$exitCode = $LASTEXITCODE
+if ($out -match [regex]::Escape($pidEsc) + '\s+([^\s]+)\s+([^\s]+)') {{
     [PSCustomObject]@{{ available=$true; current=$Matches[1]; newVersion=$Matches[2] }}
+}} elseif ($exitCode -ne 0 -and $exitCode -ne -1978335212) {{
+    [PSCustomObject]@{{ available=$false; current=''; newVersion=''; error=($out.Trim()) }}
 }} else {{
-    # try install to see if it's not installed at all
-    $show = winget show --id '{package_id}' --source winget --accept-source-agreements 2>&1 | Out-String
-    if ($show -match 'Version:\s+([\S]+)') {{
-        [PSCustomObject]@{{ available=$true; current='unknown'; newVersion=$Matches[1] }}
-    }} else {{
-        [PSCustomObject]@{{ available=$false; current=''; newVersion='' }}
-    }}
+    [PSCustomObject]@{{ available=$false; current=''; newVersion='' }}
 }}
 "#
     );
@@ -224,13 +219,12 @@ if ($upg -match 'No applicable update|already installed') {{
             // APPINSTALLER_CLI_ERROR_* constants):
             //   0             = done
             //   -1978335212   = 0x8A150014, already installed / no update available
-            //   -1978335189   = 0x8A15002B, package not found on this source
             // Any other code (including 0x8A15000B-class update-blocked states)
             // is reported as an error, honest over optimistic.
             let exit_ok = out
                 .lines()
                 .next()
-                .map(|l| matches!(l, "EXIT:0" | "EXIT:-1978335212" | "EXIT:-1978335189"))
+                .map(|l| matches!(l, "EXIT:0" | "EXIT:-1978335212"))
                 .unwrap_or(false);
             if exit_ok {
                 Ok(out

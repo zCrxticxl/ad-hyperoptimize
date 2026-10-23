@@ -6,7 +6,7 @@ import { useFeatureFocus } from "../hooks/useFeatureFocus";
 
 type PTweak = {
   id: string; name: string; category: string;
-  description: string; risk: "Low" | "Medium" | "High"; applied: boolean;
+  description: string; risk: "Low" | "Medium" | "High"; applied: boolean; canRevert: boolean;
 };
 
 const RISK_CLS: Record<string, string> = { Low: "risk-Low", Medium: "risk-Medium", High: "risk-High" };
@@ -53,7 +53,12 @@ export default function PrivacyCenter({ admin, focusId }: { admin: boolean; focu
   const refresh = () => {
     setLoading(true);
     api.privacyScan()
-      .then((r: any) => { setTweaks(r.tweaks ?? []); setApplied(r.applied ?? 0); })
+      .then((r: any) => {
+        if (r.error) throw new Error(String(r.error));
+        setErr("");
+        setTweaks(r.tweaks ?? []);
+        setApplied(r.applied ?? 0);
+      })
       .catch(e => setErr(String(e)))
       .finally(() => setLoading(false));
   };
@@ -92,7 +97,21 @@ export default function PrivacyCenter({ admin, focusId }: { admin: boolean; focu
 
   const applyAll = async () => {
     const pending = tweaks.filter(t => !t.applied);
-    for (const t of pending) await doApply(t, false);
+    setBusy("all");
+    let succeeded = 0;
+    const failed: string[] = [];
+    for (const tw of pending) {
+      try {
+        const result = await api.privacyApply(tw.id);
+        if (result?.ok === false) failed.push(tw.name);
+        else succeeded++;
+      } catch (error) {
+        failed.push(`${tw.name}: ${String(error)}`);
+      }
+    }
+    push(`${succeeded} applied, ${failed.length} failed`);
+    if (failed.length) setErr(failed.join("; "));
+    setBusy(null);
     refresh();
   };
 
@@ -181,15 +200,15 @@ export default function PrivacyCenter({ admin, focusId }: { admin: boolean; focu
                     <button className="btn small ghost" onClick={() => setOpenId(isOpen ? null : tw.id)}>
                       {isOpen ? "▲" : "▼"}
                     </button>
-                    {tw.applied ? (
+                    {tw.applied && tw.canRevert ? (
                       <button className="btn small ghost" disabled={isBusy} onClick={() => doRevert(tw)}>
                         {isBusy ? <Spinner /> : t("revert")}
                       </button>
-                    ) : (
+                    ) : !tw.applied ? (
                       <button className="btn small" disabled={isBusy} onClick={() => doApply(tw)}>
                         {isBusy ? <Spinner /> : t("privActivate")}
                       </button>
-                    )}
+                    ) : null}
                   </div>
                   {isOpen && (
                     <div className="tweak-detail">

@@ -19,7 +19,7 @@ foreach ($k in $keys) {
         -not $_.SystemComponent -and
         ($_.UninstallString -or $_.QuietUninstallString)
     } | ForEach-Object {
-        $dedup = $_.DisplayName.ToLower().Trim()
+        $dedup = "$($_.PSPath.ToLower().Trim())"
         if (-not $seen[$dedup]) {
             $seen[$dedup] = $true
                 $hive = if ($k -like '*HKCU*') { 'HKCU' } else { 'HKLM' }
@@ -48,18 +48,20 @@ $apps | Sort-Object name | ConvertTo-Json -Compress -Depth 2
 pub fn uninstall_app(uninstall_string: String, from_hkcu: bool) -> Result<String, String> {
     // Detect MSI vs EXE and launch appropriately, detached so UI stays responsive.
     //
-    // The cmd.exe /C fallback executes the string verbatim. For HKLM entries
-    // that adds no privilege (writing them already needs admin), but a per-user
-    // HKCU entry can be planted by user-level malware, so executing it from
-    // this elevated app would turn the uninstall button into an escalation
-    // path. Quoted-exe and MsiExec forms stay allowed for per-user apps.
-    let needs_cmd_shell = !uninstall_string.starts_with('"')
-        && !uninstall_string.to_lowercase().starts_with("msiexec");
-    if from_hkcu && needs_cmd_shell {
-        return Err(
-            "Refused for safety: this per-user uninstaller would run through cmd.exe,              which installed software could forge into an admin-level payload.              Please uninstall it from Windows Settings > Apps."
-                .into(),
-        );
+    // Never elevate an HKCU command. Re-read HKLM here: the renderer's hive
+    // flag and uninstall string are untrusted input, even after a list scan.
+    if from_hkcu {
+        return Err("Per-user apps must be uninstalled from Windows Settings > Apps.".into());
+    }
+    let listed = list_apps();
+    let trusted = listed["apps"].as_array().is_some_and(|apps| {
+        apps.iter().any(|app| {
+            app["hive"] == "HKLM"
+                && app["uninstallString"].as_str() == Some(uninstall_string.as_str())
+        })
+    });
+    if !trusted {
+        return Err("Uninstaller is not a currently registered machine-wide app.".into());
     }
     let safe = uninstall_string.replace('\'', "''");
     let script = format!(
@@ -88,12 +90,11 @@ if ($us -imatch '^MsiExec') {{
 
 pub fn scan_leftovers(app_name: String, publisher: String, install_location: String) -> Value {
     let safe_name = app_name.replace('\'', "''");
-    let safe_pub = publisher.replace('\'', "''");
+    let _ = publisher;
     let safe_loc = install_location.replace('\'', "''");
     let script = format!(
         r#"
 $name = '{safe_name}'
-$pub  = '{safe_pub}'
 $loc  = '{safe_loc}'
 $found = @()
 $seen  = @{{}}
@@ -104,9 +105,8 @@ function Add($type, $path) {{
     $script:found += [PSCustomObject]@{{ type=$type; path=$path }}
 }}
 
-# Keywords to search for
+# Search exact app folders, not all folders of the same publisher.
 $kws = @($name)
-if ($pub -and $pub -ne '') {{ $kws += $pub }}
 
 # File system
 $dirs = @($env:APPDATA, $env:LOCALAPPDATA, $env:PROGRAMDATA,
@@ -115,13 +115,13 @@ foreach ($dir in $dirs) {{
     foreach ($kw in $kws) {{
         if ($kw.Length -lt 3) {{ continue }}
         Get-ChildItem $dir -Directory -ErrorAction SilentlyContinue |
-            Where-Object {{ $_.Name -like "*$kw*" }} |
+            Where-Object {{ $_.Name -eq $kw }} |
             ForEach-Object {{ Add 'folder' $_.FullName }}
     }}
 }}
 
 # Install location (if still exists after uninstall)
-if ($loc -and $loc.Length -gt 3 -and (Test-Path $loc)) {{ Add 'folder' $loc }}
+if ($loc -and $loc.Length -gt 3 -and (Test-Path $loc) -and (Split-Path $loc -Leaf) -eq $name) {{ Add 'folder' $loc }}
 
 # Registry
 $regBases = @('HKCU:\Software', 'HKLM:\Software', 'HKLM:\Software\WOW6432Node')
@@ -270,6 +270,7 @@ pub fn clean_leftovers(paths: Vec<String>) -> Result<String, String> {
             // dir, must not be a protected system location, no traversal.
             if !leftover_is_under_base(path)
                 || crate::diskanalyzer::is_protected(std::path::Path::new(path))
+                || crate::diskanalyzer::has_reparse_ancestor(std::path::Path::new(path))
             {
                 errors.push(format!("{path}: refusing unsafe path"));
                 continue;
@@ -295,7 +296,7 @@ pub fn clean_leftovers(paths: Vec<String>) -> Result<String, String> {
     if errors.is_empty() {
         Ok(format!("{cleaned} items removed"))
     } else {
-        Ok(format!(
+        Err(format!(
             "{cleaned} removed, {} failed: {}",
             errors.len(),
             errors.join("; ")

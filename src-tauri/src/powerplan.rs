@@ -12,38 +12,50 @@ pub fn list_plans() -> Value {
     // The * marks the active scheme.
     let script = r#"
 $lines = powercfg /list 2>$null
-$plans = $lines | Where-Object { $_ -match 'GUID:\s+([\w-]+)\s+\((.+?)\)' } | ForEach-Object {
-    [PSCustomObject]@{
-        guid   = $Matches[1].Trim().ToLower()
-        name   = $Matches[2].Trim()
-        active = ($_ -match '\*\s*$')
+$plans = $lines | ForEach-Object {
+    if ($_ -match '([0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12})\s+\((.+?)\)') {
+        [PSCustomObject]@{
+            guid   = $Matches[1].ToLower()
+            name   = $Matches[2].Trim()
+            active = ($_ -match '\*\s*$')
+        }
     }
 }
 if (-not $plans) { '[]' } else { @($plans) | ConvertTo-Json -Compress }
 "#;
 
-    let plans = match ps::run_json(script) {
+    let mut plans = match ps::run_json(script) {
         Ok(v @ Value::Array(_)) => v,
         Ok(v @ Value::Object(_)) => Value::Array(vec![v]),
-        _ => Value::Array(vec![]),
+        Ok(_) => {
+            return json!({ "error": "Power plan list returned an unexpected shape", "plans": [] })
+        }
+        Err(error) => return json!({ "error": error, "plans": [] }),
     };
 
-    let has_ultimate = plans
-        .as_array()
-        .map(|arr| {
-            arr.iter().any(|p| {
-                p["guid"]
-                    .as_str()
-                    .unwrap_or("")
-                    .contains(&ULTIMATE_GUID[..8])
-            })
+    let ultimate = plans.as_array().and_then(|arr| {
+        arr.iter().find(|p| {
+            let name = p["name"].as_str().unwrap_or("").to_lowercase();
+            p["guid"].as_str() == Some(ULTIMATE_GUID)
+                || name.contains("ultimate performance")
+                || name.contains("ultimative leistung")
         })
-        .unwrap_or(false);
+    });
+    let ultimate_available = ultimate.is_some();
+    let ultimate_guid = ultimate
+        .and_then(|p| p["guid"].as_str())
+        .unwrap_or(ULTIMATE_GUID)
+        .to_string();
+    if let Some(arr) = plans.as_array_mut() {
+        for plan in arr {
+            plan["isUltimate"] = json!(plan["guid"].as_str() == Some(ultimate_guid.as_str()));
+        }
+    }
 
     json!({
         "plans": plans,
-        "ultimateAvailable": has_ultimate,
-        "ultimateGuid": ULTIMATE_GUID,
+        "ultimateAvailable": ultimate_available,
+        "ultimateGuid": ultimate_guid,
     })
 }
 
@@ -64,24 +76,49 @@ pub fn set_active(guid: String) -> Result<String, String> {
     if !is_guid(&guid) {
         return Err(format!("Invalid GUID: {guid}"));
     }
-    let out = ps::exec("powercfg.exe", &["/setactive", &guid])?;
-    let _ = out; // powercfg outputs nothing on success
+    ps::exec("powercfg.exe", &["/setactive", &guid])?;
+    let plans = list_plans();
+    if let Some(error) = plans["error"].as_str() {
+        return Err(format!("Cannot verify active power plan: {error}"));
+    }
+    let active = plans["plans"].as_array().is_some_and(|entries| {
+        entries.iter().any(|entry| {
+            entry["guid"].as_str() == Some(guid.to_lowercase().as_str()) && entry["active"] == true
+        })
+    });
+    if !active {
+        return Err(format!("Power plan {guid} was not active after /setactive"));
+    }
     Ok(format!("Power plan {guid} activated"))
 }
 
 pub fn unlock_ultimate() -> Result<String, String> {
-    let script = format!(
-        r#"
-$existing = powercfg /list 2>$null | Where-Object {{ $_ -match '{ULTIMATE_GUID}' }}
-if ($existing) {{
-    "Ultimate Performance plan is already available"
-}} else {{
-    powercfg /duplicatescheme {ULTIMATE_GUID} 2>&1
-    "Ultimate Performance plan unlocked, restart powercfg to see it"
-}}
-"#
-    );
-    ps::run(&script).map(|s| s.trim().to_string())
+    let existing = list_plans();
+    if let Some(error) = existing["error"].as_str() {
+        return Err(format!("Cannot inspect power plans: {error}"));
+    }
+    if existing["ultimateAvailable"] == true {
+        let guid = existing["ultimateGuid"]
+            .as_str()
+            .ok_or("Ultimate plan GUID missing")?;
+        set_active(guid.to_string())?;
+        return Ok("Ultimate Performance plan activated".into());
+    }
+    let output = ps::exec("powercfg.exe", &["/duplicatescheme", ULTIMATE_GUID])?;
+    let created = list_plans();
+    if let Some(error) = created["error"].as_str() {
+        return Err(format!("Cannot verify created power plan: {error}"));
+    }
+    let guid = created["ultimateGuid"]
+        .as_str()
+        .ok_or_else(|| format!("Ultimate plan not found after creation: {output}"))?;
+    if created["ultimateAvailable"] != true {
+        return Err(format!("Ultimate plan not found after creation: {output}"));
+    }
+    set_active(guid.to_string())?;
+    Ok(format!(
+        "Ultimate Performance plan created and activated: {guid}"
+    ))
 }
 
 pub fn delete_plan(guid: String) -> Result<String, String> {
@@ -95,6 +132,15 @@ pub fn delete_plan(guid: String) -> Result<String, String> {
     let g = guid.to_lowercase();
     if builtin.contains(&g.as_str()) {
         return Err("Cannot delete a built-in power plan.".into());
+    }
+    let plans = list_plans();
+    if let Some(error) = plans["error"].as_str() {
+        return Err(format!(
+            "Cannot verify power plan type before deletion: {error}"
+        ));
+    }
+    if plans["ultimateGuid"].as_str() == Some(g.as_str()) && plans["ultimateAvailable"] == true {
+        return Err("Cannot delete the Ultimate Performance plan.".into());
     }
     ps::exec("powercfg.exe", &["/delete", &guid]).map(|_| format!("Plan {guid} deleted"))
 }
@@ -118,7 +164,7 @@ pub fn create_custom(name: String, base_guid: String) -> Result<String, String> 
     let script = format!(
         r#"
 $out = powercfg /duplicatescheme {base_guid} 2>&1
-if ($out -match 'GUID:\s+([\w-]+)') {{
+if ($out -match '([0-9a-fA-F]{{8}}(?:-[0-9a-fA-F]{{4}}){{3}}-[0-9a-fA-F]{{12}})') {{
     $newGuid = $Matches[1].Trim()
     powercfg /changename $newGuid "{name}" 2>$null
     "Created: $newGuid"

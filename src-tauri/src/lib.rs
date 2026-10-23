@@ -388,7 +388,9 @@ async fn cmd_proc_priority(pid: u32, priority: String) -> Result<Value, String> 
 #[tauri::command(async)]
 async fn cmd_proc_affinity(pid: u32, mask: String) -> Result<Value, String> {
     // Decimal string: 64-bit masks exceed JS number precision (>2^53).
-    let mask: u64 = mask.parse().map_err(|_| "invalid affinity mask".to_string())?;
+    let mask: u64 = mask
+        .parse()
+        .map_err(|_| "invalid affinity mask".to_string())?;
     tauri::async_runtime::spawn_blocking(move || procmgr::set_affinity(pid, mask))
         .await
         .map_err(|_| "process task panicked".to_string())?
@@ -752,7 +754,10 @@ async fn cmd_uninstaller_list() -> Value {
 }
 
 #[tauri::command(async)]
-async fn cmd_uninstall_app(uninstall_string: String, from_hkcu: Option<bool>) -> Result<String, String> {
+async fn cmd_uninstall_app(
+    uninstall_string: String,
+    from_hkcu: Option<bool>,
+) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
         uninstaller::uninstall_app(uninstall_string, from_hkcu.unwrap_or(false))
     })
@@ -990,6 +995,12 @@ fn validate_open_path(path: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::validate_open_path;
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn debug_launch_skips_admin_relaunch() {
+        assert!(!super::should_auto_elevate());
+    }
 
     #[test]
     fn open_path_accepts_urls_and_abs_paths() {
@@ -1276,6 +1287,10 @@ async fn cmd_defender_set_cloud(enabled: bool) -> Result<String, String> {
         .map_err(|_| "defender task panicked".to_string())?
 }
 
+const fn should_auto_elevate() -> bool {
+    !cfg!(debug_assertions)
+}
+
 fn ensure_admin() {
     #[cfg(windows)]
     {
@@ -1341,7 +1356,9 @@ fn ensure_admin() {
 }
 
 pub fn run() {
-    ensure_admin();
+    if should_auto_elevate() {
+        ensure_admin();
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())

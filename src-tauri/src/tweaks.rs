@@ -1034,11 +1034,13 @@ fn hive(root: &str) -> RegKey {
 }
 
 #[cfg(windows)]
-fn reg_read(root: &str, path: &str, name: &str) -> Result<Option<RegVal>, String> {
+pub(crate) fn reg_read(root: &str, path: &str, name: &str) -> Result<Option<RegVal>, String> {
     use winreg::enums::RegType;
-    let key = hive(root)
-        .open_subkey_with_flags(path, KEY_READ)
-        .map_err(|e| format!("open {root}\\{path}: {e}"))?;
+    let key = match hive(root).open_subkey_with_flags(path, KEY_READ) {
+        Ok(key) => key,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(format!("open {root}\\{path}: {e}")),
+    };
     match key.get_raw_value(name) {
         Ok(rv) => match rv.vtype {
             RegType::REG_DWORD => {
@@ -1106,9 +1108,11 @@ fn reg_write(root: &str, path: &str, name: &str, val: &RegVal) -> Result<(), Str
 
 #[cfg(windows)]
 fn reg_delete(root: &str, path: &str, name: &str) -> Result<(), String> {
-    let key = hive(root)
-        .open_subkey_with_flags(path, KEY_READ | KEY_SET_VALUE)
-        .map_err(|e| format!("open {root}\\{path}: {e}"))?;
+    let key = match hive(root).open_subkey_with_flags(path, KEY_READ | KEY_SET_VALUE) {
+        Ok(key) => key,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(format!("open {root}/{path}: {error}")),
+    };
     key.delete_value(name).or_else(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
             Ok(()) // already absent: idempotent undo
@@ -1193,7 +1197,7 @@ fn vals_eq(a: &RegVal, b: &RegVal) -> bool {
 /// running between an apply's capture and its mutations marks the entry
 /// reverted while the mutations still land afterwards.
 static ENGINE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-fn engine_guard() -> Result<std::sync::MutexGuard<'static, ()>, String> {
+pub(crate) fn engine_guard() -> Result<std::sync::MutexGuard<'static, ()>, String> {
     ENGINE_LOCK.lock().map_err(|e| format!("engine lock: {e}"))
 }
 
@@ -1220,6 +1224,41 @@ fn service_default(name: &str) -> Option<&'static str> {
     }
 }
 
+fn may_help_performance(id: &str) -> bool {
+    matches!(
+        id,
+        "power_high_performance"
+            | "game_dvr_off"
+            | "mmcss_gaming"
+            | "startup_delay_off"
+            | "visual_fx_performance"
+            | "sysmain_off"
+            | "background_apps_off"
+            | "game_mode_on"
+            | "fse_optimizations_off"
+            | "hags_on"
+            | "priority_separation"
+            | "power_throttling_off"
+            | "mmcss_games_task"
+            | "mpo_off"
+            | "transparency_off"
+            | "min_animate_off"
+            | "widgets_off"
+            | "usb_suspend_off"
+            | "core_parking_off"
+            | "ntfs_last_access_off"
+            | "ntfs_8dot3_off"
+            | "xbox_services_off"
+            | "edge_prelaunch_off"
+            | "svc_maps_off"
+            | "svc_diag_tracking_off"
+            | "wsearch_manual"
+            | "nagle_off"
+            | "tcp_autotuning_normal"
+            | "net_rss_on"
+    )
+}
+
 /// Catalog + live status, ready for the UI.
 pub fn list_with_status() -> Value {
     // Display-only path: a broken journal degrades to "no undo entries"
@@ -1233,6 +1272,9 @@ pub fn list_with_status() -> Value {
             // as applied/undoable.
             let undoable = journal
                 .iter()
+                .any(|e| e.tweak_id == t.id && !e.reverted && (e.completed || e.attempted > 0));
+            let completed = journal
+                .iter()
                 .any(|e| e.tweak_id == t.id && !e.reverted && e.completed);
             // Cmd-only tweaks (powercfg/fsutil/netsh one-shots) have no live
             // state detect_status() can read back, so it always returns
@@ -1240,7 +1282,7 @@ pub fn list_with_status() -> Value {
             // apply means it IS applied, even though we can't re-verify it.
             let live = detect_status(t);
             let status = match live {
-                "unknown" if undoable => "applied",
+                "unknown" if completed => "applied",
                 s => s,
             };
             // canUndo: true when we have a journal entry (precise restore with
@@ -1253,6 +1295,7 @@ pub fn list_with_status() -> Value {
                 "id": t.id, "name": t.name, "category": t.category,
                 "description": t.description, "rationale": t.rationale,
                 "impact": t.impact, "risk": t.risk,
+                "performancePotential": may_help_performance(t.id),
                 "requiresAdmin": t.requires_admin, "reversible": t.reversible,
                 "status": status, "undoable": undoable, "canUndo": can_undo,
             })
@@ -1406,6 +1449,7 @@ pub fn apply(tweak_id: &str) -> Result<Value, String> {
         id: entry_id,
         tweak_id: t.id.to_string(),
         tweak_name: t.name.to_string(),
+        origin: None,
         time: chrono::Local::now().to_rfc3339(),
         items: items.clone(),
         reverted: false,
@@ -1421,43 +1465,32 @@ pub fn apply(tweak_id: &str) -> Result<Value, String> {
     //    the rollback fully succeeded; otherwise it stays open so the UI can
     //    offer a retry.
     for (idx, item) in items.iter().enumerate() {
-        if let Err(e) = apply_item(item) {
-            let mut rollback_errs = Vec::new();
-            for d in items[..=idx].iter().rev() {
-                if let Err(re) = revert_item(d) {
-                    rollback_errs.push(re);
-                }
-            }
-            if rollback_errs.is_empty() {
-                let _ = safety::with_journal(|j| {
-                    if let Some(en) = j.iter_mut().find(|en| en.id == entry_id) {
-                        en.reverted = true;
-                    }
-                    Ok(())
-                });
-                return Err(format!("apply failed ({e}); all changes were rolled back"));
-            }
-            return Err(format!(
-                "apply failed ({e}); ROLLBACK INCOMPLETE: {} step(s) could not be \
-                 reverted ({}) — the journal entry stays open, use Undo to retry",
-                rollback_errs.len(),
-                rollback_errs.join("; ")
-            ));
-        }
-        let _ = safety::with_journal(|j| {
-            if let Some(en) = j.iter_mut().find(|en| en.id == entry_id) {
-                en.attempted = idx + 1;
-            }
+        safety::with_journal(|j| {
+            let en = j
+                .iter_mut()
+                .find(|en| en.id == entry_id)
+                .ok_or("journal entry missing")?;
+            en.attempted = idx + 1;
             Ok(())
-        });
+        })?;
+        if let Err(e) = apply_item(item) {
+            return match rollback_entry_items(&entry_id, &items[..=idx]) {
+                Ok(()) => Err(format!("apply failed ({e}); all changes were rolled back")),
+                Err(re) => Err(format!(
+                    "apply failed ({e}); rollback incomplete ({re}); restore token: {entry_id}"
+                )),
+            };
+        }
     }
 
-    let _ = safety::with_journal(|j| {
-        if let Some(en) = j.iter_mut().find(|en| en.id == entry_id) {
-            en.completed = true;
-        }
+    safety::with_journal(|j| {
+        let en = j
+            .iter_mut()
+            .find(|en| en.id == entry_id)
+            .ok_or("journal entry missing")?;
+        en.completed = true;
         Ok(())
-    });
+    })?;
 
     Ok(json!({ "entryId": entry_id, "status": "applied" }))
 }
@@ -1501,6 +1534,29 @@ pub(crate) fn revert_item(item: &ChangeItem) -> Result<(), String> {
     }
 }
 
+/// Record each successful reverse step so a later Undo resumes after a partial rollback.
+pub(crate) fn rollback_entry_items(entry_id: &str, items: &[ChangeItem]) -> Result<(), String> {
+    for item in items.iter().rev() {
+        revert_item(item)?;
+        safety::with_journal(|journal| {
+            let entry = journal
+                .iter_mut()
+                .find(|entry| entry.id == entry_id)
+                .ok_or("journal entry missing")?;
+            entry.reverted_items += 1;
+            Ok(())
+        })?;
+    }
+    safety::with_journal(|journal| {
+        let entry = journal
+            .iter_mut()
+            .find(|entry| entry.id == entry_id)
+            .ok_or("journal entry missing")?;
+        entry.reverted = true;
+        Ok(())
+    })
+}
+
 /// Undo the most recent non-reverted journal entry for a tweak.
 /// If no journal entry exists but the tweak is currently active (detected via
 /// live registry / service state), falls back to a synthesized force-revert:
@@ -1519,32 +1575,22 @@ pub fn revert(tweak_id: &str) -> Result<Value, String> {
         let entry = match journal
             .iter_mut()
             .rev()
-            .find(|e| e.tweak_id == tweak_id && !e.reverted && e.completed)
+            .find(|e| e.tweak_id == tweak_id && !e.reverted)
         {
             Some(e) => e,
-            // Incomplete (interrupted) entries are deliberately skipped: their
-            // apply never finished, so undoing them wholesale would touch
-            // actions that were never attempted. The force-revert path below
-            // handles whatever actually landed, driven by live state.
             None => return Ok(None),
         };
         // Resume semantics: reverted_items counts already-restored entries
         // from the END of the list, so a retry continues exactly where the
         // previous attempt stopped instead of re-running finished steps.
-        let already = entry.reverted_items.min(entry.items.len());
-        let stop = entry.items.len() - already;
-        let mut errs = Vec::new();
+        let attempted = entry.attempted.min(entry.items.len());
+        let already = entry.reverted_items.min(attempted);
+        let stop = attempted - already;
         for offset in (0..stop).rev() {
             match revert_item(&entry.items[offset]) {
                 Ok(()) => entry.reverted_items += 1,
-                Err(e) => errs.push(e),
+                Err(e) => return Err(format!("partial revert: {e} — retry to resume")),
             }
-        }
-        if !errs.is_empty() {
-            return Err(format!(
-                "partial revert, errors: {} — retry to resume the remaining steps",
-                errs.join("; ")
-            ));
         }
         entry.reverted = true;
         Ok(Some(entry.id.clone()))
@@ -1650,18 +1696,11 @@ pub fn revert_entry(entry_id: &str) -> Result<Value, String> {
         let attempted = entry.attempted.min(entry.items.len());
         let already = entry.reverted_items.min(attempted);
         let stop = attempted - already;
-        let mut errs = Vec::new();
         for offset in (0..stop).rev() {
             match revert_item(&entry.items[offset]) {
                 Ok(()) => entry.reverted_items += 1,
-                Err(e) => errs.push(e),
+                Err(e) => return Err(format!("partial revert: {e} — retry to resume")),
             }
-        }
-        if !errs.is_empty() {
-            return Err(format!(
-                "partial revert, errors: {} — retry to resume the remaining steps",
-                errs.join("; ")
-            ));
         }
         entry.reverted = true;
         Ok(entry.id.clone())
@@ -1678,6 +1717,15 @@ pub fn history() -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn performance_candidates_exclude_bonus_only_tweaks() {
+        assert!(may_help_performance("mmcss_gaming"));
+        assert!(may_help_performance("game_dvr_off"));
+        assert!(!may_help_performance("qos_bandwidth_free"));
+        assert!(!may_help_performance("advertising_id_off"));
+        assert!(!may_help_performance("disable_paging_executive"));
+    }
 
     #[test]
     fn power_scheme_guid_is_extracted_locale_independent() {

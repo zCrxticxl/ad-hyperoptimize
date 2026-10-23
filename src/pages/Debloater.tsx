@@ -41,6 +41,7 @@ const RECOMMENDED_BLOAT = [
 ];
 
 type Tweak = { id: string; name: string; desc: string; cat: string; applied: boolean };
+type OptionalApp = { Name: string; PackageFullName: string | null; provisioned: boolean };
 
 function ProgressBar({ done, total }: { done: number; total: number }) {
   const pct = total ? Math.round((done / total) * 100) : 0;
@@ -60,7 +61,10 @@ export default function Debloater({ admin, focusId }: { admin: boolean; focusId?
   const [busy, setBusy]           = useState<Record<string, boolean>>({});
   const [log, setLog]             = useState<{ msg: string; ok: boolean } | null>(null);
   const [applyingAll, setApplyingAll] = useState(false);
-  const [selBloat, setSelBloat]   = useState<Set<string>>(new Set(RECOMMENDED_BLOAT));
+  const [selBloat, setSelBloat]   = useState<Set<string>>(new Set());
+  const [uwpApps, setUwpApps] = useState<OptionalApp[]>([]);
+  const [uwpLoading, setUwpLoading] = useState(true);
+  const [uwpError, setUwpError] = useState("");
   const [removingBloat, setRemovingBloat] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [bloatLog, setBloatLog]   = useState("");
@@ -68,7 +72,20 @@ export default function Debloater({ admin, focusId }: { admin: boolean; focusId?
 
   useEffect(() => {
     refresh();
+    refreshUwp();
   }, []);
+
+  const refreshUwp = () => {
+    setUwpLoading(true);
+    setUwpError("");
+    api.debloaterUwpList()
+      .then(d => {
+        if (d?.error) throw new Error(String(d.error));
+        setUwpApps(d?.apps ?? []);
+      })
+      .catch((e: unknown) => setUwpError(String(e)))
+      .finally(() => setUwpLoading(false));
+  };
 
   const refresh = () => {
     setLoading(true);
@@ -140,12 +157,21 @@ export default function Debloater({ admin, focusId }: { admin: boolean; focusId?
     setRemovingBloat(true); setBloatLog(""); setConfirmRemove(false);
     let removed = 0, failed = 0;
     for (const name of selBloat) {
-      try { await api.debloaterRemoveProvisioned(name); removed++; } catch { failed++; }
+      const app = uwpApps.find(a => a.Name === name);
+      if (!app) continue;
+      try {
+        if (app.PackageFullName) await api.debloaterRemoveUwp(app.PackageFullName);
+        if (app.provisioned) await api.debloaterRemoveProvisioned(name);
+        removed++;
+      } catch { failed++; }
     }
     setRemovingBloat(false);
+    setSelBloat(new Set());
+    refreshUwp();
     setBloatLog(`${t("debloatRemovedN")} ${removed} ${removed !== 1 ? t("debloatAppsWord") : t("debloatAppWord")}${failed ? `, ${failed} ${t("debloatSkipped")}` : ""}.`);
   };
 
+  const availableBloat = BLOAT_PACKAGES.filter(b => uwpApps.some(a => a.Name === b.name));
   const CAT_ORDER = ["Telemetry", "Ads & Clutter", "Privacy", "Gaming"];
   const byCategory = tweaks.reduce<Record<string, Tweak[]>>((acc, t) => { (acc[t.cat] ??= []).push(t); return acc; }, {});
   const sortedCategories = CAT_ORDER.filter(c => byCategory[c]).concat(Object.keys(byCategory).filter(c => !CAT_ORDER.includes(c)));
@@ -242,9 +268,12 @@ export default function Debloater({ admin, focusId }: { admin: boolean; focusId?
           <div style={{ flex: 1, borderBottom: "1px solid var(--border)" }} />
         </div>
         <div className="muted" style={{ fontSize: 12, marginBottom: 12 }}>{t("debloatPreselectedNote")}</div>
+        {uwpLoading && <Spinner />}
+        {uwpError && <div style={{ color: "var(--red)", marginBottom: 10 }}>{uwpError}</div>}
+        {!uwpLoading && !uwpError && availableBloat.length === 0 && <div className="muted">{t("debloatNothingLeft")}</div>}
 
         {["3rd Party", "Microsoft", "Xbox"].map(grp => {
-          const items = BLOAT_PACKAGES.filter(b => b.cat === grp);
+          const items = availableBloat.filter(b => b.cat === grp);
           if (!items.length) return null;
           return (
             <div key={grp} style={{ marginBottom: 12 }}>
@@ -278,8 +307,8 @@ export default function Debloater({ admin, focusId }: { admin: boolean; focusId?
               <button className="btn small ghost" onClick={() => setConfirmRemove(false)} disabled={removingBloat}>{t("cancel")}</button>
             </>
           )}
-          <button className="btn small ghost" onClick={() => setSelBloat(new Set(RECOMMENDED_BLOAT))}>{t("debloatReset")}</button>
-          <button className="btn small ghost" onClick={() => setSelBloat(new Set(BLOAT_PACKAGES.map(b => b.name)))}>{t("debloatAll")}</button>
+          <button className="btn small ghost" onClick={() => setSelBloat(new Set(availableBloat.filter(b => RECOMMENDED_BLOAT.includes(b.name)).map(b => b.name)))}>{t("debloatReset")}</button>
+          <button className="btn small ghost" onClick={() => setSelBloat(new Set(availableBloat.map(b => b.name)))}>{t("debloatAll")}</button>
           <button className="btn small ghost" onClick={() => setSelBloat(new Set())}>{t("debloatNone")}</button>
         </div>
         {bloatLog && <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>{bloatLog}</div>}

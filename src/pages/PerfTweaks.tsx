@@ -200,13 +200,6 @@ function NetCard({ admin }: { admin: boolean }) {
     finally { setBusy(false); }
   };
 
-  const allGaming = async () => {
-    setBusy(true);
-    try { setLog(await api.netTweakAllGaming()); await load(); }
-    catch (e: any) { setLog(String(e)); }
-    finally { setBusy(false); }
-  };
-
   const resetAll = async () => {
     if (!window.confirm(t("perfNetResetConfirm"))) return;
     setBusy(true);
@@ -267,9 +260,6 @@ function NetCard({ admin }: { admin: boolean }) {
           ))}
           {!admin && <div className="muted" style={{ fontSize: 12 }}>⚠ {t("perfAdminRequired")}</div>}
           <div className="row" style={{ gap: 8, marginTop: 10 }}>
-            <button className="btn small" onClick={allGaming} disabled={busy || !admin}>
-              ⚡ {t("perfNetDisableAllGaming")}
-            </button>
             <button className="btn small ghost" onClick={resetAll} disabled={busy || !admin}>
               ↩ {t("perfNetResetAllDefaults")}
             </button>

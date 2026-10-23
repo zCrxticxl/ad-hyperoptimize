@@ -61,9 +61,9 @@ export const buildNav: NavBuilder = (t) => [
     { id: "optimize", icon: "🎚️", label: t("navOptimize"), desc: t("toolDescOptimize"), basic: true, keywords: "tweaks fps speed schneller performance" },
     { id: "gameboost", icon: "🎮", label: t("navGameBoost"), desc: t("toolDescGameBoost"), basic: true, keywords: "gaming fps games spiele boost" },
     { id: "powerplan", icon: "🔌", label: t("navPowerPlan"), desc: t("toolDescPowerPlan"), basic: true, keywords: "power energy energie plan cpu" },
-    { id: "perftweaks", icon: "⚙️", label: t("navPerfTweaks"), desc: t("toolDescPerfTweaks"), keywords: "advanced tweaks timer mmcss" },
+    { id: "perftweaks", icon: "⚙️", label: t("navPerfTweaks"), desc: t("toolDescPerfTweaks"), basic: true, keywords: "advanced tweaks timer mmcss" },
     { id: "latency", icon: "📉", label: t("navLatency"), desc: t("toolDescLatency"), keywords: "latency dpc ping input lag" },
-    { id: "gputweaks", icon: "🖼️", label: t("navGpuTweaks"), desc: t("toolDescGpuTweaks"), keywords: "gpu graphics grafik nvidia amd" },
+    { id: "gputweaks", icon: "🖼️", label: t("navGpuTweaks"), desc: t("toolDescGpuTweaks"), basic: true, keywords: "gpu graphics grafik nvidia amd" },
     { id: "nvcontrol", icon: "🎛️", label: t("navNvControl"), desc: t("toolDescNvControl"), keywords: "nvidia driver control panel" },
     { id: "profiles", icon: "📁", label: t("navProfiles"), desc: t("toolDescProfiles"), keywords: "profile preset" },
     { id: "gameprofiles", icon: "🕹️", label: t("navGameProfiles"), desc: t("toolDescGameProfiles"), keywords: "game profile per-game" },
@@ -72,7 +72,7 @@ export const buildNav: NavBuilder = (t) => [
     { id: "cleanup", icon: "🧼", label: t("navCleanup"), desc: t("toolDescCleanup"), basic: true, keywords: "clean temp cache junk speicher aufräumen" },
     { id: "uninstaller", icon: "🗑️", label: t("navUninstaller"), desc: t("toolDescUninstaller"), basic: true, keywords: "uninstall remove apps programme deinstallieren" },
     { id: "diskanalyzer", icon: "💾", label: t("navDiskAnalyzer"), desc: t("toolDescDiskAnalyzer"), keywords: "disk space storage speicherplatz" },
-    { id: "debloater", icon: "📦", label: t("navDebloater"), desc: t("toolDescDebloater"), keywords: "bloat debloat remove windows apps" },
+    { id: "debloater", icon: "📦", label: t("navDebloater"), desc: t("toolDescDebloater"), basic: true, keywords: "bloat debloat remove windows apps" },
     { id: "regclean", icon: "🗂️", label: t("navRegClean"), desc: t("toolDescRegClean"), keywords: "registry regedit" },
     { id: "ctxmenu", icon: "🖱️", label: t("navCtxMenu"), desc: t("toolDescCtxMenu"), keywords: "context menu rechtsklick explorer" },
   ] },
@@ -86,9 +86,9 @@ export const buildNav: NavBuilder = (t) => [
     { id: "monitor", icon: "📈", label: t("navMonitor"), desc: t("toolDescMonitor"), basic: true, keywords: "monitor live metrics usage auslastung" },
     { id: "hwmonitor", icon: "🌡️", label: t("navHwMonitor"), desc: t("toolDescHwMonitor"), keywords: "sensors temps temperature lüfter fans" },
     { id: "processes", icon: "📑", label: t("navProcesses"), desc: t("toolDescProcesses"), keywords: "processes tasks task manager prozesse" },
-    { id: "startup", icon: "🚦", label: t("navStartup"), desc: t("toolDescStartup"), keywords: "startup autostart boot" },
-    { id: "services", icon: "🔧", label: t("navServices"), desc: t("toolDescServices"), keywords: "services dienste" },
-    { id: "schedtasks", icon: "⏰", label: t("navSchedTasks"), desc: t("toolDescSchedTasks"), keywords: "scheduled tasks aufgaben" },
+    { id: "startup", icon: "🚦", label: t("navStartup"), desc: t("toolDescStartup"), basic: true, keywords: "startup autostart boot" },
+    { id: "services", icon: "🔧", label: t("navServices"), desc: t("toolDescServices"), basic: true, keywords: "services dienste" },
+    { id: "schedtasks", icon: "⏰", label: t("navSchedTasks"), desc: t("toolDescSchedTasks"), basic: true, keywords: "scheduled tasks aufgaben" },
     { id: "drivers", icon: "💿", label: t("navDrivers"), desc: t("toolDescDrivers"), keywords: "drivers treiber" },
     { id: "bootopt", icon: "🥾", label: t("navBootOpt"), desc: t("toolDescBootOpt"), keywords: "boot startup time bootzeit" },
     { id: "updates", icon: "🔄", label: t("navUpdates"), desc: t("toolDescUpdates"), basic: true, keywords: "update upgrade version aktualisieren" },
@@ -337,6 +337,13 @@ function AppInner() {
   const activeGroup = route.kind === "category" ? nav.find((g) => g.id === route.id) : undefined;
   const activeTool = route.kind === "tool" ? findTool(route.id) : undefined;
   const activeToolGroup = route.kind === "tool" ? findGroupOf(route.id) : undefined;
+  const featuredTools = (["optimize", "powerplan", "perftweaks", "gputweaks", "privacy", "startup", "services", "schedtasks"] as const)
+    .map((id) => findTool(id))
+    .filter((item): item is NavItem => item !== undefined && allowedByMode(item));
+  const recentTools = recents.filter((id) => {
+    const item = findTool(id);
+    return item !== undefined && allowedByMode(item) && !featuredTools.some((featured) => featured.id === id);
+  });
 
   return (
     <div className="shell">
@@ -360,7 +367,7 @@ function AppInner() {
         <div className="topbar-search">
           <span aria-hidden="true">⌕</span>
           <input ref={searchRef} value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("navSearchTools")} aria-label={t("navSearchTools")} />
-          {query && <button className="topbar-search-clear" onClick={() => setQuery("")} aria-label="Clear search">×</button>}
+          {query && <button className="topbar-search-clear" onClick={() => setQuery("")} aria-label={t("navSearchClear")}>×</button>}
         </div>
 
         <div className="topbar-right">
@@ -428,16 +435,28 @@ function AppInner() {
                 <h1>{t("homeTitle")}</h1>
                 <p>{t("homeSub")}</p>
               </div>
-              <button className="btn big" onClick={() => openTool("autoopt")}><span aria-hidden="true">⚡</span> {t("navAutoOpt")}</button>
             </div>
 
-            {recents.length > 0 && (
+            <section className="home-featured" aria-labelledby="home-focus-title">
+              <div className="home-section-head"><h2 id="home-focus-title">{t("homeFocus")}</h2></div>
+              <div className="home-featured-grid">
+                {featuredTools.map((item, index) => (
+                  <button key={item.id} className="home-featured-card" onClick={() => openTool(item.id)}>
+                    <span className="home-featured-number" aria-hidden="true">0{index + 1}</span>
+                    <span className="home-featured-copy"><b>{item.label}</b><span>{item.desc}</span></span>
+                    <span className="home-featured-arrow" aria-hidden="true">→</span>
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            {recentTools.length > 0 && (
               <>
                 <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".1em", color: "var(--muted)", margin: "6px 0 10px" }}>
                   🕘 {t("homeRecents")}
                 </div>
                 <div className="tool-grid" style={{ marginBottom: 22 }}>
-                  {recents.map((id) => {
+                  {recentTools.map((id) => {
                     const item = findTool(id);
                     if (!item || !allowedByMode(item)) return null;
                     return (
@@ -452,6 +471,7 @@ function AppInner() {
               </>
             )}
 
+            <div className="home-section-head"><h2>{t("homeAllAreas")}</h2></div>
             <div className="category-grid">
               {visibleGroups.map((g) => (
                 <button key={g.id} className={`category-card accent-${g.accent}`} onClick={() => openCategory(g.id)}>

@@ -156,20 +156,6 @@ fn is_valid_exe_name(exe: &str) -> bool {
         && ps::is_safe_ident(exe)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::is_valid_exe_name;
-
-    #[test]
-    fn exe_name_validation() {
-        assert!(is_valid_exe_name("chrome.exe"));
-        assert!(is_valid_exe_name("My App (x64).exe"));
-        assert!(is_valid_exe_name("CHROME.EXE"));
-        assert!(is_valid_exe_name("evil.exe.exe.exe"));
-        assert!(!is_valid_exe_name(""));
-    }
-}
-
 /// All exes with a permanent CpuPriorityClass override.
 pub fn perm_list() -> Value {
     #[cfg(windows)]
@@ -245,5 +231,19 @@ pub fn perm_remove(exe: String) -> Result<Value, String> {
     {
         let _ = exe;
         Err("Windows only".into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_valid_exe_name;
+
+    #[test]
+    fn exe_name_validation() {
+        assert!(is_valid_exe_name("chrome.exe"));
+        assert!(is_valid_exe_name("My App (x64).exe"));
+        assert!(is_valid_exe_name("CHROME.EXE"));
+        assert!(is_valid_exe_name("evil.exe.exe.exe"));
+        assert!(!is_valid_exe_name(""));
     }
 }

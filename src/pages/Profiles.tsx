@@ -101,7 +101,7 @@ export default function Profiles() {
                   {t("profilesApply")}
                 </button>
               )}
-              {p.appliedCount > 0 && (
+              {p.ownedCount > 0 && (
                 <button
                   className="btn small ghost"
                   disabled={busy}

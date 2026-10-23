@@ -73,6 +73,8 @@ pub struct JournalEntry {
     pub id: String, // unique entry id
     pub tweak_id: String,
     pub tweak_name: String,
+    #[serde(default)]
+    pub origin: Option<String>,
     pub time: String,
     pub items: Vec<ChangeItem>,
     pub reverted: bool,
@@ -133,9 +135,9 @@ pub fn with_journal<R>(
         .lock()
         .map_err(|e| format!("journal lock: {e}"))?;
     let mut j = load_journal()?;
-    let r = f(&mut j)?;
+    let r = f(&mut j);
     save_journal(&j)?;
-    Ok(r)
+    r
 }
 
 /// Appends an entry and returns the ACTUAL stored id: collisions (two applies
@@ -218,23 +220,91 @@ pub fn backup_registry_key(root: &str, path: &str) -> Result<String, String> {
 
 /// Create a System Restore point. Requires admin; Windows throttles creation
 /// to one per 24h by default, surface that as a warning, not a failure.
+#[derive(Debug, PartialEq, Eq)]
+enum RestorePointOutcome {
+    Created { sequence_number: u32 },
+    CoveredByRecent { sequence_number: u32 },
+    Missing,
+}
+
+struct RestorePointObservation {
+    before_sequence: Option<u32>,
+    after_sequence: Option<u32>,
+    after_description: Option<String>,
+    recent_point_exists: bool,
+}
+
+fn classify_restore_point(
+    observation: &RestorePointObservation,
+    description: &str,
+) -> RestorePointOutcome {
+    match observation.after_sequence {
+        Some(sequence_number)
+            if Some(sequence_number) != observation.before_sequence
+                && observation.after_description.as_deref() == Some(description) =>
+        {
+            RestorePointOutcome::Created { sequence_number }
+        }
+        Some(sequence_number)
+            if Some(sequence_number) == observation.before_sequence
+                && observation.recent_point_exists =>
+        {
+            RestorePointOutcome::CoveredByRecent { sequence_number }
+        }
+        _ => RestorePointOutcome::Missing,
+    }
+}
+
+fn newest_restore_point() -> Result<(Option<u32>, Option<String>, bool), String> {
+    let value = ps::run_json(
+        "$p = Get-ComputerRestorePoint -ErrorAction Stop | Sort-Object SequenceNumber -Descending | Select-Object -First 1; \
+         if ($p) { \
+           $recent = try { [Management.ManagementDateTimeConverter]::ToDateTime($p.CreationTime) -ge (Get-Date).AddHours(-24) } catch { $false }; \
+           [PSCustomObject]@{ sequence = [uint32]$p.SequenceNumber; description = [string]$p.Description; recent = [bool]$recent } \
+         } else { [PSCustomObject]@{ sequence = $null; description = $null; recent = $false } }",
+    )?;
+    let sequence = value["sequence"]
+        .as_u64()
+        .and_then(|n| u32::try_from(n).ok());
+    let description = value["description"].as_str().map(str::to_owned);
+    let recent = value["recent"].as_bool().unwrap_or(false);
+    Ok((sequence, description, recent))
+}
+
 pub fn create_restore_point(description: &str) -> Result<String, String> {
     if !ps::is_admin() {
         return Err(
             "Administrator rights required for restore points. Restart the app as admin.".into(),
         );
     }
+    let before_sequence = newest_restore_point()?.0;
     // PowerShell doubles '' inside single-quoted strings; stripping changed
     // the user's description text.
     let desc = description.replace('\'', "''");
-    match ps::run(&format!(
+    let result = ps::run(&format!(
         "Checkpoint-Computer -Description '{desc}' -RestorePointType MODIFY_SETTINGS -ErrorAction Stop; 'OK'"
-    )) {
-        Ok(_) => Ok("Restore point created.".into()),
-        Err(e) if e.contains("1440") || e.to_lowercase().contains("already been created") => Ok(
-            "Windows limits restore points to one per 24h, an existing recent point covers you.".into(),
+    ));
+    if let Err(e) = &result {
+        if !e.contains("1440") && !e.to_lowercase().contains("already been created") {
+            return Err(e.clone());
+        }
+    }
+    let (after_sequence, after_description, recent_point_exists) = newest_restore_point()?;
+    let observation = RestorePointObservation {
+        before_sequence,
+        after_sequence,
+        after_description,
+        recent_point_exists,
+    };
+    match classify_restore_point(&observation, description) {
+        RestorePointOutcome::Created { .. } => Ok("Restore point created.".into()),
+        RestorePointOutcome::CoveredByRecent { .. } => Ok(
+            "Windows limits restore points to one per 24h; an existing recent point covers you."
+                .into(),
         ),
-        Err(e) => Err(e),
+        RestorePointOutcome::Missing => {
+            Err("Windows did not create a restore point, and no recent point was found.".into())
+        }
     }
 }
 
@@ -268,4 +338,89 @@ if ($result.ReturnValue -ne 0) {{ throw "DeleteRestorePoint failed (code $($resu
 /// Open Windows System Restore UI (rstrui.exe) for interactive restore.
 pub fn launch_rstrui() -> Result<String, String> {
     ps::run("Start-Process rstrui.exe; 'Opened System Restore'").map(|s| s.trim().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{classify_restore_point, RestorePointObservation, RestorePointOutcome};
+
+    #[test]
+    fn classifies_created_restore_point_when_matching_sequence_changes() {
+        let observation = RestorePointObservation {
+            before_sequence: Some(41),
+            after_sequence: Some(42),
+            after_description: Some("AD HyperOptimize".into()),
+            recent_point_exists: true,
+        };
+
+        let outcome = classify_restore_point(&observation, "AD HyperOptimize");
+
+        assert_eq!(
+            outcome,
+            RestorePointOutcome::Created {
+                sequence_number: 42
+            }
+        );
+    }
+
+    #[test]
+    fn classifies_first_matching_restore_point_as_created() {
+        let observation = RestorePointObservation {
+            before_sequence: None,
+            after_sequence: Some(1),
+            after_description: Some("AD HyperOptimize".into()),
+            recent_point_exists: true,
+        };
+
+        let outcome = classify_restore_point(&observation, "AD HyperOptimize");
+
+        assert_eq!(outcome, RestorePointOutcome::Created { sequence_number: 1 });
+    }
+
+    #[test]
+    fn classifies_unchanged_recent_restore_point_as_throttled() {
+        let observation = RestorePointObservation {
+            before_sequence: Some(42),
+            after_sequence: Some(42),
+            after_description: Some("Windows Update".into()),
+            recent_point_exists: true,
+        };
+
+        let outcome = classify_restore_point(&observation, "AD HyperOptimize");
+
+        assert_eq!(
+            outcome,
+            RestorePointOutcome::CoveredByRecent {
+                sequence_number: 42
+            }
+        );
+    }
+
+    #[test]
+    fn classifies_unchanged_stale_restore_point_as_missing() {
+        let observation = RestorePointObservation {
+            before_sequence: Some(42),
+            after_sequence: Some(42),
+            after_description: Some("Old restore point".into()),
+            recent_point_exists: false,
+        };
+
+        let outcome = classify_restore_point(&observation, "AD HyperOptimize");
+
+        assert_eq!(outcome, RestorePointOutcome::Missing);
+    }
+
+    #[test]
+    fn rejects_sequence_change_from_unrelated_restore_point() {
+        let observation = RestorePointObservation {
+            before_sequence: Some(42),
+            after_sequence: Some(43),
+            after_description: Some("Another application".into()),
+            recent_point_exists: true,
+        };
+
+        let outcome = classify_restore_point(&observation, "AD HyperOptimize");
+
+        assert_eq!(outcome, RestorePointOutcome::Missing);
+    }
 }

@@ -1,7 +1,7 @@
 //! GPU-specific tweak catalog.
 //! Detects primary discrete GPU (NVIDIA / AMD), maps it to the Windows
 //! display-adapter class key, then reads/writes driver-level registry values.
-//! All apply/revert pairs are hardcoded so no journal is needed.
+//! Previous registry and service state is journaled for exact rollback.
 
 use serde_json::{json, Value};
 
@@ -11,9 +11,8 @@ use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ};
 use winreg::RegKey;
 
 #[cfg(windows)]
-use crate::safety::{self, ChangeItem, JournalEntry, RegVal};
-#[cfg(windows)]
-use crate::tweaks;
+use crate::safety::{ChangeItem, JournalEntry, RegVal};
+use crate::{safety, tweaks};
 
 const GPU_CLASS: &str =
     "SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e968-e325-11ce-bfc1-08002be10318}";
@@ -115,10 +114,17 @@ Get-ChildItem $base -ErrorAction SilentlyContinue | ForEach-Object {
         $all += [PSCustomObject]@{ Index=$_.PSChildName; Name=$p.DriverDesc.Trim() }
     }
 }
-$gpu = $all | Where-Object { $_.Name -match 'NVIDIA|GeForce|Quadro' } | Select-Object -First 1
-if (-not $gpu) { $gpu = $all | Where-Object { $_.Name -match 'AMD|Radeon' } | Select-Object -First 1 }
-if (-not $gpu) { $gpu = $all | Where-Object { $_.Name -match 'Intel.*Arc' } | Select-Object -First 1 }
-if (-not $gpu) { $gpu = $all | Where-Object { $_.Name -notmatch 'Microsoft|Basic Display|Remote Desktop' } | Select-Object -First 1 }
+$gpu = $null
+$ambiguous = $false
+foreach ($pattern in @('NVIDIA|GeForce|Quadro', 'AMD|Radeon', 'Intel.*Arc')) {
+    $matches = @($all | Where-Object { $_.Name -match $pattern })
+    if ($matches.Count -gt 1) { $ambiguous = $true; break }
+    if ($matches.Count -eq 1) { $gpu = $matches[0]; break }
+}
+if (-not $gpu -and -not $ambiguous) {
+    $matches = @($all | Where-Object { $_.Name -notmatch 'Microsoft|Basic Display|Remote Desktop' })
+    if ($matches.Count -eq 1) { $gpu = $matches[0] }
+}
 if ($gpu) { $gpu | ConvertTo-Json -Compress } else { '{"Index":"","Name":"Unknown"}' }
 "#;
 
@@ -520,8 +526,10 @@ fn apply_action(_action: &TweakAction, _driver_key: &str, _applying: bool) -> Re
 pub fn scan() -> serde_json::Value {
     let (vendor, gpu_name, driver_key) = detect_gpu();
     let tweaks_data = catalog();
+    let journal = safety::load_journal().unwrap_or_default();
     let tweaks: Vec<serde_json::Value> = tweaks_data
         .iter()
+        .filter(|tw| !matches!(tw.id, "amd_rx_tex_cache" | "dx_shader_cache_unlimited"))
         .map(|tw| {
             let vendor_str = format!("{:?}", vendor).to_lowercase();
             let applicable = tw.vendor == "any" || tw.vendor == vendor_str;
@@ -535,6 +543,9 @@ pub fn scan() -> serde_json::Value {
             } else {
                 "unknown"
             };
+            let can_revert = journal.iter().any(|entry| {
+                entry.tweak_id == format!("gpu:{}", tw.id) && entry.completed && !entry.reverted
+            });
             serde_json::json!({
                 "id":              tw.id,
                 "name":            tw.name,
@@ -547,6 +558,7 @@ pub fn scan() -> serde_json::Value {
                 "status":          status,
                 "applicable":      applicable,
                 "driverKeyMissing": driver_key_missing,
+                "canRevert": can_revert,
             })
         })
         .collect();
@@ -560,30 +572,121 @@ pub fn scan() -> serde_json::Value {
 }
 
 pub fn do_tweak(id: String, driver_key: String, applying: bool) -> Result<String, String> {
-    let tweaks = catalog();
-    for tw in &tweaks {
-        if tw.id == id {
-            // driver_key arrives from the renderer; it must stay inside the
-            // display-adapter class key or arbitrary HKLM keys could be
-            // created by reg_write_dword.
-            let needs_driver_key = tw
-                .actions
-                .iter()
-                .any(|a| matches!(a, TweakAction::DriverReg { .. }));
-            if needs_driver_key && !is_valid_driver_key(&driver_key) {
-                return Err("Invalid GPU driver registry key".into());
-            }
-            for action in &tw.actions {
-                apply_action(action, &driver_key, applying)?;
-            }
-            return Ok(format!(
-                "{} {}",
-                if applying { "Applied" } else { "Reverted" },
-                tw.name
-            ));
-        }
+    if matches!(
+        id.as_str(),
+        "amd_rx_tex_cache" | "dx_shader_cache_unlimited"
+    ) {
+        return Err("GPU tweak has no verified effect or safe restore path".into());
     }
-    Err(format!("Unknown GPU tweak: {id}"))
+    let tweaks = catalog();
+    let tw = tweaks
+        .iter()
+        .find(|tw| tw.id == id)
+        .ok_or_else(|| format!("Unknown GPU tweak: {id}"))?;
+    let (vendor, _, actual_driver_key) = detect_gpu();
+    if tw.vendor != "any" && tw.vendor != vendor.as_str() {
+        return Err("GPU tweak does not match the detected graphics adapter".into());
+    }
+    let needs_driver_key = tw
+        .actions
+        .iter()
+        .any(|a| matches!(a, TweakAction::DriverReg { .. }));
+    if needs_driver_key && (!is_valid_driver_key(&driver_key) || driver_key != actual_driver_key) {
+        return Err("GPU driver registry key does not match the detected adapter".into());
+    }
+    let tweak_id = format!("gpu:{id}");
+    if !applying {
+        let entry = safety::load_journal()?
+            .into_iter()
+            .rev()
+            .find(|entry| entry.tweak_id == tweak_id && entry.completed && !entry.reverted)
+            .ok_or("No saved GPU state to restore")?;
+        tweaks::revert_entry(&entry.id)?;
+        return Ok(format!("Restored previous state for {}", tw.name));
+    }
+    #[cfg(windows)]
+    {
+        let _engine = tweaks::engine_guard()?;
+        let mut items = Vec::new();
+        for action in &tw.actions {
+            match action {
+                TweakAction::DriverReg { name, apply, .. } => items.push(ChangeItem::Registry {
+                    root: "HKLM".into(),
+                    path: actual_driver_key.clone(),
+                    name: (*name).into(),
+                    prev: tweaks::reg_read("HKLM", &actual_driver_key, name)?,
+                    new: RegVal::Dword(*apply),
+                }),
+                TweakAction::FixedReg {
+                    root,
+                    path,
+                    name,
+                    apply,
+                    ..
+                } => items.push(ChangeItem::Registry {
+                    root: (*root).into(),
+                    path: (*path).into(),
+                    name: (*name).into(),
+                    prev: tweaks::reg_read(root, path, name)?,
+                    new: RegVal::Dword(*apply),
+                }),
+                TweakAction::Svc { name, apply, .. } => {
+                    let prev = svc_start_type(name);
+                    if prev.is_empty() {
+                        return Err(format!("Service {name} was not found"));
+                    }
+                    items.push(ChangeItem::ServiceStartup {
+                        service: (*name).into(),
+                        prev,
+                        new: (*apply).into(),
+                    });
+                }
+                TweakAction::Ps { .. } => return Err("GPU command has no safe restore path".into()),
+            }
+        }
+        let entry_id = safety::append_entry(JournalEntry {
+            id: format!("gpu-{id}-{}", chrono::Local::now().format("%Y%m%d%H%M%S")),
+            tweak_id,
+            tweak_name: tw.name.into(),
+            origin: None,
+            time: chrono::Local::now().to_rfc3339(),
+            items: items.clone(),
+            reverted: false,
+            backup_files: vec![],
+            completed: false,
+            attempted: 0,
+            reverted_items: 0,
+        })?;
+        for idx in 0..items.len() {
+            safety::with_journal(|journal| {
+                let entry = journal
+                    .iter_mut()
+                    .find(|entry| entry.id == entry_id)
+                    .ok_or("journal entry missing")?;
+                entry.attempted = idx + 1;
+                Ok(())
+            })?;
+            if let Err(e) = apply_action(&tw.actions[idx], &actual_driver_key, true) {
+                return match tweaks::rollback_entry_items(&entry_id, &items[..=idx]) {
+                    Ok(()) => Err(format!("GPU tweak failed ({e}); previous state restored")),
+                    Err(re) => Err(format!("GPU tweak failed ({e}); rollback incomplete ({re}); restore token: {entry_id}")),
+                };
+            }
+        }
+        safety::with_journal(|journal| {
+            let entry = journal
+                .iter_mut()
+                .find(|entry| entry.id == entry_id)
+                .ok_or("journal entry missing")?;
+            entry.completed = true;
+            Ok(())
+        })?;
+        Ok(format!("Applied {} (restore token: {entry_id})", tw.name))
+    }
+    #[cfg(not(windows))]
+    {
+        Err("Windows only".into())
+    }
 }
 
 /// The driver class key is HKLM\SYSTEM\CurrentControlSet\Control\Class\
@@ -600,27 +703,6 @@ fn is_valid_driver_key(key: &str) -> bool {
         return false;
     }
     key.split('\\').all(|c| !matches!(c, "" | "." | ".."))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{is_valid_driver_key, GPU_CLASS};
-
-    #[test]
-    fn driver_key_validation() {
-        assert!(is_valid_driver_key(&format!("{GPU_CLASS}\\0000")));
-        assert!(is_valid_driver_key(&format!("{GPU_CLASS}\\0001\\Extra")));
-        assert!(!is_valid_driver_key(&format!("{GPU_CLASS}")));
-        assert!(!is_valid_driver_key(&format!("{GPU_CLASS}\\")));
-        assert!(!is_valid_driver_key("SYSTEM\\CurrentControlSet\\Control\\Class\\{00000000-0000-0000-0000-000000000000}\\0000"));
-        assert!(!is_valid_driver_key(&format!(
-            "{GPU_CLASS}\\0000'; calc; '"
-        )));
-        assert!(!is_valid_driver_key(&format!(
-            "{GPU_CLASS}\\0000\\..\\..\\SOFTWARE\\Evil"
-        )));
-        assert!(!is_valid_driver_key(""));
-    }
 }
 
 // ── NVIDIA Control Panel, editable global 3D settings ──────────────────────
@@ -644,8 +726,12 @@ const NV_TWEAK_HKCU: &str = "Software\\NVIDIA Corporation\\Global\\NVTweak";
 #[cfg(windows)]
 pub fn nv_get_settings() -> Value {
     let (vendor, name, driver_key) = detect_gpu();
-    if vendor != Vendor::Nvidia {
-        return json!({ "supported": false, "name": name });
+    if vendor != Vendor::Nvidia || driver_key.is_empty() {
+        return json!({
+            "supported": false,
+            "name": name,
+            "reason": "NVIDIA driver registry path could not be identified"
+        });
     }
 
     let power_mode = if reg_read_dword("HKLM", &driver_key, "PowerMizerEnable") == Some(0) {
@@ -687,6 +773,7 @@ pub fn nv_get_settings() -> Value {
 
 #[cfg(windows)]
 pub fn nv_set_setting(setting: String, value: String) -> Result<Value, String> {
+    let _engine = tweaks::engine_guard()?;
     let (vendor, _name, driver_key) = detect_gpu();
     if vendor != Vendor::Nvidia {
         return Err("No NVIDIA GPU detected".into());
@@ -749,14 +836,16 @@ pub fn nv_set_setting(setting: String, value: String) -> Result<Value, String> {
 
     let items: Vec<ChangeItem> = targets
         .iter()
-        .map(|(root, path, name, new)| ChangeItem::Registry {
-            root: root.to_string(),
-            path: path.clone(),
-            name: name.to_string(),
-            prev: reg_read_dword(root, path, name).map(RegVal::Dword),
-            new: RegVal::Dword(*new),
+        .map(|(root, path, name, new)| {
+            Ok(ChangeItem::Registry {
+                root: root.to_string(),
+                path: path.clone(),
+                name: name.to_string(),
+                prev: tweaks::reg_read(root, path, name)?,
+                new: RegVal::Dword(*new),
+            })
         })
-        .collect();
+        .collect::<Result<Vec<_>, String>>()?;
 
     let entry_id = format!(
         "nvCtrlPanel-{setting}-{}",
@@ -766,23 +855,43 @@ pub fn nv_set_setting(setting: String, value: String) -> Result<Value, String> {
         id: entry_id,
         tweak_id: format!("nvCtrlPanel:{setting}"),
         tweak_name: format!("NVIDIA Control Panel, {setting} = {value}"),
+        origin: None,
         time: chrono::Local::now().to_rfc3339(),
         items: items.clone(),
         reverted: false,
         backup_files: vec![],
-        completed: true,
-        attempted: usize::MAX,
+        completed: false,
+        attempted: 0,
         reverted_items: 0,
     })?;
 
     for (idx, item) in items.iter().enumerate() {
+        safety::with_journal(|j| {
+            let entry = j
+                .iter_mut()
+                .find(|entry| entry.id == entry_id)
+                .ok_or("journal entry missing")?;
+            entry.attempted = idx + 1;
+            Ok(())
+        })?;
         if let Err(e) = tweaks::apply_item(item) {
-            for d in items[..=idx].iter().rev() {
-                let _ = tweaks::revert_item(d);
-            }
-            return Err(format!("failed to apply ({e}); changes rolled back"));
+            return match tweaks::rollback_entry_items(&entry_id, &items[..=idx]) {
+                Ok(()) => Err(format!("failed to apply ({e}); changes rolled back")),
+                Err(re) => Err(format!(
+                    "failed to apply ({e}); rollback incomplete ({re}); restore token: {entry_id}"
+                )),
+            };
         }
     }
+
+    safety::with_journal(|j| {
+        let entry = j
+            .iter_mut()
+            .find(|entry| entry.id == entry_id)
+            .ok_or("journal entry missing")?;
+        entry.completed = true;
+        Ok(())
+    })?;
 
     Ok(json!({ "restoreToken": entry_id, "setting": setting, "value": value }))
 }
@@ -808,4 +917,25 @@ if ($exe) {
 "#,
     )
     .map(|_| "Opened NVIDIA Control Panel".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_valid_driver_key, GPU_CLASS};
+
+    #[test]
+    fn driver_key_validation() {
+        assert!(is_valid_driver_key(&format!("{GPU_CLASS}\\0000")));
+        assert!(is_valid_driver_key(&format!("{GPU_CLASS}\\0001\\Extra")));
+        assert!(!is_valid_driver_key(GPU_CLASS));
+        assert!(!is_valid_driver_key(&format!("{GPU_CLASS}\\")));
+        assert!(!is_valid_driver_key("SYSTEM\\CurrentControlSet\\Control\\Class\\{00000000-0000-0000-0000-000000000000}\\0000"));
+        assert!(!is_valid_driver_key(&format!(
+            "{GPU_CLASS}\\0000'; calc; '"
+        )));
+        assert!(!is_valid_driver_key(&format!(
+            "{GPU_CLASS}\\0000\\..\\..\\SOFTWARE\\Evil"
+        )));
+        assert!(!is_valid_driver_key(""));
+    }
 }

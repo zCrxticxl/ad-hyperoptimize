@@ -19,68 +19,12 @@ static BLOAT: &[BloatEntry] = &[
         reason: "WAP Push - Telemetry Routing",
     },
     BloatEntry {
-        name: "WerSvc",
-        reason: "Windows Error Reporting",
-    },
-    BloatEntry {
-        name: "WSearch",
-        reason: "Windows Search / Indexing (unnecessary if search unused)",
-    },
-    BloatEntry {
-        name: "SysMain",
-        reason: "Superfetch - can cause I/O spikes on SSD",
-    },
-    BloatEntry {
-        name: "XblAuthManager",
-        reason: "Xbox Live Auth - not needed without Xbox login",
-    },
-    BloatEntry {
-        name: "XblGameSave",
-        reason: "Xbox Live Game Save",
-    },
-    BloatEntry {
-        name: "XboxNetApiSvc",
-        reason: "Xbox Live Networking",
-    },
-    BloatEntry {
-        name: "XboxGipSvc",
-        reason: "Xbox Game Input Protocol",
-    },
-    BloatEntry {
         name: "MapsBroker",
         reason: "Offline Maps - automatic updates",
     },
     BloatEntry {
-        name: "PcaSvc",
-        reason: "Program Compatibility Assistant",
-    },
-    BloatEntry {
         name: "Fax",
         reason: "Legacy Fax Service",
-    },
-    BloatEntry {
-        name: "stisvc",
-        reason: "Windows Image Acquisition - only needed for scanners",
-    },
-    BloatEntry {
-        name: "TapiSrv",
-        reason: "Telephony API - Legacy",
-    },
-    BloatEntry {
-        name: "lltdsvc",
-        reason: "Link Layer Topology Discovery",
-    },
-    BloatEntry {
-        name: "FDResPub",
-        reason: "Function Discovery Resource Publication",
-    },
-    BloatEntry {
-        name: "SSDPSRV",
-        reason: "SSDP Discovery (UPnP)",
-    },
-    BloatEntry {
-        name: "upnphost",
-        reason: "UPnP Device Host",
     },
     BloatEntry {
         name: "RemoteRegistry",
@@ -91,16 +35,8 @@ static BLOAT: &[BloatEntry] = &[
         reason: "Retail Demo Mode - not needed on a normal PC",
     },
     BloatEntry {
-        name: "WMPNetworkSvc",
-        reason: "Windows Media Player Network Sharing",
-    },
-    BloatEntry {
         name: "wisvc",
         reason: "Windows Insider Service",
-    },
-    BloatEntry {
-        name: "wuauserv",
-        reason: "Windows Update - only disable if self-managed",
     },
 ];
 
@@ -114,7 +50,7 @@ try {
         if ($_.PathName)    { $pathMap[$_.Name] = $_.PathName }
     }
 } catch {}
-Get-Service -ErrorAction SilentlyContinue | ForEach-Object {
+Get-Service -ErrorAction Stop | ForEach-Object {
     [PSCustomObject]@{
         name        = $_.Name
         displayName = $_.DisplayName
@@ -125,11 +61,16 @@ Get-Service -ErrorAction SilentlyContinue | ForEach-Object {
     }
 } | ConvertTo-Json -Compress -Depth 2
 "#;
-    let raw = ps::run(script).unwrap_or_default();
+    let raw = match ps::run(script) {
+        Ok(raw) => raw,
+        Err(error) => return json!({ "services": [], "bloatCount": 0, "error": error }),
+    };
     let services: Vec<Value> = match serde_json::from_str(raw.trim()) {
         Ok(Value::Array(v)) => v,
         Ok(o @ Value::Object(_)) => vec![o],
-        _ => return json!({ "services": [], "bloatCount": 0 }),
+        _ => {
+            return json!({ "services": [], "bloatCount": 0, "error": "Service list could not be parsed" })
+        }
     };
 
     // Build bloat lookup
@@ -183,10 +124,71 @@ pub fn set_startup(name: String, startup_type: String) -> Result<Value, String> 
     if !ps::is_safe_ident(&name) || name.contains(['*', '?', '[', ']']) {
         return Err(format!("Invalid service name: {name}"));
     }
+    if !ps::is_admin() {
+        return Err("Changing service startup requires administrator rights".into());
+    }
+    let previous = ps::run(&format!(
+        "(Get-Service -Name '{name}' -ErrorAction Stop).StartType.ToString()"
+    ))?;
+    let previous = previous.trim();
+    if previous == startup_type {
+        return Ok(
+            json!({ "ok": true, "name": name, "startupType": startup_type, "alreadySet": true }),
+        );
+    }
+    let service_registry = format!(r"SYSTEM\CurrentControlSet\Services\{name}");
+    let delayed_before = crate::tweaks::reg_read("HKLM", &service_registry, "DelayedAutoStart")?;
+    let entry_id = crate::safety::append_entry(crate::safety::JournalEntry {
+        id: format!(
+            "service-{name}-{}",
+            chrono::Local::now().format("%Y%m%d%H%M%S%6f")
+        ),
+        tweak_id: format!("service:{name}"),
+        tweak_name: format!("Service startup: {name}"),
+        origin: None,
+        time: chrono::Local::now().to_rfc3339(),
+        items: vec![
+            crate::safety::ChangeItem::Registry {
+                root: "HKLM".into(),
+                path: service_registry,
+                name: "DelayedAutoStart".into(),
+                prev: delayed_before,
+                new: crate::safety::RegVal::Dword(0),
+            },
+            crate::safety::ChangeItem::ServiceStartup {
+                service: name.clone(),
+                prev: previous.into(),
+                new: startup_type.clone(),
+            },
+        ],
+        reverted: false,
+        backup_files: vec![],
+        completed: false,
+        attempted: 2,
+        reverted_items: 0,
+    })?;
     let script =
         format!("Set-Service -Name '{name}' -StartupType {startup_type} -ErrorAction Stop");
-    ps::run(&script)?;
-    Ok(json!({ "ok": true, "name": name, "startupType": startup_type }))
+    let result = ps::run(&script).and_then(|_| {
+        let actual = ps::run(&format!(
+            "(Get-Service -Name '{name}' -ErrorAction Stop).StartType.ToString()"
+        ))?;
+        if actual.trim() == startup_type {
+            Ok(())
+        } else {
+            Err(format!("Service {name} startup remains {}", actual.trim()))
+        }
+    });
+    crate::safety::with_journal(|entries| {
+        let entry = entries
+            .iter_mut()
+            .find(|entry| entry.id == entry_id)
+            .ok_or("Service journal entry missing")?;
+        entry.completed = result.is_ok();
+        Ok(())
+    })?;
+    result?;
+    Ok(json!({ "ok": true, "name": name, "startupType": startup_type, "entryId": entry_id }))
 }
 
 pub fn control(name: String, action: String) -> Result<Value, String> {
@@ -208,4 +210,16 @@ pub fn control(name: String, action: String) -> Result<Value, String> {
         .trim()
         .to_string();
     Ok(json!({ "ok": true, "name": name, "action": action, "status": status }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::BLOAT;
+
+    #[test]
+    fn critical_windows_services_are_not_bulk_candidates() {
+        for name in ["wuauserv", "WSearch", "SysMain", "PcaSvc", "stisvc"] {
+            assert!(!BLOAT.iter().any(|entry| entry.name == name), "{name}");
+        }
+    }
 }

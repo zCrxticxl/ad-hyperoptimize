@@ -19,51 +19,11 @@ pub struct Rec {
     pub applied: bool,
 }
 
-const SAFE_TWEAK_IDS: &[&str] = &[
-    "game_dvr_off",
-    "gamebar_popups_off",
-    "transparency_off",
-    "start_websearch_off",
-    "lockscreen_ads_off",
-    "widgets_off",
-    "delivery_opt_off",
-    "wer_off",
-    "activity_history_off",
-    "ntfs_last_access_off",
-    "ntfs_8dot3_off",
-    "xbox_services_off",
-    "remote_registry_off",
-    "cortana_off",
-    "edge_prelaunch_off",
-    "auto_play_off",
-    "svc_fax_off",
-    "svc_geolocation_off",
-    "svc_wmp_network_off",
-    "svc_maps_off",
-    "svc_link_tracking_off",
-    "svc_wisvc_off",
-    "usb_suspend_off",
-    "menu_delay_fast",
-    "nagle_off",
-    "tcp_timed_wait_low",
-    "irp_stack_high",
-    "qos_bandwidth_free",
-    "tcp_autotuning_normal",
-    "net_rss_on",
-];
+const SAFE_TWEAK_IDS: &[&str] = &["game_dvr_off", "game_mode_on"];
 
-const SAFE_PRIVACY_IDS: &[&str] = &[
-    "advertising_id",
-    "telemetry_minimal",
-    "app_diagnostics",
-    "inking_typing",
-    "feedback_frequency",
-    "content_suggestions",
-    "background_apps_off",
-    "location_off",
-];
+const SAFE_PRIVACY_IDS: &[&str] = &[];
 
-const SAFE_DEBLOAT_IDS: &[&str] = &["telemetry_tasks", "ceip", "wer_service"];
+const SAFE_DEBLOAT_IDS: &[&str] = &[];
 
 pub fn scan() -> Value {
     let mut recs: Vec<Value> = Vec::new();
@@ -152,11 +112,21 @@ pub fn apply_selected(items: Vec<Value>) -> Value {
         let module = item["module"].as_str().unwrap_or("").to_string();
         let name = item["name"].as_str().unwrap_or(&id).to_string();
 
-        let result: Result<String, String> = match module.as_str() {
-            "tweak" => tweaks::apply(&id).map(|_| format!("OK: {}", name)),
-            "privacy" => privacy::apply(id.clone()).map(|_| format!("OK: {}", name)),
-            "debloater_tweak" => debloater::apply_tweak(id.clone()),
-            other => Err(format!("Unknown module: {}", other)),
+        let allowed = match module.as_str() {
+            "tweak" => SAFE_TWEAK_IDS.contains(&id.as_str()),
+            "privacy" => SAFE_PRIVACY_IDS.contains(&id.as_str()),
+            "debloater_tweak" => SAFE_DEBLOAT_IDS.contains(&id.as_str()),
+            _ => false,
+        };
+        let result: Result<String, String> = if !allowed {
+            Err(format!("Not recommended: {module}/{id}"))
+        } else {
+            match module.as_str() {
+                "tweak" => tweaks::apply(&id).map(|_| format!("OK: {}", name)),
+                "privacy" => privacy::apply(id.clone()).map(|_| format!("OK: {}", name)),
+                "debloater_tweak" => debloater::apply_tweak(id.clone()),
+                other => Err(format!("Unknown module: {}", other)),
+            }
         };
 
         results.push(json!({

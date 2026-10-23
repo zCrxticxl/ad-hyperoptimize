@@ -303,7 +303,7 @@ $results = @()
 for ($i = 0; $i -lt $coll.Count; $i++) {
   $results += @{ title = $coll.Item($i).Title; result = $codes[$ir.GetUpdateResult($i).ResultCode] }
 }
-@{ installed = $coll.Count; rebootRequired = [bool]$ir.RebootRequired; overall = $codes[$ir.ResultCode]; results = $results }
+@{ installed = @($results | Where-Object { $_.result -eq 'Succeeded' }).Count; rebootRequired = [bool]$ir.RebootRequired; overall = $codes[$ir.ResultCode]; results = $results }
 }
 "#;
     ps::run_json_long(script)

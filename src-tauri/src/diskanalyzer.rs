@@ -5,7 +5,7 @@ use rayon::prelude::*;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::io::Read as _;
+use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use tauri::Emitter as _;
@@ -71,7 +71,7 @@ pub fn fmt_size(bytes: u64) -> String {
 #[cfg(windows)]
 pub(crate) fn is_reparse_point(p: &Path) -> bool {
     use std::os::windows::fs::MetadataExt;
-    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0400_0000;
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
     p.symlink_metadata()
         .map(|m| m.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0)
         .unwrap_or(false)
@@ -79,6 +79,10 @@ pub(crate) fn is_reparse_point(p: &Path) -> bool {
 #[cfg(not(windows))]
 pub(crate) fn is_reparse_point(_p: &Path) -> bool {
     false
+}
+
+pub(crate) fn has_reparse_ancestor(path: &Path) -> bool {
+    path.ancestors().any(is_reparse_point)
 }
 
 fn walk(root: &Path) -> Vec<FileInfo> {
@@ -234,13 +238,17 @@ fn is_protected_inner(path: &Path, allow_root: bool) -> bool {
     // surfaces exactly these roots. Deeper paths (e.g. Temp files) stay
     // user-controllable.
     let comps: Vec<&str> = norm[3..].split('\\').filter(|s| !s.is_empty()).collect();
+    if comps.is_empty() {
+        return true;
+    }
     if comps.len() == 1 && comps[0].eq_ignore_ascii_case("users") {
         return true;
     }
     if comps.len() == 2 && comps[0].eq_ignore_ascii_case("users") {
         return true;
     }
-    if comps[0].eq_ignore_ascii_case("users")
+    if comps.len() >= 3
+        && comps[0].eq_ignore_ascii_case("users")
         && comps[2].eq_ignore_ascii_case("appdata")
         && (comps.len() == 3
             || (comps.len() == 4
@@ -273,7 +281,7 @@ pub fn delete_items(paths: Vec<String>) -> Value {
             errors.push(format!("{raw}: path is protected"));
             continue;
         }
-        if is_reparse_point(p) {
+        if has_reparse_ancestor(p) {
             errors.push(format!(
                 "{raw}: refusing to delete a symlink/junction — delete its target explicitly instead"
             ));
@@ -302,28 +310,49 @@ fn copy_file(src: &Path, dst: &Path) -> std::io::Result<()> {
     if let Some(parent) = dst.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::copy(src, dst)?;
-    Ok(())
+    let mut input = std::fs::File::open(src)?;
+    let mut output = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(dst)?;
+    let result = std::io::copy(&mut input, &mut output).and_then(|_| output.flush());
+    if result.is_err() {
+        drop(output);
+        let _ = std::fs::remove_file(dst);
+    }
+    result.map(|_| ())
 }
 
 /// Copy a directory tree iteratively (explicit stack, no recursion).
 fn copy_dir(src: &Path, dst: &Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(dst)?;
-    let mut stack = vec![(src.to_path_buf(), dst.to_path_buf())];
-    while let Some((s, d)) = stack.pop() {
-        let rd = std::fs::read_dir(&s)?;
-        for entry in rd.flatten() {
-            let m = entry.path().symlink_metadata()?;
-            let target = d.join(entry.file_name());
-            if m.is_dir() {
-                std::fs::create_dir_all(&target)?;
-                stack.push((entry.path(), target));
-            } else {
-                copy_file(&entry.path(), &target)?;
+    std::fs::create_dir(dst)?;
+    let result = (|| {
+        let mut stack = vec![(src.to_path_buf(), dst.to_path_buf())];
+        while let Some((s, d)) = stack.pop() {
+            let rd = std::fs::read_dir(&s)?;
+            for entry in rd.flatten() {
+                if is_reparse_point(&entry.path()) {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        "refusing to copy a symlink/junction",
+                    ));
+                }
+                let m = entry.path().symlink_metadata()?;
+                let target = d.join(entry.file_name());
+                if m.is_dir() {
+                    std::fs::create_dir(&target)?;
+                    stack.push((entry.path(), target));
+                } else {
+                    copy_file(&entry.path(), &target)?;
+                }
             }
         }
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_dir_all(dst);
     }
-    Ok(())
+    result
 }
 
 /// Move a list of paths to dest_dir. Handles cross-drive (copy+delete fallback).
@@ -350,28 +379,44 @@ pub fn move_items(paths: Vec<String>, dest_dir: String) -> Value {
         };
         let dst = dest_root.join(fname);
 
-        // Ensure dest directory exists
+        if has_reparse_ancestor(&src) || has_reparse_ancestor(&dst) {
+            errors.push(format!(
+                "{raw}: refusing to move through a symlink/junction"
+            ));
+            continue;
+        }
+        if src.is_dir() {
+            if let Ok(source) = src.canonicalize() {
+                if dest_root
+                    .ancestors()
+                    .find_map(|ancestor| ancestor.canonicalize().ok())
+                    .is_some_and(|ancestor| ancestor.starts_with(&source))
+                {
+                    errors.push(format!("{raw}: destination is inside the source"));
+                    continue;
+                }
+            }
+        }
+        // Validate the destination before creating it: a rejected move must
+        // not leave directories inside the source or beyond a junction.
         if let Err(e) = std::fs::create_dir_all(&dest_root) {
             errors.push(format!("{}: mkdir {e}", raw));
             continue;
         }
+        if dst.symlink_metadata().is_ok() {
+            errors.push(format!("{raw}: destination already exists"));
+            continue;
+        }
 
         // Try atomic rename first (same drive = instant)
-        let res: Result<(), std::io::Error> = if is_reparse_point(&src) {
-            Err(std::io::Error::new(
-                std::io::ErrorKind::PermissionDenied,
-                "refusing to move a symlink/junction",
-            ))
-        } else {
-            std::fs::rename(&src, &dst).or_else(|_| {
-                // Cross-drive: copy then remove
-                if src.is_dir() {
-                    copy_dir(&src, &dst).and_then(|_| std::fs::remove_dir_all(&src))
-                } else {
-                    copy_file(&src, &dst).and_then(|_| std::fs::remove_file(&src))
-                }
-            })
-        };
+        let res: Result<(), std::io::Error> = std::fs::rename(&src, &dst).or_else(|_| {
+            // Cross-drive: copy then remove
+            if src.is_dir() {
+                copy_dir(&src, &dst).and_then(|_| std::fs::remove_dir_all(&src))
+            } else {
+                copy_file(&src, &dst).and_then(|_| std::fs::remove_file(&src))
+            }
+        });
 
         match res {
             Ok(_) => moved += 1,
@@ -950,7 +995,7 @@ pub fn organize_apply(items: Vec<Value>) -> Value {
             errors.push(format!("{}: path is protected", src));
             continue;
         }
-        if is_reparse_point(&src_path) || is_reparse_point(&dest_path) {
+        if has_reparse_ancestor(&src_path) || has_reparse_ancestor(&dest_path) {
             errors.push(format!(
                 "{}: refusing to organize through a symlink/junction",
                 src
@@ -1014,6 +1059,7 @@ mod tests {
     fn protected_paths_are_rejected() {
         for p in [
             r"C:\",
+            r"C:\\",
             r"E:\",
             r"C:\Windows",
             r"C:\Windows\System32\drivers\evil.sys",
@@ -1076,5 +1122,78 @@ mod tests {
             );
         }
         assert!(is_protected_dest(Path::new(r"C:\Windows")));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn move_refuses_existing_destination_and_self_nesting() {
+        use super::move_items;
+        use std::fs;
+
+        let root = std::env::temp_dir().join(format!(
+            "ad-hyperoptimize-move-test-{}",
+            rand::random::<u64>()
+        ));
+        let source = root.join("source");
+        let destination = root.join("destination");
+        fs::create_dir_all(&source).unwrap();
+        fs::create_dir_all(&destination).unwrap();
+        let source_file = source.join("same.txt");
+        let destination_file = destination.join("same.txt");
+        fs::write(&source_file, "source").unwrap();
+        fs::write(&destination_file, "destination").unwrap();
+
+        let result = move_items(
+            vec![source_file.to_string_lossy().into_owned()],
+            destination.to_string_lossy().into_owned(),
+        );
+        assert_eq!(result["moved"], 0);
+        assert_eq!(fs::read_to_string(&source_file).unwrap(), "source");
+        assert_eq!(
+            fs::read_to_string(&destination_file).unwrap(),
+            "destination"
+        );
+
+        let nested = source.join("nested");
+        let result = move_items(
+            vec![source.to_string_lossy().into_owned()],
+            nested.to_string_lossy().into_owned(),
+        );
+        assert_eq!(result["moved"], 0);
+        assert!(source_file.exists());
+        assert!(!nested.exists());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn junction_is_detected_as_reparse_point() {
+        use super::is_reparse_point;
+        use std::fs;
+        use std::process::Command;
+
+        let root = std::env::temp_dir().join(format!(
+            "ad-hyperoptimize-junction-test-{}",
+            rand::random::<u64>()
+        ));
+        let target = root.join("target");
+        let junction = root.join("junction");
+        fs::create_dir_all(&target).unwrap();
+        let output = Command::new("cmd.exe")
+            .args(["/C", "mklink", "/J"])
+            .arg(&junction)
+            .arg(&target)
+            .output()
+            .unwrap();
+        if !output.status.success() {
+            fs::remove_dir_all(&root).unwrap();
+            panic!(
+                "junction creation failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        assert!(is_reparse_point(&junction));
+        fs::remove_dir(&junction).unwrap();
+        fs::remove_dir_all(&root).unwrap();
     }
 }

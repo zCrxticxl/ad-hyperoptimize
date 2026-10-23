@@ -79,6 +79,7 @@ fn tweak_status_map() -> std::collections::HashMap<String, (String, String, bool
 
 pub fn list() -> Value {
     let status = tweak_status_map();
+    let journal = safety::load_journal().unwrap_or_default();
     let out: Vec<Value> = PROFILES
         .iter()
         .map(|p| {
@@ -95,9 +96,14 @@ pub fn list() -> Value {
                 })
                 .collect();
             let applied = tws.iter().filter(|t| t["status"] == "applied").count();
+            let origin = format!("profile:{}", p.id);
+            let owned_count = journal
+                .iter()
+                .filter(|entry| entry.origin.as_deref() == Some(origin.as_str()) && !entry.reverted)
+                .count();
             json!({
                 "id": p.id, "name": p.name, "desc": p.desc,
-                "tweaks": tws, "appliedCount": applied,
+                "tweaks": tws, "appliedCount": applied, "ownedCount": owned_count,
             })
         })
         .collect();
@@ -133,7 +139,29 @@ pub fn apply(profile_id: &str, with_bench: bool) -> Result<Value, String> {
         match status.get(*id).map(|s| s.1.as_str()) {
             Some("applied") => skipped.push(json!(id)),
             _ => match tweaks::apply(id) {
-                Ok(_) => applied.push(json!(id)),
+                Ok(result) => {
+                    if let Some(entry_id) = result["entryId"].as_str() {
+                        let tag = safety::with_journal(|journal| {
+                            let entry = journal
+                                .iter_mut()
+                                .find(|entry| entry.id == entry_id)
+                                .ok_or("profile entry missing from journal")?;
+                            entry.origin = Some(format!("profile:{}", p.id));
+                            Ok(())
+                        });
+                        match tag {
+                            Ok(()) => applied.push(json!(id)),
+                            Err(e) => {
+                                let rollback = tweaks::revert_entry(entry_id).err();
+                                failed.push(
+                                    json!({ "id": id, "error": e, "rollbackError": rollback }),
+                                );
+                            }
+                        }
+                    } else {
+                        failed.push(json!({ "id": id, "error": "missing journal entry ID" }));
+                    }
+                }
                 Err(e) => failed.push(json!({ "id": id, "error": e })),
             },
         }
@@ -157,21 +185,25 @@ pub fn apply(profile_id: &str, with_bench: bool) -> Result<Value, String> {
     }))
 }
 
-/// Revert every undoable tweak of a profile (reverse order).
+/// Revert only journal entries written by this profile.
 pub fn revert(profile_id: &str) -> Result<Value, String> {
     let p = PROFILES
         .iter()
         .find(|p| p.id == profile_id)
         .ok_or_else(|| format!("unbekanntes Profil '{profile_id}'"))?;
     let mut reverted = Vec::new();
-    let mut skipped = Vec::new();
     let mut failed = Vec::new();
-    for id in p.tweaks.iter().rev() {
-        match tweaks::revert(id) {
-            Ok(_) => reverted.push(json!(id)),
-            Err(e) if e.contains("nothing to undo") => skipped.push(json!(id)),
-            Err(e) => failed.push(json!({ "id": id, "error": e })),
+    let origin = format!("profile:{}", p.id);
+    let entries: Vec<_> = safety::load_journal()?
+        .into_iter()
+        .filter(|entry| entry.origin.as_deref() == Some(origin.as_str()) && !entry.reverted)
+        .map(|entry| (entry.id, entry.tweak_id))
+        .collect();
+    for (entry_id, tweak_id) in entries.iter().rev() {
+        match tweaks::revert_entry(entry_id) {
+            Ok(_) => reverted.push(json!(tweak_id)),
+            Err(e) => failed.push(json!({ "id": tweak_id, "error": e })),
         }
     }
-    Ok(json!({ "profile": p.id, "reverted": reverted, "skipped": skipped, "failed": failed }))
+    Ok(json!({ "profile": p.id, "reverted": reverted, "skipped": [], "failed": failed }))
 }

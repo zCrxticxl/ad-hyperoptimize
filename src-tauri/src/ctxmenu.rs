@@ -195,8 +195,7 @@ else {{ "Key not found, may not be installed" }}
 "#
         )
     };
-    ps::run(&script)
-        .map(|s| s.trim().to_string())
+    ps::run(&script).map(|s| s.trim().to_string())
 }
 
 pub fn disable_all_bloat() -> Result<String, String> {
@@ -227,12 +226,21 @@ pub fn disable_all_bloat() -> Result<String, String> {
 
 pub fn enable_all() -> Result<String, String> {
     let mut enabled = 0usize;
+    let mut errors = Vec::<String>::new();
     for e in ENTRIES {
-        if let Ok(s) = toggle_entry(e.path.to_string(), true) {
-            if s == "Enabled" {
-                enabled += 1;
-            }
+        match toggle_entry(e.path.to_string(), true) {
+            Ok(s) if s == "Enabled" => enabled += 1,
+            Ok(_) => {}
+            Err(err) => errors.push(format!("{}: {err}", e.name)),
         }
     }
-    Ok(format!("{enabled} entries re-enabled"))
+    if errors.is_empty() {
+        Ok(format!("{enabled} entries re-enabled"))
+    } else {
+        Ok(format!(
+            "{enabled} re-enabled, {} errors: {}",
+            errors.len(),
+            errors.join("; ")
+        ))
+    }
 }

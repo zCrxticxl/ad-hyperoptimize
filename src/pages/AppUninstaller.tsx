@@ -65,7 +65,9 @@ export default function AppUninstaller({ admin }: { admin: boolean }) {
       const d = await api.scanLeftovers(app.name, app.publisher ?? "", app.installLocation ?? "");
       const items: any[] = d.leftovers ?? [];
       setLeftovers(prev => ({ ...prev, [app.name]: items }));
-      setSelLeft(prev => ({ ...prev, [app.name]: new Set(items.map((i: any) => i.path)) }));
+      setSelLeft(prev => ({ ...prev, [app.name]: new Set<string>() }));
+    } catch (error) {
+      setLog(prev => ({ ...prev, [app.name]: String(error) }));
     } finally { setScanning(null); }
   };
 
@@ -77,7 +79,8 @@ export default function AppUninstaller({ admin }: { admin: boolean }) {
     try {
       const msg = await api.cleanLeftovers([...sel]);
       setLog(prev => ({ ...prev, [appName]: msg }));
-      setLeftovers(prev => ({ ...prev, [appName]: [] }));
+      setLeftovers(prev => ({ ...prev, [appName]: (prev[appName] ?? []).filter(item => !sel.has(item.path)) }));
+      setSelLeft(prev => ({ ...prev, [appName]: new Set<string>() }));
     } catch (e: any) {
       setLog(prev => ({ ...prev, [appName]: String(e) }));
     } finally { setCleaning(null); }

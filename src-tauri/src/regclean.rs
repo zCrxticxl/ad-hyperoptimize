@@ -501,9 +501,7 @@ pub fn clean(entries: Vec<Value>) -> Result<Value, String> {
     {
         // 1. Prepare backup dir + a per-cleanup folder for the .reg exports.
         let ts = chrono::Local::now().format("%Y%m%d_%H%M%S%6f").to_string();
-        let backup_dir = crate::safety::app_data_dir()
-            .join("regclean")
-            .join("regclean");
+        let backup_dir = crate::safety::app_data_dir().join("regclean");
         let reg_dir = backup_dir.join(&ts);
         std::fs::create_dir_all(&reg_dir).map_err(|e| format!("backup dir: {e}"))?;
         let backup_path = backup_dir.join(format!("backup_{ts}.json"));
@@ -640,15 +638,17 @@ fn reg_export(full_key: &str, file: &std::path::Path) -> Result<(), String> {
 pub fn restore(backup_path: String) -> Result<Value, String> {
     #[cfg(windows)]
     {
-        let backup_dir = dirs::config_dir()
-            .unwrap_or_else(|| std::path::PathBuf::from("."))
-            .join("PCOptSuite")
-            .join("regclean");
-        let dir_canon = std::fs::canonicalize(&backup_dir)
-            .map_err(|e| format!("backup folder missing: {e}"))?;
+        let mut allowed_dirs = vec![crate::safety::app_data_dir().join("regclean")];
+        if let Some(legacy) = dirs::config_dir() {
+            allowed_dirs.push(legacy.join("PCOptSuite").join("regclean"));
+        }
+        let allowed_dirs: Vec<_> = allowed_dirs
+            .iter()
+            .filter_map(|dir| std::fs::canonicalize(dir).ok())
+            .collect();
         let backup_canon =
             std::fs::canonicalize(&backup_path).map_err(|e| format!("cannot read backup: {e}"))?;
-        if !backup_canon.starts_with(&dir_canon) {
+        if !allowed_dirs.iter().any(|dir| backup_canon.starts_with(dir)) {
             return Err("backup manifest must live in the app backup folder.".into());
         }
 
@@ -670,7 +670,7 @@ pub fn restore(backup_path: String) -> Result<Value, String> {
                 errors.push(format!("{display}: backup file missing"));
                 continue;
             };
-            if !reg_canon.starts_with(&dir_canon) {
+            if !allowed_dirs.iter().any(|dir| reg_canon.starts_with(dir)) {
                 errors.push(format!("{display}: backup file outside app folder"));
                 continue;
             }
@@ -692,7 +692,8 @@ pub fn restore(backup_path: String) -> Result<Value, String> {
 pub fn list_backups() -> Value {
     // New backups live under the shared data dir; pre-unification backups
     // live under the old config_dir location and must stay listable.
-    let mut dirs = vec![crate::safety::app_data_dir().join("regclean")];
+    let current = crate::safety::app_data_dir().join("regclean");
+    let mut dirs = vec![current.clone(), current.join("regclean")];
     if let Some(legacy) = dirs::config_dir() {
         let legacy = legacy.join("PCOptSuite").join("regclean");
         if legacy != dirs[0] {
