@@ -284,10 +284,8 @@ fn apply_power_plan_for_preset(game: &Game, preset: &str) -> Result<String, Stri
 // or restart while a game plan is active never strands the user on High
 // Performance: revert reads it back.
 
-fn prev_plan_path() -> std::path::PathBuf {
-    crate::safety::app_data_dir()
-        .join("gameprofile")
-        .join("prev-plan.txt")
+fn prev_plan_path() -> Result<std::path::PathBuf, String> {
+    crate::safety::state_dir().map(|d| d.join("gameprofile").join("prev-plan.txt"))
 }
 
 /// The record is `<previous plan>` or `<previous plan>|<plan the app applied>`.
@@ -295,7 +293,7 @@ fn prev_plan_path() -> std::path::PathBuf {
 /// plan is no longer the one the app set, the user changed it since, and
 /// restoring the old record would silently override their choice.
 fn load_prev_record() -> Option<(String, Option<String>)> {
-    let raw = std::fs::read_to_string(prev_plan_path()).ok()?;
+    let raw = std::fs::read_to_string(prev_plan_path().ok()?).ok()?;
     parse_prev_record(&raw)
 }
 
@@ -313,7 +311,7 @@ fn parse_prev_record(raw: &str) -> Option<(String, Option<String>)> {
 }
 
 fn write_prev_record(prev: &str, applied: Option<&str>) -> Result<(), String> {
-    let path = prev_plan_path();
+    let path = prev_plan_path()?;
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
@@ -336,7 +334,9 @@ fn note_applied_plan(guid: &str) {
 }
 
 fn clear_prev_plan() {
-    let _ = std::fs::remove_file(prev_plan_path());
+    if let Ok(path) = prev_plan_path() {
+        let _ = std::fs::remove_file(path);
+    }
 }
 
 /// Record the currently active plan as the one to restore, unless one is

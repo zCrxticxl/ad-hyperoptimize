@@ -20,9 +20,7 @@ fn sec(script: &str) -> Value {
 /// snapshot went stale: restoring it silently discarded every hosts change
 /// made since, by this app or anything else.)
 fn hosts_backup() -> Result<PathBuf, String> {
-    let backup = crate::safety::app_data_dir()
-        .join("hosts")
-        .join("hosts.bak");
+    let backup = crate::safety::state_dir()?.join("hosts").join("hosts.bak");
     if let Some(parent) = backup.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
@@ -338,6 +336,7 @@ fn journaled_defender_change(
         completed: false,
         attempted: 1,
         reverted_items: 0,
+        untrusted: false,
     })?;
     let result = ps::run(apply);
     safety::with_journal(|entries| {

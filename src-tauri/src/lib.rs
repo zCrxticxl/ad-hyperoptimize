@@ -33,6 +33,7 @@ mod security;
 mod services;
 mod softwareinstaller;
 mod startup;
+mod statestore;
 mod tweaks;
 mod uninstaller;
 mod updates;
@@ -1093,7 +1094,8 @@ mod smoke {
     #[test]
     #[ignore]
     fn read_only_scans_have_no_powershell_parser_errors() {
-        let scans: Vec<(&str, fn() -> serde_json::Value)> = vec![
+        type Scan = fn() -> serde_json::Value;
+        let scans: Vec<(&str, Scan)> = vec![
             ("autoopt", crate::autoopt::scan),
             ("bootopt", crate::bootopt::scan),
             ("cleanup", crate::cleanup::scan),

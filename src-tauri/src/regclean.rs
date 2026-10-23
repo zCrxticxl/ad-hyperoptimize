@@ -583,7 +583,7 @@ pub(crate) struct RegBackup {
 impl RegBackup {
     pub(crate) fn new() -> Result<Self, String> {
         let ts = chrono::Local::now().format("%Y%m%d_%H%M%S%6f").to_string();
-        let backup_dir = crate::safety::app_data_dir().join("regclean");
+        let backup_dir = crate::safety::state_dir()?.join("regclean");
         let reg_dir = backup_dir.join(&ts);
         std::fs::create_dir_all(&reg_dir).map_err(|e| format!("backup dir: {e}"))?;
         Ok(Self {
@@ -778,16 +778,15 @@ fn reg_export(full_key: &str, file: &std::path::Path) -> Result<(), String> {
 /// Restore a previous cleanup from its backup manifest by re-importing every
 /// exported .reg file. Returns { restored, errors }.
 ///
-/// Only manifests inside the app's own `PCOptSuite/regclean` folder are
-/// accepted, and every referenced `.reg` file must live there too, otherwise
-/// this command would be an arbitrary registry-import primitive.
+/// Only manifests inside the protected state folder's `regclean` directory
+/// are accepted, and every referenced `.reg` file must live there too,
+/// otherwise this command would be an arbitrary registry-import primitive.
+/// Backups left in the old user-writable folders are deliberately not
+/// restorable: anyone could have planted a manifest and `.reg` file there.
 pub fn restore(backup_path: String) -> Result<Value, String> {
     #[cfg(windows)]
     {
-        let mut allowed_dirs = vec![crate::safety::app_data_dir().join("regclean")];
-        if let Some(legacy) = dirs::config_dir() {
-            allowed_dirs.push(legacy.join("PCOptSuite").join("regclean"));
-        }
+        let allowed_dirs = [crate::safety::state_dir()?.join("regclean")];
         let allowed_dirs: Vec<_> = allowed_dirs
             .iter()
             .filter_map(|dir| std::fs::canonicalize(dir).ok())
@@ -836,16 +835,12 @@ pub fn restore(backup_path: String) -> Result<Value, String> {
 
 /// List available cleanup backups (newest first) for the restore UI.
 pub fn list_backups() -> Value {
-    // New backups live under the shared data dir; pre-unification backups
-    // live under the old config_dir location and must stay listable.
-    let current = crate::safety::app_data_dir().join("regclean");
-    let mut dirs = vec![current.clone(), current.join("regclean")];
-    if let Some(legacy) = dirs::config_dir() {
-        let legacy = legacy.join("PCOptSuite").join("regclean");
-        if legacy != dirs[0] {
-            dirs.push(legacy);
-        }
-    }
+    // Only the protected state folder: restore refuses anything else.
+    let current = match crate::safety::state_dir() {
+        Ok(dir) => dir.join("regclean"),
+        Err(_) => return json!([]),
+    };
+    let dirs = vec![current.clone(), current.join("regclean")];
     let mut out: Vec<Value> = Vec::new();
     for dir in dirs {
         let Ok(rd) = std::fs::read_dir(&dir) else {

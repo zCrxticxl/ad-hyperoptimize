@@ -699,6 +699,7 @@ pub fn do_tweak(id: String, driver_key: String, applying: bool) -> Result<String
             completed: false,
             attempted: 0,
             reverted_items: 0,
+            untrusted: false,
         })?;
         for idx in 0..items.len() {
             safety::with_journal(|journal| {
@@ -906,6 +907,7 @@ pub fn nv_set_setting(setting: String, value: String) -> Result<Value, String> {
         completed: false,
         attempted: 0,
         reverted_items: 0,
+        untrusted: false,
     })?;
 
     for (idx, item) in items.iter().enumerate() {

@@ -559,6 +559,7 @@ pub fn apply(id: String) -> Result<Value, String> {
         completed: false,
         attempted: 0,
         reverted_items: 0,
+        untrusted: false,
     })?;
     safety::with_journal(|entries| {
         if let Some(entry) = entries.iter_mut().find(|entry| entry.id == entry_id) {

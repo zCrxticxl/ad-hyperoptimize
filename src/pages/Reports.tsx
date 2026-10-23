@@ -63,7 +63,14 @@ export default function Reports() {
             {[...history].reverse().map((h, i) => (
               <tr key={h.id ?? i}>
                 <td className="muted">{new Date(h.time).toLocaleString()}</td>
-                <td>{h.tweak_name}</td>
+                <td>
+                  {h.tweak_name}
+                  {h.untrusted && (
+                    <span className="badge risk-High" style={{ marginLeft: 6 }} title={t("repUntrustedHint")}>
+                      {t("repUntrusted")}
+                    </span>
+                  )}
+                </td>
                 <td style={{ color: h.reverted ? "var(--muted)" : h.completed === false ? "var(--orange)" : "var(--green)" }}>
                   {h.reverted ? t("repReverted") : h.completed === false ? t("repIncomplete") : t("repApplied")}
                 </td>

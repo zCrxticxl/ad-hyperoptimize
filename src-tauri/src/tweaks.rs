@@ -167,6 +167,62 @@ fn build_nagle_revert(out: &str) -> Option<String> {
     Some(format!("powershell -Command {}", steps.join("; ")))
 }
 
+/// Exact revert for a captured power-setting index. One PowerShell wrapper so
+/// run_cmdline executes all three steps in order and aborts on the first
+/// failure; the final setactive makes the restored indexes effective
+/// immediately. Also used by statestore to recognise migrated entries.
+pub(crate) fn power_index_revert(
+    scheme: &str,
+    subgroup: &str,
+    setting: &str,
+    ac: &str,
+    dc: &str,
+) -> String {
+    format!(
+        "powershell -Command powercfg /setacvalueindex {scheme} {subgroup} {setting} {ac}; \
+         if ($LASTEXITCODE -eq 0) {{ powercfg /setdcvalueindex {scheme} {subgroup} {setting} {dc}; \
+         if ($LASTEXITCODE -eq 0) {{ powercfg /setactive scheme_current }} }}; \
+         exit $LASTEXITCODE"
+    )
+}
+
+/// The catalog's fixed revert commands for a tweak (used to recognise
+/// migrated journal entries as app-generated).
+pub(crate) fn static_cmd_reverts(tweak_id: &str) -> Vec<&'static str> {
+    catalog()
+        .into_iter()
+        .filter(|t| t.id == tweak_id)
+        .flat_map(|t| t.actions)
+        .filter_map(|a| match a {
+            Action::Cmd { revert, .. } => Some(revert),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Undo never runs a command of an untrusted (migrated, unrecognised) entry.
+fn refuse_untrusted(entry: &JournalEntry, upto: usize) -> Result<(), String> {
+    if !entry.untrusted {
+        return Ok(());
+    }
+    let commands: Vec<&str> = entry.items[..upto]
+        .iter()
+        .filter_map(|i| match i {
+            ChangeItem::Command { revert, .. } => Some(revert.as_str()),
+            _ => None,
+        })
+        .collect();
+    if commands.is_empty() {
+        return Ok(());
+    }
+    Err(format!(
+        "This undo entry was recorded in the old, user-writable data folder and its command \
+         could not be verified as one this app generates, so it is not run automatically. \
+         Review it and run it manually only if it is what you expect: {}",
+        commands.join(" | ")
+    ))
+}
+
 /// Run a capture and build the exact revert command for it.
 #[cfg(windows)]
 fn capture_revert(cap: &ShowCapture) -> Option<String> {
@@ -223,15 +279,7 @@ fn capture_revert(cap: &ShowCapture) -> Option<String> {
             let query_out =
                 crate::ps::exec("powercfg.exe", &["/query", &guid, subgroup, setting]).ok()?;
             parse_power_indexes(&query_out).map(|(ac, dc)| {
-                // One PowerShell wrapper so run_cmdline executes all three
-                // steps in order and aborts on the first failure; the final
-                // setactive makes the restored indexes effective immediately.
-                format!(
-                    "powershell -Command powercfg /setacvalueindex {guid} {subgroup} {setting} {ac}; \
-                     if ($LASTEXITCODE -eq 0) {{ powercfg /setdcvalueindex {guid} {subgroup} {setting} {dc}; \
-                     if ($LASTEXITCODE -eq 0) {{ powercfg /setactive scheme_current }} }}; \
-                     exit $LASTEXITCODE"
-                )
+                power_index_revert(&guid, subgroup, setting, &ac.to_string(), &dc.to_string())
             })
         }
         ShowCapture::NagleInterfaces => {
@@ -1598,6 +1646,7 @@ pub fn apply(tweak_id: &str) -> Result<Value, String> {
         completed: false,
         attempted: 0,
         reverted_items: 0,
+        untrusted: false,
     })?;
 
     // 4. Apply. On failure, roll back everything up to and including the
@@ -1737,6 +1786,7 @@ pub fn revert(tweak_id: &str) -> Result<Value, String> {
         let attempted = entry.attempted.min(entry.items.len());
         let already = entry.reverted_items.min(attempted);
         let stop = attempted - already;
+        refuse_untrusted(entry, stop)?;
         for offset in (0..stop).rev() {
             match revert_item(&entry.items[offset]) {
                 Ok(()) => entry.reverted_items += 1,
@@ -1876,6 +1926,7 @@ pub fn revert_entry(entry_id: &str) -> Result<Value, String> {
         let attempted = entry.attempted.min(entry.items.len());
         let already = entry.reverted_items.min(attempted);
         let stop = attempted - already;
+        refuse_untrusted(entry, stop)?;
         for offset in (0..stop).rev() {
             match revert_item(&entry.items[offset]) {
                 Ok(()) => entry.reverted_items += 1,
@@ -2012,6 +2063,7 @@ mod tests {
             completed,
             attempted,
             reverted_items: 0,
+            untrusted: false,
         }
     }
 

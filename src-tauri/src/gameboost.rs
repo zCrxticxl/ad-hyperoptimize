@@ -212,10 +212,8 @@ pub fn kill_background(pids: Vec<u32>) -> Result<String, String> {
     ))
 }
 
-fn boost_state_path() -> std::path::PathBuf {
-    crate::safety::app_data_dir()
-        .join("gameboost")
-        .join("boost-state.json")
+fn boost_state_path() -> Result<std::path::PathBuf, String> {
+    crate::safety::state_dir().map(|d| d.join("gameboost").join("boost-state.json"))
 }
 
 /// Activate `guid` via powercfg; a non-zero exit is a real error.
@@ -228,7 +226,7 @@ fn set_active_plan(guid: &str) -> Result<(), String> {
 pub fn boost_start(pid: u32) -> Result<String, String> {
     // A second boost must not overwrite the saved pre-boost state with
     // already-boosted values (the stop would then "restore" the boost).
-    if boost_state_path().exists() {
+    if boost_state_path()?.exists() {
         return Err("a boost is already active; stop it first".into());
     }
 
@@ -299,7 +297,7 @@ else {{ "Game boost active for PID {pid} ({plan_label})" }}
 
 /// Persist the pre-boost state for exact restore in boost_stop.
 fn save_boost_state(prev_plan: &str, prev_toast: Option<&str>) -> Result<(), String> {
-    let path = boost_state_path();
+    let path = boost_state_path()?;
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
@@ -311,7 +309,7 @@ fn save_boost_state(prev_plan: &str, prev_toast: Option<&str>) -> Result<(), Str
 /// Read (without consuming) the pre-boost state; `None` when no state was
 /// saved or the file is unreadable.
 fn read_boost_state() -> Option<(String, Option<String>)> {
-    let raw = std::fs::read_to_string(boost_state_path()).ok()?;
+    let raw = std::fs::read_to_string(boost_state_path().ok()?).ok()?;
     let v: Value = serde_json::from_str(&raw).ok()?;
     let plan = v["prevPlan"].as_str().unwrap_or_default().to_string();
     let toast = v["prevToast"].as_str().map(str::to_string);
@@ -319,14 +317,16 @@ fn read_boost_state() -> Option<(String, Option<String>)> {
 }
 
 fn remove_boost_state() {
-    let _ = std::fs::remove_file(boost_state_path());
+    if let Ok(path) = boost_state_path() {
+        let _ = std::fs::remove_file(path);
+    }
 }
 
 pub fn boost_stop() -> Result<String, String> {
     // No recorded state means there is nothing we changed to restore. Never
     // guess a "Balanced" plan the user may never have had.
     let Some((prev_plan, prev_toast)) = read_boost_state() else {
-        if boost_state_path().exists() {
+        if boost_state_path()?.exists() {
             // Unparseable state can never be restored; drop it so a new boost
             // is possible, and say honestly that nothing was restored.
             remove_boost_state();
@@ -522,6 +522,7 @@ pub fn quick_boost_start(process_name: String) -> Result<Value, String> {
         completed: false,
         attempted: 0,
         reverted_items: 0,
+        untrusted: false,
     })?;
 
     // ---- apply; roll back whatever already succeeded if one step fails ----

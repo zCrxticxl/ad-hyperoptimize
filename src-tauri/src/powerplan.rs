@@ -55,12 +55,12 @@ if (-not $plans) { '[]' } else { @($plans) | ConvertTo-Json -Compress }
 /// File in the app data dir holding the GUID `/duplicatescheme` returned
 /// when this app unlocked Ultimate Performance. Plan names are localized,
 /// so the GUID is the only locale-independent way to find the copy again.
-fn ultimate_marker() -> std::path::PathBuf {
-    crate::safety::app_data_dir().join("ultimate_plan_guid.txt")
+fn ultimate_marker() -> Result<std::path::PathBuf, String> {
+    Ok(crate::safety::state_dir()?.join("ultimate_plan_guid.txt"))
 }
 
 fn read_remembered_ultimate() -> Option<String> {
-    let s = std::fs::read_to_string(ultimate_marker()).ok()?;
+    let s = std::fs::read_to_string(ultimate_marker().ok()?).ok()?;
     let g = s.trim().to_lowercase();
     is_guid(&g).then_some(g)
 }
@@ -160,7 +160,8 @@ pub fn unlock_ultimate() -> Result<String, String> {
         .ok_or_else(|| format!("Ultimate plan GUID not found in powercfg output: {output}"))?;
     // Remember the copy so later clicks reuse it on any display language
     // instead of duplicating again.
-    let remember = std::fs::write(ultimate_marker(), &guid);
+    let remember =
+        ultimate_marker().and_then(|p| std::fs::write(p, &guid).map_err(|e| e.to_string()));
     set_active(guid.clone())?;
     if let Err(e) = remember {
         return Ok(format!(

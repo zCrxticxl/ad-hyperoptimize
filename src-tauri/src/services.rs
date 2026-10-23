@@ -272,6 +272,7 @@ pub fn set_startup(name: String, startup_type: String) -> Result<Value, String> 
         completed: false,
         attempted: 0,
         reverted_items: 0,
+        untrusted: false,
     })?;
 
     let mut failure = None;

@@ -214,6 +214,7 @@ pub fn toggle(path: String, name: String, enable: bool) -> Result<Value, String>
         completed: false,
         attempted: 1,
         reverted_items: 0,
+        untrusted: false,
     })?;
     let result = crate::ps::run(&apply_script).and_then(|_| {
         let state = crate::ps::run(&query)?;

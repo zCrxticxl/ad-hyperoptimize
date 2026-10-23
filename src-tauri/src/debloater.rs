@@ -374,7 +374,7 @@ pub fn list_tweaks() -> Value {
             // read-back differs from what we wrote), so treat "we applied it
             // in this app" as applied too, revert uses that exact state file,
             // so the status never wrongly flips back to "not applied".
-            let applied = live || state_path(t.id).exists();
+            let applied = live || state_path(t.id).is_ok_and(|p| p.exists());
             json!({
                 "id":      t.id,
                 "name":    t.name,
@@ -390,10 +390,32 @@ pub fn list_tweaks() -> Value {
 
 // ── Exact undo: capture pre-apply state, restore it on revert ─────────────────
 
-fn state_path(id: &str) -> std::path::PathBuf {
-    crate::safety::app_data_dir()
+/// Lives in the protected state folder: restore_script runs elevated.
+fn state_path(id: &str) -> Result<std::path::PathBuf, String> {
+    Ok(crate::safety::state_dir()?
         .join("debloater")
-        .join(format!("{id}.json"))
+        .join(format!("{id}.json")))
+}
+
+/// A migrated legacy state file is accepted only if every captured item is
+/// one this tweak's catalog entry declares (statestore.rs): restore_script
+/// would otherwise write attacker-chosen registry values with admin rights.
+pub(crate) fn state_is_valid(id: &str, state: &serde_json::Value) -> bool {
+    let Some(t) = TWEAKS.iter().find(|t| t.id == id) else {
+        return false;
+    };
+    let Some(items) = state.as_array() else {
+        return false;
+    };
+    items.iter().all(|it| match it["kind"].as_str() {
+        Some("reg") => t.capture.iter().any(|(root, path, name)| {
+            it["root"].as_str() == Some(*root)
+                && it["path"].as_str() == Some(*path)
+                && it["name"].as_str() == Some(*name)
+        }),
+        Some("service") => t.service.is_some() && it["name"].as_str() == t.service,
+        _ => false,
+    })
 }
 
 /// Capture registry values + service state listed in `t.capture`/`t.service`
@@ -508,7 +530,7 @@ pub fn apply_tweak(id: String) -> Result<String, String> {
     // apply (or a crash mid-apply) is still undoable via revert_tweak. An
     // existing state file is kept: it holds the original pre-apply values,
     // a re-apply must not overwrite it with already-applied ones.
-    let path = state_path(id.as_str());
+    let path = state_path(id.as_str())?;
     let wrote_state = if path.exists() {
         false
     } else {
@@ -543,7 +565,7 @@ pub fn revert_tweak(id: String) -> Result<String, String> {
         .iter()
         .find(|t| t.id == id)
         .ok_or_else(|| format!("Unknown tweak: {id}"))?;
-    let path = state_path(id.as_str());
+    let path = state_path(id.as_str())?;
     match std::fs::read_to_string(&path)
         .ok()
         .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())

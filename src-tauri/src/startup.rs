@@ -234,6 +234,7 @@ pub fn toggle(scope: String, name: String, enable: bool) -> Result<Value, String
             completed: false,
             attempted: 1,
             reverted_items: 0,
+            untrusted: false,
         })?;
         let (key, _) = hive(root)
             .create_subkey(approved)

@@ -401,6 +401,7 @@ pub fn apply_tweak(id: String) -> Result<Value, String> {
         completed: false,
         attempted: 1,
         reverted_items: 0,
+        untrusted: false,
     })?;
 
     let args: Vec<&str> = applied.iter().map(String::as_str).collect();

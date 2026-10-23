@@ -5,10 +5,34 @@
 use crate::ps;
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
-use std::sync::Mutex;
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 
 static JOURNAL_LOCK: Mutex<()> = Mutex::new(());
+static STATE_DIR: OnceLock<Result<PathBuf, String>> = OnceLock::new();
+
+/// Where privileged state lives: the journal, registry backups and state files
+/// that undo executes or imports with admin rights. Elevated, that is an
+/// admin-only folder under %ProgramData% (see statestore.rs); data left in the
+/// user-writable %APPDATA% folder is migrated into it once, validated.
+/// Unelevated sessions keep using %APPDATA%: nothing they record can run with
+/// more rights than they have, and an elevated session only takes it over via
+/// that validation. Fails closed: if the protected folder can't be
+/// established, privileged operations fail instead of using a writable one.
+pub fn state_dir() -> Result<PathBuf, String> {
+    STATE_DIR.get_or_init(resolve_state_dir).clone()
+}
+
+fn resolve_state_dir() -> Result<PathBuf, String> {
+    #[cfg(windows)]
+    if ps::is_admin() {
+        let dir = crate::statestore::program_data_dir()?.join("ADHyperOptimize");
+        crate::statestore::ensure_secure_dir(&dir)?;
+        crate::statestore::migrate_legacy(&app_data_dir(), &dir);
+        return Ok(dir);
+    }
+    Ok(app_data_dir())
+}
 
 pub fn app_data_dir() -> PathBuf {
     // Under elevation the CWD can be System32; a "." fallback would silently
@@ -91,6 +115,11 @@ pub struct JournalEntry {
     /// already restored, so a retry resumes exactly where it stopped.
     #[serde(default)]
     pub reverted_items: usize,
+    /// Set when the entry was migrated from the user-writable legacy folder
+    /// and one of its revert commands is not a shape this app generates: those
+    /// commands are never run automatically (see statestore.rs).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub untrusted: bool,
 }
 
 fn default_completed() -> bool {
@@ -100,29 +129,36 @@ fn default_all_attempted() -> usize {
     usize::MAX
 }
 
-fn journal_path() -> PathBuf {
-    app_data_dir().join("journal.json")
+fn journal_path() -> Result<PathBuf, String> {
+    Ok(state_dir()?.join("journal.json"))
 }
 
 pub fn load_journal() -> Result<Vec<JournalEntry>, String> {
-    let p = journal_path();
+    load_journal_at(&journal_path()?)
+}
+
+pub(crate) fn load_journal_at(p: &Path) -> Result<Vec<JournalEntry>, String> {
     if !p.exists() {
         return Ok(Vec::new());
     }
     // A broken or unreadable journal must never be silently replaced by an
     // empty one: the next save would destroy the recovery history.
-    let s = fs::read_to_string(&p).map_err(|e| format!("journal read: {e}"))?;
+    let s = fs::read_to_string(p).map_err(|e| format!("journal read: {e}"))?;
     serde_json::from_str(&s).map_err(|e| format!("journal parse: {e}"))
 }
 
 pub fn save_journal(j: &[JournalEntry]) -> Result<(), String> {
-    let tmp = journal_path().with_extension("json.tmp");
+    save_journal_at(&journal_path()?, j)
+}
+
+pub(crate) fn save_journal_at(p: &Path, j: &[JournalEntry]) -> Result<(), String> {
+    let tmp = p.with_extension("json.tmp");
     fs::write(
         &tmp,
         serde_json::to_string_pretty(j).map_err(|e| e.to_string())?,
     )
     .map_err(|e| e.to_string())?;
-    fs::rename(&tmp, journal_path()).map_err(|e| e.to_string()) // atomic-ish swap
+    fs::rename(&tmp, p).map_err(|e| e.to_string()) // atomic-ish swap
 }
 
 /// Serializes every journal read-modify-write pair (apply, revert, undo,
@@ -190,7 +226,10 @@ pub fn latest_backup_for(root: &str, path: &str) -> Option<String> {
     let safe = path.replace(['\\', '/'], "_");
     let prefix = format!("{root}_{safe}_");
     let mut best: Option<(std::time::SystemTime, String)> = None;
-    for entry in fs::read_dir(app_data_dir().join("backups")).ok()?.flatten() {
+    for entry in fs::read_dir(state_dir().ok()?.join("backups"))
+        .ok()?
+        .flatten()
+    {
         let name = entry.file_name().to_string_lossy().into_owned();
         if name.starts_with(&prefix) && name.ends_with(".reg") {
             let modified = entry.metadata().and_then(|m| m.modified()).ok()?;
@@ -210,9 +249,9 @@ pub fn latest_backup_for(root: &str, path: &str) -> Option<String> {
 pub fn backup_registry_key(root: &str, path: &str) -> Result<String, String> {
     let ts = chrono::Local::now().format("%Y%m%d-%H%M%S");
     let safe = path.replace(['\\', '/'], "_");
-    let file = app_data_dir()
-        .join("backups")
-        .join(format!("{root}_{safe}_{ts}.reg"));
+    let dir = state_dir()?.join("backups");
+    fs::create_dir_all(&dir).map_err(|e| format!("creating backup folder: {e}"))?;
+    let file = dir.join(format!("{root}_{safe}_{ts}.reg"));
     let full = format!("{root}\\{path}");
     ps::exec("reg.exe", &["export", &full, &file.to_string_lossy(), "/y"])?;
     Ok(file.to_string_lossy().into_owned())

@@ -128,7 +128,7 @@ $msg
             },
             crate::safety::ChangeItem::Command {
                 applied: script.clone(),
-                revert: format!("powershell -Command {TIMER_RESET_PS}"),
+                revert: timer_revert_command(),
             },
         ],
         reverted: false,
@@ -136,6 +136,7 @@ $msg
         completed: false,
         attempted: 2,
         reverted_items: 0,
+        untrusted: false,
     })?;
     let res = ps::run(&script).map(|s| s.trim().to_string());
     crate::safety::with_journal(|entries| {
@@ -215,6 +216,12 @@ const TIMER_LEGACY_CLEANUP_PS: &str = timer_legacy_cleanup_ps!();
 
 /// Undo operations for the persistent timer-resolution task; shared by
 /// timer_reset and the journal entry timer_set writes.
+/// Journal revert for the timer tweak; statestore re-derives migrated timer
+/// entries from this instead of trusting their stored script.
+pub(crate) fn timer_revert_command() -> String {
+    format!("powershell -Command {TIMER_RESET_PS}")
+}
+
 const TIMER_RESET_PS: &str = concat!(
     r#"
 # Stop and remove the persistent scheduled task
