@@ -376,6 +376,8 @@ fn compute_profile(mut data: Value) -> Value {
     }
 
     // ─── Per-tweak hardware risk engine ──────────────────────────────────────
+    // Retired tweaks (optregistry::RETIRED) get no verdict: they can no longer
+    // be applied, so a risk badge for them would only suggest otherwise.
     // Maps specific tweak IDs (from tweaks.rs + gputweaks.rs catalogs) to a
     // hardware-aware risk verdict. Severity "danger" means: this exact tweak
     // is a known cause of REGRESSION (lower FPS / instability) on this exact
@@ -427,50 +429,22 @@ fn compute_profile(mut data: Value) -> Value {
             "Disabling compute preemption changes driver scheduling behavior that varies a lot by GPU generation. On older RX 400/500-series cards this can increase stutter instead of reducing it. Test before/after.");
     }
 
-    // ── CPU scheduler tweaks, risk on low core counts ──────────────────────
+    // ── Network offloads, risk on low core counts ───────────────────────────
     if cpu_tier == "budget" {
-        risk!("priority_separation", "warning",
-            "Aggressive Scheduler Bias on Low Core Count",
-            "Win32PrioritySeparation 0x26 gives the foreground app a hard 3:1 quanta bias. On 2-core/4-thread CPUs this can starve background services (audio, anti-cheat helpers, drivers) instead of helping, the opposite of the intended effect. Watch for audio crackle or input stutter after applying.");
         risk!("net_offload_disable", "warning",
             "Budget CPU, Offload Disabling Increases CPU Load",
             "Disabling NIC offloads (TCP checksum, LSO, RSS) moves that work from the network card back onto the CPU. On a low core-count CPU under load (game + voice chat + overlay) this can add enough overhead to cost more frame time than the latency it saves. Test before/after with a frame-time graph, not just ping.");
-        risk!("mmcss_games_task", "warning",
-            "Maximum MMCSS Priority on Low Core Count",
-            "GPU Priority 8 + CPU Priority 6 increases scheduling priority for any MMCSS-registered process. On budget CPUs (≤4 threads) this can cause contention with system threads and reduce, not improve, frame consistency.");
     }
 
-    // ── Power throttling / heat & battery ───────────────────────────────────
-    if is_laptop {
-        risk!("power_throttling_off", "warning",
-            "Laptop, Heat & Battery Impact",
-            "Disabling EcoQoS power throttling stops Windows from parking background processes onto efficiency cores. On a laptop this raises sustained power draw and heat, which can trigger CPU thermal throttling under combined CPU+GPU load, possibly netting lower sustained FPS than with throttling enabled. Use only plugged in, monitor CPU temps.");
-    }
-
-    // ── Low RAM, pagefile / RAM-dependent tweaks ───────────────────────────
+    // ── Low RAM, pagefile ───────────────────────────────────────────────────
     if ram_tier == "low" {
         risk!("pagefile_disable", "danger",
             "Low RAM, Disabling Pagefile Risks Crashes",
             "With under 8 GB RAM, the pagefile is not optional headroom, it's actively used. Disabling it on this system risks out-of-memory crashes and application instability. Keep at minimum 'System Managed'.");
-        risk!("disable_paging_executive", "danger",
-            "Low RAM, Keep Kernel in RAM Not Recommended",
-            "This tweak's own rationale only applies to systems with ≥8 GB RAM. On this system it pins kernel/driver pages permanently in RAM, removing headroom you don't have, increases the chance of paging thrash and crashes instead of reducing latency.");
-    }
-
-    // ── SysMain/Superfetch, helps HDDs, hurts nothing on SSD but is a no-op ─
-    // The tweak's own catalog name says "(SSD systems)", disabling it on an
-    // HDD-only system removes the prefetching that masks slow seek times.
-    if has_hdd && !has_ssd {
-        risk!("sysmain_off", "danger",
-            "HDD Detected, SysMain/Superfetch Helps You",
-            "This tweak is intended for SSD systems. Your system drive is a mechanical HDD, where SysMain's prefetching actively hides slow seek/access times. Disabling it on an HDD-only system will make app launches and boot feel slower, not faster.");
     }
 
     // ── Laptop power-draw tweaks, heat & battery, not 'free' performance ───
     if is_laptop {
-        risk!("core_parking_off", "warning",
-            "Laptop, Battery & Heat Impact",
-            "Keeps every CPU core powered at all times instead of parking idle cores. On a laptop this raises sustained power draw and heat, can shorten battery life noticeably and, under combined CPU+GPU load, contribute to thermal throttling that cancels out the latency gain this tweak aims for.");
         risk!("usb_suspend_off", "warning",
             "Laptop, Battery Impact",
             "Keeps all USB devices fully powered, never suspended. Fine on AC power; on battery this is a measurable, continuous drain for the questionable benefit of avoiding mouse/headset micro-stutter most users never notice.");
@@ -502,4 +476,45 @@ fn compute_profile(mut data: Value) -> Value {
     data["tweakRisks"] = Value::Object(tweak_risks);
 
     data
+}
+
+#[cfg(test)]
+mod tests {
+    use super::compute_profile;
+    use serde_json::json;
+
+    /// The worst case for every hardware rule at once: budget dual-core
+    /// laptop, older GPU, 4 GB RAM, HDD only.
+    fn worst_case() -> serde_json::Value {
+        json!({
+            "cpu": { "name": "Intel Celeron N4020", "cores": 2 },
+            "gpu": { "name": "NVIDIA GeForce GTX 950M", "vramMb": 2048 },
+            "ram": { "totalMb": 4096 },
+            "storage": { "hasNvme": false, "hasSsd": false, "hasHdd": true },
+            "isLaptop": true,
+            "isWifi": true,
+        })
+    }
+
+    #[test]
+    fn retired_tweaks_get_no_risk_verdict() {
+        let profile = compute_profile(worst_case());
+        let risks = profile["tweakRisks"].as_object().unwrap();
+        assert!(!risks.is_empty());
+        for id in risks.keys() {
+            assert!(
+                !crate::optregistry::is_retired(id),
+                "verdict for retired {id}"
+            );
+        }
+    }
+
+    #[test]
+    fn active_tweaks_keep_their_verdicts() {
+        let profile = compute_profile(worst_case());
+        let risks = &profile["tweakRisks"];
+        for id in ["pagefile_disable", "usb_suspend_off", "net_offload_disable"] {
+            assert!(risks.get(id).is_some(), "{id} lost its verdict");
+        }
+    }
 }
