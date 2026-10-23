@@ -5,10 +5,13 @@
 use serde_json::Value;
 use std::fs;
 
+/// HTML-escape text for element content AND quoted attribute values.
 fn esc(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
 }
 
 fn sev_label(s: u64) -> (&'static str, &'static str) {
@@ -122,8 +125,9 @@ td,th{{padding:10px;border-bottom:1px solid #21262d;vertical-align:top;text-alig
         generated = ts.format("%Y-%m-%d %H:%M"),
         os = esc(&os),
         cpu = esc(cpu),
+        summary = esc(summary),
         nf = findings.len(),
-        json_name = json_path.file_name().unwrap_or_default().to_string_lossy(),
+        json_name = esc(&json_path.file_name().unwrap_or_default().to_string_lossy()),
     );
     fs::write(&html_path, html).map_err(|e| e.to_string())?;
 
@@ -131,4 +135,23 @@ td,th{{padding:10px;border-bottom:1px solid #21262d;vertical-align:top;text-alig
         "htmlPath": html_path.to_string_lossy(),
         "jsonPath": json_path.to_string_lossy(),
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::esc;
+
+    #[test]
+    fn esc_covers_text_and_attribute_contexts() {
+        assert_eq!(esc("a<b>&c"), "a&lt;b&gt;&amp;c");
+        assert_eq!(esc("\"onmouseover=\"x"), "&quot;onmouseover=&quot;x");
+        assert_eq!(esc("it's"), "it&#39;s");
+        assert_eq!(
+            esc("<script>alert('x')</script>"),
+            "&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;"
+        );
+        // `&` first, so existing entities are not double-decoded.
+        assert_eq!(esc("&quot;"), "&amp;quot;");
+        assert_eq!(esc("Müller"), "Müller");
+    }
 }

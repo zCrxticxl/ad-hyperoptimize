@@ -109,9 +109,11 @@ async fn cmd_start_monitor(app: AppHandle, state: State<'_, AppState>) -> Result
         .map_err(|e| e.to_string())?
 }
 
-#[tauri::command]
-fn cmd_stop_monitor(state: State<'_, AppState>) {
-    monitor::stop(&state.monitor);
+#[tauri::command(async)]
+async fn cmd_stop_monitor(app: AppHandle) {
+    // stop() joins the monitor thread, never block the main thread on it.
+    let monitor = app.state::<AppState>().monitor.clone();
+    let _ = tauri::async_runtime::spawn_blocking(move || monitor::stop(&monitor)).await;
 }
 
 // ---- optimization engine ----
@@ -915,18 +917,26 @@ async fn cmd_game_list() -> serde_json::Value {
         .unwrap_or_default()
 }
 
-#[tauri::command]
-fn cmd_game_switcher_status(state: State<'_, AppState>) -> serde_json::Value {
-    gameprofile::cmd_game_switcher_status(&state.game_switcher)
+#[tauri::command(async)]
+async fn cmd_game_switcher_status(app: AppHandle) -> serde_json::Value {
+    let st = app.state::<AppState>().game_switcher.clone();
+    tauri::async_runtime::spawn_blocking(move || gameprofile::cmd_game_switcher_status(&st))
+        .await
+        .unwrap_or_default()
 }
 
-#[tauri::command]
-fn cmd_game_switcher_configure(
-    state: State<'_, AppState>,
+#[tauri::command(async)]
+async fn cmd_game_switcher_configure(
+    app: AppHandle,
     enabled: bool,
     default_preset: String,
 ) -> serde_json::Value {
-    gameprofile::cmd_game_switcher_configure(&state.game_switcher, enabled, default_preset)
+    let st = app.state::<AppState>().game_switcher.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        gameprofile::cmd_game_switcher_configure(&st, enabled, default_preset)
+    })
+    .await
+    .unwrap_or_default()
 }
 
 #[tauri::command(async)]
@@ -938,63 +948,145 @@ async fn cmd_game_apply_preset(game_id: String, preset: String) -> serde_json::V
     .unwrap_or_default()
 }
 
-#[tauri::command]
-fn cmd_game_revert(state: State<'_, AppState>) -> serde_json::Value {
-    gameprofile::cmd_game_revert(&state.game_switcher)
+#[tauri::command(async)]
+async fn cmd_game_revert(app: AppHandle) -> serde_json::Value {
+    // Reverting runs powercfg; keep it off the main thread.
+    let st = app.state::<AppState>().game_switcher.clone();
+    tauri::async_runtime::spawn_blocking(move || gameprofile::cmd_game_revert(&st))
+        .await
+        .unwrap_or_default()
 }
 
 // ---- misc ----
-#[tauri::command]
-fn cmd_clear_cache() -> Result<String, String> {
-    let n = cache::clear()?;
+#[tauri::command(async)]
+async fn cmd_clear_cache() -> Result<String, String> {
+    let n = tauri::async_runtime::spawn_blocking(cache::clear)
+        .await
+        .map_err(|_| "cache clear task panicked".to_string())??;
     Ok(format!("Cleared {n} cached scans"))
 }
 
 #[tauri::command(async)]
 fn cmd_open_path(path: String) -> Result<(), String> {
-    // Start-Process opens URLs, files and folders via their default handler
-    // (browser / file association / Explorer). It is spawned with the value as
-    // a single single-quoted argument through ps::run, PowerShell performs no
-    // cmd-style percent/operator expansion inside single quotes, so
-    // percent-encoded URLs (&, %, =, ?) pass through verbatim and the
-    // renderer-supplied value cannot break out of the argument.
-    validate_open_path(&path)?;
-    let safe = path.replace('\'', "''");
-    crate::ps::run(&format!("Start-Process '{safe}'")).map(|_| ())
+    // This process is elevated and `path` is renderer-supplied (social and
+    // buy links, report/backup files, registry-derived install locations).
+    // Nothing is ever executed: no PowerShell, no Start-Process, no
+    // ShellExecute on an arbitrary file. Everything goes to explorer.exe as
+    // one Command argument; explorer hands the request to the running
+    // (unelevated) shell instance, so browsers/viewers do not inherit the
+    // admin token. See classify_open_target for what is allowed.
+    let reports = crate::safety::app_data_dir().join("reports");
+    let arg = match classify_open_target(&path, &reports)? {
+        OpenTarget::Url(u) => u,
+        OpenTarget::Dir(p) | OpenTarget::ReportHtml(p) => p,
+        OpenTarget::RevealFile(p) => format!("/select,{p}"),
+    };
+    let windir = std::env::var_os("SystemRoot")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("C:\\Windows"));
+    // explorer.exe's exit code is meaningless (often 1 on success), so the
+    // child is detached instead of waited on.
+    std::process::Command::new(windir.join("explorer.exe"))
+        .arg(arg)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("explorer: {e}"))
 }
 
-/// `path` is renderer-supplied (including registry-derived install locations
-/// and percent-encoded buy links), so reject anything that could alter the
-/// single-quoted PowerShell argument: control characters (newline injection)
-/// and anything that is neither an http(s) URL nor an absolute local path
-/// (drive letter or UNC).
-fn validate_open_path(path: &str) -> Result<(), String> {
+/// What cmd_open_path may do with a renderer-supplied value.
+#[derive(Debug, PartialEq)]
+enum OpenTarget {
+    /// An `https://` URL, opened in the default browser.
+    Url(String),
+    /// An existing local directory, opened in Explorer.
+    Dir(String),
+    /// A `.html` report inside the app's own reports directory, opened with
+    /// its default handler (the browser). The only file ever "opened".
+    ReportHtml(String),
+    /// Any other existing local file: only revealed (`/select,`), never
+    /// opened or executed.
+    RevealFile(String),
+}
+
+/// Strip the `\\?\` prefix std::fs::canonicalize adds; a canonical path that
+/// resolves to a UNC location (`\\?\UNC\…`, e.g. via a symlink) is refused.
+fn strip_verbatim(p: &std::path::Path) -> Option<String> {
+    let s = p.to_string_lossy();
+    match s.strip_prefix(r"\\?\") {
+        Some(rest) if rest.len() >= 2 && rest.as_bytes()[1] == b':' => Some(rest.to_string()),
+        Some(_) => None,
+        None => Some(s.into_owned()),
+    }
+}
+
+/// Classify `path` for cmd_open_path:
+/// * `https://` URLs only (no http, no other scheme), without whitespace,
+///   quotes or commas (explorer splits its arguments on commas);
+/// * otherwise an absolute `X:\…` local path that exists: UNC, `\\?\`,
+///   device and NTFS stream (`:` after the drive) forms are rejected;
+/// * existing directory → open; `.html` file inside `reports_dir` → open
+///   with the default handler; any other file → reveal only.
+fn classify_open_target(path: &str, reports_dir: &std::path::Path) -> Result<OpenTarget, String> {
     if path.is_empty() || path.len() > 4096 {
         return Err("invalid path".into());
     }
-    if path.bytes().any(|b| b < 0x20) {
+    if path.chars().any(char::is_control) {
         return Err("path contains control characters".into());
     }
-    let upper = path.to_ascii_uppercase();
-    let is_url = upper.starts_with("HTTP://") || upper.starts_with("HTTPS://");
-    let is_unc = upper.starts_with("\\\\");
-    if is_unc && upper.contains('@') {
-        return Err("UNC paths with embedded credentials are not allowed".into());
+    // Explorer parses `,` as an argument separator and `"` as quoting.
+    if path.contains([',', '"']) {
+        return Err("path contains unsupported characters".into());
     }
-    let is_abs = (upper.len() >= 3
-        && upper.as_bytes()[0].is_ascii_alphabetic()
-        && upper.as_bytes()[1] == b':'
-        && upper.as_bytes()[2] == b'\\')
-        || is_unc;
-    if !is_url && !is_abs {
-        return Err("path must be an http(s) URL or an absolute local path".into());
+    let lower = path.to_ascii_lowercase();
+    if lower.starts_with("https://") {
+        if path.len() <= "https://".len() || path.chars().any(char::is_whitespace) {
+            return Err("invalid URL".into());
+        }
+        return Ok(OpenTarget::Url(path.to_string()));
     }
-    Ok(())
+    if lower.contains("://") || lower.starts_with("http:") {
+        return Err("only https:// URLs can be opened".into());
+    }
+
+    let b = path.as_bytes();
+    let is_abs_drive = b.len() >= 3
+        && b[0].is_ascii_alphabetic()
+        && b[1] == b':'
+        && (b[2] == b'\\' || b[2] == b'/');
+    if !is_abs_drive {
+        return Err("path must be an https:// URL or an absolute local path".into());
+    }
+    // NTFS stream syntax / device forms: no `:` after the drive letter.
+    if path[2..].contains(':') {
+        return Err("invalid path".into());
+    }
+    let p = std::path::Path::new(path);
+    let meta = std::fs::metadata(p).map_err(|_| "path does not exist".to_string())?;
+    let canon = std::fs::canonicalize(p).map_err(|e| format!("cannot resolve path: {e}"))?;
+    let canon_str = strip_verbatim(&canon).ok_or("network paths cannot be opened")?;
+
+    if meta.is_dir() {
+        return Ok(OpenTarget::Dir(canon_str));
+    }
+    if !meta.is_file() {
+        return Err("not a file or directory".into());
+    }
+    let is_html = canon
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("html"));
+    let in_reports = std::fs::canonicalize(reports_dir)
+        .map(|r| canon.parent() == Some(r.as_path()))
+        .unwrap_or(false);
+    if is_html && in_reports {
+        Ok(OpenTarget::ReportHtml(canon_str))
+    } else {
+        Ok(OpenTarget::RevealFile(canon_str))
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::validate_open_path;
+    use super::{classify_open_target, OpenTarget};
 
     #[cfg(debug_assertions)]
     #[test]
@@ -1002,33 +1094,88 @@ mod tests {
         assert!(!super::should_auto_elevate());
     }
 
-    #[test]
-    fn open_path_accepts_urls_and_abs_paths() {
-        assert!(validate_open_path("https://discord.gg/vFaKsVuxKP").is_ok());
-        assert!(validate_open_path("http://example.com/x").is_ok());
-        // percent-encoded query links (PcConfigurator buy buttons)
-        assert!(
-            validate_open_path(
-                "https://www.bestbuy.com/site/searchpage.jsp?st=NVIDIA%20GeForce%20RTX%205090&_dyncharset=UTF-8"
-            )
-            .is_ok()
-        );
-        assert!(validate_open_path(r"C:\Program Files (x86)\App & More").is_ok());
-        assert!(validate_open_path(
-            r"C:\Users\Me\AppData\Roaming\PCOptSuite\reports\report-1.html"
-        )
-        .is_ok());
-        assert!(validate_open_path(r"\\server\share\folder").is_ok());
+    fn no_reports() -> std::path::PathBuf {
+        std::env::temp_dir().join("adho-open-path-no-such-reports-dir")
     }
 
     #[test]
-    fn open_path_rejects_injection() {
-        assert!(validate_open_path("").is_err());
-        assert!(validate_open_path("calc.exe").is_err()); // relative
-        assert!(validate_open_path("not a url").is_err());
-        assert!(validate_open_path("https://x.com/a\ncalc").is_err()); // newline
-        assert!(validate_open_path("https://x.com/a\rcalc").is_err());
-        assert!(validate_open_path(&"x".repeat(4097)).is_err());
+    fn open_path_accepts_https_urls() {
+        for u in [
+            "https://discord.gg/vFaKsVuxKP",
+            "https://www.buymeacoffee.com/zCrxticxl",
+            // percent-encoded query links (PcConfigurator buy buttons)
+            "https://www.bestbuy.com/site/searchpage.jsp?st=NVIDIA%20GeForce%20RTX%205090&_dyncharset=UTF-8",
+        ] {
+            assert_eq!(
+                classify_open_target(u, &no_reports()),
+                Ok(OpenTarget::Url(u.to_string()))
+            );
+        }
+    }
+
+    #[test]
+    fn open_path_rejects_unsafe_targets() {
+        for bad in [
+            "",
+            "calc.exe",
+            "not a url",
+            "http://example.com/x",
+            "file:///C:/Windows/System32/calc.exe",
+            "ms-settings:privacy",
+            "https://x.com/a\ncalc",
+            "https://x.com/a b",
+            "https://x.com/a\"b",
+            "https://",
+            r"\\server\share\folder",
+            r"\\?\C:\Windows",
+            r"\\.\C:\Windows",
+            r"C:\Windows::$INDEX_ALLOCATION",
+            r"C:\x\file.txt:stream",
+            r"C:\a,b",
+            r"C:\definitely\not\existing\adho-xyz",
+        ] {
+            assert!(
+                classify_open_target(bad, &no_reports()).is_err(),
+                "should reject {bad:?}"
+            );
+        }
+        assert!(classify_open_target(&"x".repeat(4097), &no_reports()).is_err());
+    }
+
+    #[test]
+    fn open_path_dirs_open_files_are_only_revealed() {
+        let base = std::env::temp_dir().join("adho-open-path-test");
+        let reports = base.join("reports");
+        std::fs::create_dir_all(&reports).unwrap();
+        let exe = base.join("evil.exe");
+        let html_out = base.join("x.html");
+        let html_in = reports.join("report-1.html");
+        for f in [&exe, &html_out, &html_in] {
+            std::fs::write(f, b"x").unwrap();
+        }
+        let s = |p: &std::path::Path| p.to_string_lossy().into_owned();
+
+        if cfg!(windows) {
+            assert!(matches!(
+                classify_open_target(&s(&base), &reports),
+                Ok(OpenTarget::Dir(_))
+            ));
+            // An executable is never opened, only revealed.
+            assert!(matches!(
+                classify_open_target(&s(&exe), &reports),
+                Ok(OpenTarget::RevealFile(_))
+            ));
+            // HTML outside the reports dir: reveal only.
+            assert!(matches!(
+                classify_open_target(&s(&html_out), &reports),
+                Ok(OpenTarget::RevealFile(_))
+            ));
+            assert!(matches!(
+                classify_open_target(&s(&html_in), &reports),
+                Ok(OpenTarget::ReportHtml(_))
+            ));
+        }
+        std::fs::remove_dir_all(&base).unwrap();
     }
 }
 
@@ -1321,8 +1468,8 @@ fn ensure_admin() {
             let Some(exe) = std::env::current_exe().ok() else {
                 return;
             };
-            // Escape single quotes in path, hide the spawning shell entirely
-            let path = exe.to_string_lossy().replace('\'', "''");
+            // Quote the path as a PS literal (ASCII + typographic quotes), hide the spawning shell entirely
+            let path = crate::ps::quote_single(&exe.to_string_lossy());
             // Relaunch elevated and block on the UAC outcome before this
             // unelevated instance shows any window. `Start-Process -Verb RunAs`
             // throws if the user declines UAC; the try/catch maps that to a
@@ -1338,7 +1485,7 @@ fn ensure_admin() {
                     "Hidden",
                     "-Command",
                     &format!(
-                        "try {{ Start-Process -FilePath '{}' -Verb RunAs -ErrorAction Stop; exit 0 }} \
+                        "try {{ Start-Process -FilePath {} -Verb RunAs -ErrorAction Stop; exit 0 }} \
                          catch {{ exit 1 }}",
                         path
                     ),

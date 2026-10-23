@@ -104,10 +104,14 @@ mod freq {
 }
 
 pub struct MonitorState {
+    /// True while a monitor loop is running (informational).
     pub running: Arc<AtomicBool>,
-    /// Join handle of the monitor thread, stop() joins it so a
-    /// stop→start sequence can never leave two loops emitting metrics.
-    thread: Mutex<Option<std::thread::JoinHandle<()>>>,
+    /// The running loop: its join handle plus its OWN stop flag. Both
+    /// start() and stop() hold this mutex for their whole critical section
+    /// (check, spawn/store, signal, join), and every loop gets a fresh flag,
+    /// so a concurrent stop/start can never leave two loops emitting
+    /// metrics or revive a loop that was told to stop.
+    thread: Mutex<Option<(std::thread::JoinHandle<()>, Arc<AtomicBool>)>>,
 }
 
 impl Default for MonitorState {
@@ -120,10 +124,19 @@ impl Default for MonitorState {
 }
 
 pub fn start(app: AppHandle, st: &MonitorState) -> Result<(), String> {
-    if st.running.swap(true, Ordering::SeqCst) {
-        return Ok(()); // already running
+    // Poison recovery: a panicked monitor thread must not brick the monitor.
+    let mut slot = st.thread.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((h, _)) = slot.as_ref() {
+        if !h.is_finished() {
+            return Ok(()); // already running
+        }
     }
-    let running = st.running.clone();
+    // A finished loop (panicked) is reaped before a new one starts.
+    if let Some((h, _)) = slot.take() {
+        let _ = h.join();
+    }
+    let flag = Arc::new(AtomicBool::new(true));
+    let running = flag.clone();
     // Builder::spawn returns io::Result, on failure we must reset the flag,
     // otherwise every later start() no-ops and the monitor is dead forever.
     let handle = std::thread::Builder::new().spawn(move || {
@@ -222,18 +235,19 @@ pub fn start(app: AppHandle, st: &MonitorState) -> Result<(), String> {
             return Err(format!("failed to start monitor thread: {e}"));
         }
     };
-    *st.thread
-        .lock()
-        .map_err(|_| "monitor lock poisoned".to_string())? = Some(handle);
+    *slot = Some((handle, flag));
+    st.running.store(true, Ordering::SeqCst);
     Ok(())
 }
 
 pub fn stop(st: &MonitorState) {
-    st.running.store(false, Ordering::SeqCst);
-    // Poison recovery instead of unwrap: a panicked monitor thread must not
-    // crash the app when the user stops monitoring.
-    let handle = st.thread.lock().unwrap_or_else(|e| e.into_inner()).take();
-    if let Some(h) = handle {
+    // Hold the slot lock across signal + join so a concurrent start() waits
+    // until this loop is really gone. Poison recovery instead of unwrap: a
+    // panicked monitor thread must not crash the app on stop.
+    let mut slot = st.thread.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((h, flag)) = slot.take() {
+        flag.store(false, Ordering::SeqCst);
         let _ = h.join();
     }
+    st.running.store(false, Ordering::SeqCst);
 }

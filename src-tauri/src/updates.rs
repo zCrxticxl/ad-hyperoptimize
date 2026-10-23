@@ -39,8 +39,9 @@ Get-ItemProperty $paths -ErrorAction SilentlyContinue |
 /// spinner output is stripped, footer sentences and secondary sections are
 /// rejected by id sanity checks.
 pub fn scan_app_updates() -> Result<Value, String> {
+    let winget = ps::winget_exe();
     let raw = ps::exec_long(
-        "winget.exe",
+        &winget,
         &[
             "upgrade",
             "--accept-source-agreements",
@@ -174,6 +175,10 @@ pub fn update_apps(id: Option<String>) -> Result<Value, String> {
         }
         None => args.push("--all".into()),
     }
+    // Only the community winget source: never resolve an id against
+    // msstore or a user-added source.
+    args.push("--source".into());
+    args.push("winget".into());
     // --disable-interactivity suppresses UAC on some packages → omit for per-app updates.
     let extra: &[&str] = if id.is_some() {
         &[
@@ -195,7 +200,7 @@ pub fn update_apps(id: Option<String>) -> Result<Value, String> {
     // winget writes errors to stdout (not stderr), exec_capture returns the
     // status + both streams, and enforces the long timeout + tree kill so a
     // hung installer can never wedge the command or leak children.
-    let (status, stdout, stderr) = ps::exec_capture("winget.exe", &argrefs)?;
+    let (status, stdout, stderr) = ps::exec_capture(&ps::winget_exe(), &argrefs)?;
     let stdout = stdout
         .lines()
         .map(|l| l.rsplit('\r').next().unwrap_or("").to_string())

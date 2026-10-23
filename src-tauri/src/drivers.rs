@@ -165,10 +165,12 @@ pub fn check_winget_package(package_id: String) -> Value {
     if !allowed.contains(&package_id.as_str()) {
         return json!({ "available": false, "error": "not whitelisted" });
     }
+    let winget = ps::quote_single(&ps::winget_exe());
+    let pid_q = ps::quote_single(&package_id);
     let script = format!(
         r#"
-$pidEsc = '{package_id}'.Replace("'", "''")
-$out = winget upgrade --id $pidEsc --exact --source winget --accept-source-agreements 2>&1 | Out-String
+$pidEsc = {pid_q}
+$out = & {winget} upgrade --id $pidEsc --exact --source winget --accept-source-agreements 2>&1 | Out-String
 $exitCode = $LASTEXITCODE
 if ($out -match [regex]::Escape($pidEsc) + '\s+([^\s]+)\s+([^\s]+)') {{
     [PSCustomObject]@{{ available=$true; current=$Matches[1]; newVersion=$Matches[2] }}
@@ -199,12 +201,13 @@ pub fn install_via_winget(package_id: String) -> Result<String, String> {
     }
     // Try upgrade first, fall back to install. Every branch reports the real
     // winget exit code so failures are never presented as success.
+    let winget = ps::quote_single(&ps::winget_exe());
     let script = format!(
         r#"
-$upg = winget upgrade --id '{package_id}' --source winget --accept-package-agreements --accept-source-agreements 2>&1
+$upg = & {winget} upgrade --id '{package_id}' --exact --source winget --accept-package-agreements --accept-source-agreements 2>&1
 $upgCode = $LASTEXITCODE
 if ($upg -match 'No applicable update|already installed') {{
-    $inst = winget install --id '{package_id}' --source winget --accept-package-agreements --accept-source-agreements 2>&1
+    $inst = & {winget} install --id '{package_id}' --exact --source winget --accept-package-agreements --accept-source-agreements 2>&1
     $instCode = $LASTEXITCODE
     "EXIT:$instCode`n" + ($inst -join "`n")
 }} else {{

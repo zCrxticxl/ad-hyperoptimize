@@ -146,8 +146,17 @@ fn walk(root: &Path) -> Vec<FileInfo> {
     out
 }
 
+/// Bytes hashed in the cheap first duplicate pass.
+const DUP_PREFIX_BYTES: u64 = 64 * 1024;
+
 fn hash_file(path: &Path) -> Option<String> {
-    let mut f = std::fs::File::open(path).ok()?;
+    hash_file_limited(path, u64::MAX)
+}
+
+/// SHA-256 of the first `limit` bytes of `path` (the whole file when it is
+/// shorter).
+fn hash_file_limited(path: &Path, limit: u64) -> Option<String> {
+    let mut f = std::fs::File::open(path).ok()?.take(limit);
     let mut h = Sha256::new();
     let mut buf = vec![0u8; 65_536];
     loop {
@@ -180,10 +189,53 @@ fn is_protected_dest(path: &Path) -> bool {
 }
 
 fn is_protected_inner(path: &Path, allow_root: bool) -> bool {
+    if is_protected_str(path, allow_root) {
+        return true;
+    }
+    // The string check alone is bypassable by aliases that resolve to a
+    // protected location (junctions/symlinks, 8.3 names the filter below
+    // misses, case/normalisation tricks). When the path exists, resolve it
+    // to its canonical long path and check that too.
+    match std::fs::canonicalize(path) {
+        Ok(canon) => match strip_verbatim_prefix(&canon) {
+            Some(c) => is_protected_str(Path::new(&c), allow_root),
+            None => true, // resolves to a UNC/device path, never a scan target
+        },
+        Err(_) => false,
+    }
+}
+
+/// `std::fs::canonicalize` returns `\\?\C:\…` on Windows; strip it back to
+/// `C:\…`. `\\?\UNC\…` and other verbatim device forms yield `None`.
+fn strip_verbatim_prefix(p: &Path) -> Option<String> {
+    let s = p.to_string_lossy();
+    match s.strip_prefix(r"\\?\") {
+        Some(rest) if rest.len() >= 2 && rest.as_bytes()[1] == b':' => Some(rest.to_string()),
+        Some(_) => None,
+        None => Some(s.into_owned()),
+    }
+}
+
+fn is_protected_str(path: &Path, allow_root: bool) -> bool {
     let raw = path.to_string_lossy().replace('/', "\\");
 
     // `.` / `..` segments never come from the scanner.
     if raw.split('\\').any(|seg| seg == ".." || seg == ".") {
+        return true;
+    }
+
+    // NTFS stream / attribute syntax (`C:\Windows::$INDEX_ALLOCATION`,
+    // `file:stream`): no `:` may follow the drive letter.
+    if raw.char_indices().any(|(i, c)| c == ':' && i != 1) {
+        return true;
+    }
+
+    // 8.3 short names (`C:\PROGRA~1`, `C:\WINDOW~1`) alias long names the
+    // prefix list below would otherwise miss. Scans emit long names only.
+    if raw.split('\\').any(|seg| {
+        let b = seg.as_bytes();
+        b.windows(2).any(|w| w[0] == b'~' && w[1].is_ascii_digit())
+    }) {
         return true;
     }
 
@@ -221,6 +273,8 @@ fn is_protected_inner(path: &Path, allow_root: bool) -> bool {
         "\\RECOVERY",
         "\\WINDOWS.OLD",
         "\\EFI",
+        "\\BOOT",
+        "\\CONFIG.MSI",
         "\\PCOPTSUITE", // journal / cache / backups, never self-delete
     ];
     // `X:\…` → keep the backslash: index 2 is `\`, so [2..] is `\…`.
@@ -663,20 +717,45 @@ pub fn scan_duplicates(path: String) -> Value {
         .collect();
     let total_checked = flat.len();
 
-    // Hash in parallel
-    let hashed: Vec<(String, PathBuf, u64, u64)> = flat
+    // Pass 1: hash only a 64 KiB prefix of every size-matched file (cheap),
+    // in parallel. Only (size, prefix) collisions can be duplicates.
+    let prefixed: Vec<(String, PathBuf, u64)> = flat
         .par_iter()
         .filter_map(|(path, size)| {
+            hash_file_limited(path, DUP_PREFIX_BYTES).map(|h| (h, path.clone(), *size))
+        })
+        .collect();
+    let mut by_prefix: HashMap<(u64, String), Vec<PathBuf>> = HashMap::new();
+    for (h, path, size) in prefixed {
+        by_prefix.entry((size, h)).or_default().push(path);
+    }
+    let collisions: Vec<(String, PathBuf, u64)> = by_prefix
+        .into_iter()
+        .filter(|(_, v)| v.len() >= 2)
+        .flat_map(|((size, h), v)| v.into_iter().map(move |p| (h.clone(), p, size)))
+        .collect();
+
+    // Pass 2: full hash for prefix collisions only. A file no larger than
+    // the prefix was already hashed completely in pass 1.
+    let hashed: Vec<(String, PathBuf, u64, u64)> = collisions
+        .par_iter()
+        .filter_map(|(prefix_hash, path, size)| {
             let modified = path.metadata().ok().map(|m| modified_secs(&m)).unwrap_or(0);
-            hash_file(path).map(|h| (h, path.clone(), *size, modified))
+            let full = if *size <= DUP_PREFIX_BYTES {
+                Some(prefix_hash.clone())
+            } else {
+                hash_file(path)
+            };
+            full.map(|h| (h, path.clone(), *size, modified))
         })
         .collect();
 
-    // Group by hash
-    let mut by_hash: HashMap<String, Vec<(PathBuf, u64, u64)>> = HashMap::new();
+    // Group by (size, full hash); value = (path, size, modified)
+    type DupFiles = Vec<(PathBuf, u64, u64)>;
+    let mut by_hash: HashMap<(u64, String), DupFiles> = HashMap::new();
     for (hash, path, size, modified) in hashed {
         by_hash
-            .entry(hash)
+            .entry((size, hash))
             .or_default()
             .push((path, size, modified));
     }
@@ -685,7 +764,7 @@ pub fn scan_duplicates(path: String) -> Value {
     let mut groups: Vec<Value> = by_hash
         .into_iter()
         .filter(|(_, v)| v.len() >= 2)
-        .map(|(hash, files)| {
+        .map(|((_, hash), files)| {
             let size   = files[0].1;
             let wasted = size * (files.len() as u64 - 1);
             // Sort: oldest first (original), newest last (likely the copy)
@@ -1090,6 +1169,74 @@ mod tests {
             r"..\..\Windows\System32",
         ] {
             assert!(is_protected(Path::new(p)), "should be protected: {p}");
+        }
+    }
+
+    #[test]
+    fn short_name_stream_and_boot_aliases_are_rejected() {
+        for p in [
+            // 8.3 short names alias protected long names.
+            r"C:\PROGRA~1\App",
+            r"C:\PROGRA~2",
+            r"C:\WINDOW~1\System32",
+            r"C:\Users\ALICE~1\AppData",
+            r"D:\data\LONGFO~1\x",
+            // NTFS stream / attribute syntax.
+            r"C:\Windows::$INDEX_ALLOCATION",
+            r"C:\Windows:$I30:$INDEX_ALLOCATION",
+            r"C:\Users\Alice\Downloads\file.zip:Zone.Identifier",
+            r"D:\x:y",
+            // Boot files and the MSI rollback folder.
+            r"C:\Boot",
+            r"C:\Boot\BCD",
+            r"C:\boot\x",
+            r"C:\Config.Msi",
+            r"C:\Config.Msi\abc.rbf",
+        ] {
+            assert!(is_protected(Path::new(p)), "should be protected: {p}");
+            assert!(
+                is_protected_dest(Path::new(p)),
+                "dest should be protected: {p}"
+            );
+        }
+        // A tilde not followed by a digit is an ordinary name.
+        assert!(!is_protected(Path::new(r"D:\Games\~backup\save.dat")));
+        assert!(!is_protected(Path::new(r"D:\Games\v1~beta\save.dat")));
+        assert!(!is_protected(Path::new(r"D:\Bootleg\x")));
+    }
+
+    #[test]
+    fn verbatim_prefix_is_stripped_only_for_drive_paths() {
+        use super::strip_verbatim_prefix;
+        assert_eq!(
+            strip_verbatim_prefix(Path::new(r"\\?\C:\Windows")).as_deref(),
+            Some(r"C:\Windows")
+        );
+        assert_eq!(
+            strip_verbatim_prefix(Path::new(r"C:\Users\x")).as_deref(),
+            Some(r"C:\Users\x")
+        );
+        assert_eq!(strip_verbatim_prefix(Path::new(r"\\?\UNC\srv\share")), None);
+        assert_eq!(strip_verbatim_prefix(Path::new(r"\\?\Volume{x}\a")), None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn existing_paths_are_checked_by_canonical_long_name() {
+        // A real 8.3/case alias of a protected directory is caught by the
+        // canonical check as well as the string filter.
+        let windir = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
+        assert!(is_protected(Path::new(&windir.to_lowercase())));
+        assert!(is_protected(Path::new(&format!(r"{windir}\System32"))));
+        // A temp dir under the user profile stays allowed after canonicalisation.
+        let tmp = std::env::temp_dir().join("adho-protect-canon");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let canon_ok = !is_protected(&tmp);
+        std::fs::remove_dir_all(&tmp).unwrap();
+        // temp_dir may itself be an 8.3 path (C:\Users\ADRIA~1\...); then the
+        // string filter refuses it by design. Only assert for long paths.
+        if !tmp.to_string_lossy().contains('~') {
+            assert!(canon_ok, "temp dir should be allowed: {}", tmp.display());
         }
     }
 

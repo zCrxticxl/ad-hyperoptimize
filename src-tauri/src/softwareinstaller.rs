@@ -1,6 +1,7 @@
 //! Software Installer, curated winget catalog with streaming install progress.
 
 use serde_json::{json, Value};
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::AppHandle;
 use tauri::Emitter;
 
@@ -71,11 +72,12 @@ pub fn check_installed() -> Value {
         .map(|i| format!("'{i}'"))
         .collect::<Vec<_>>()
         .join(",");
+    let winget = crate::ps::quote_single(&crate::ps::winget_exe());
     let script = format!(
         r#"
 $result = @{{}}
 try {{
-    $installed = winget list --accept-source-agreements 2>$null
+    $installed = & {winget} list --accept-source-agreements 2>$null
     $catalog = @({list})
     foreach ($id in $catalog) {{
         $result[$id] = ($installed | Select-String ([regex]::Escape($id))) -ne $null
@@ -89,8 +91,45 @@ $result | ConvertTo-Json -Compress
 
 // ── install ───────────────────────────────────────────────────────────────────
 
+/// Set while an install batch runs; a second concurrent batch is refused so
+/// two winget processes never race on the same packages.
+static INSTALLING: AtomicBool = AtomicBool::new(false);
+
+/// Clears [`INSTALLING`] when the batch ends, also on panic.
+struct InstallGuard;
+impl Drop for InstallGuard {
+    fn drop(&mut self) {
+        INSTALLING.store(false, Ordering::SeqCst);
+    }
+}
+
+/// True when the winget exit code reports success. Language-agnostic:
+/// 0 = installed, -1978335212 (0x8A150014) / -1978335189 (0x8A15002B) =
+/// already installed / no applicable upgrade. Output text is never used,
+/// so a localized or failing run can't be reported as success.
+fn install_succeeded(first_line: &str) -> bool {
+    matches!(
+        first_line.trim(),
+        "EXIT:0" | "EXIT:-1978335212" | "EXIT:-1978335189"
+    )
+}
+
 pub fn install_apps(winget_ids: Vec<String>, app: AppHandle) {
+    if INSTALLING.swap(true, Ordering::SeqCst) {
+        for id in &winget_ids {
+            let _ = app.emit(
+                "sw-install-progress",
+                json!({
+                    "wingetId": id,
+                    "status":   "error",
+                    "message":  "Another installation is already running",
+                }),
+            );
+        }
+        return;
+    }
     std::thread::spawn(move || {
+        let _guard = InstallGuard;
         let known: std::collections::HashSet<String> = catalog_ids().into_iter().collect();
         let mut seen = std::collections::HashSet::new();
         for id in &winget_ids {
@@ -120,23 +159,19 @@ pub fn install_apps(winget_ids: Vec<String>, app: AppHandle) {
                 }),
             );
 
+            // id is a catalog id (checked above, is_safe_ident by test);
+            // quote_single keeps it one literal argument regardless.
             let script = format!(
-                r#"$o = winget install --id "{}" --exact --silent --accept-package-agreements --accept-source-agreements 2>&1 | Out-String; "EXIT:$($LASTEXITCODE)"; $o"#,
-                id
+                r#"$o = & {} install --id {} --exact --source winget --silent --accept-package-agreements --accept-source-agreements 2>&1 | Out-String; "EXIT:$($LASTEXITCODE)"; $o"#,
+                crate::ps::quote_single(&crate::ps::winget_exe()),
+                crate::ps::quote_single(id)
             );
 
             match crate::ps::run_long(&script) {
                 Ok(out) => {
                     // Use exit code as primary indicator, language-agnostic
                     // -1978335212 = already installed, -1978335189 = no applicable upgrade
-                    let first = out.lines().next().unwrap_or("");
-                    let exit_ok = first == "EXIT:0"
-                        || first == "EXIT:-1978335212"
-                        || first == "EXIT:-1978335189";
-                    let success = exit_ok
-                        || out.contains("Successfully installed")
-                        || out.contains("already installed")
-                        || out.contains("No applicable upgrade found");
+                    let success = install_succeeded(out.lines().next().unwrap_or(""));
                     let msg = out
                         .lines()
                         .rfind(|l| !l.starts_with("EXIT:") && !l.trim().is_empty())
@@ -188,5 +223,16 @@ mod tests {
         for id in ids {
             assert!(is_safe_ident(&id), "unsafe winget id in catalog: {id}");
         }
+    }
+
+    #[test]
+    fn success_comes_only_from_the_exit_code() {
+        assert!(install_succeeded("EXIT:0"));
+        assert!(install_succeeded("EXIT:-1978335212"));
+        assert!(install_succeeded("EXIT:-1978335189"));
+        assert!(!install_succeeded("EXIT:1"));
+        assert!(!install_succeeded("EXIT:-1978335215"));
+        assert!(!install_succeeded("Successfully installed"));
+        assert!(!install_succeeded(""));
     }
 }
