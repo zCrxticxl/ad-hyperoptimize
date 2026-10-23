@@ -135,7 +135,9 @@ fn build_nagle_revert(out: &str) -> Option<String> {
         let key = parts.next()?;
         let ack = parts.next()?;
         let nd = parts.next()?;
-        if parts.next().is_some() || !crate::ps::is_guid(key) {
+        // Interface subkeys are named `{GUID}` (with braces).
+        let bare = key.strip_prefix('{').and_then(|k| k.strip_suffix('}'));
+        if parts.next().is_some() || !bare.is_some_and(crate::ps::is_guid) {
             return None;
         }
         let path = format!(
@@ -148,6 +150,8 @@ fn build_nagle_revert(out: &str) -> Option<String> {
                      if ($v -eq 1) {{ Remove-ItemProperty -Path '{path}' -Name '{name}' -EA Stop }} else {{ if ($null -ne $v) {{ exit 1 }} }}"
                 ));
             } else if captured != "1" {
+                // Only a plain DWORD may be baked into the script text.
+                captured.parse::<u32>().ok()?;
                 steps.push(format!(
                     "Set-ItemProperty -Path '{path}' -Name '{name}' -Value {captured} -Type DWord -EA Stop"
                 ));
@@ -155,9 +159,12 @@ fn build_nagle_revert(out: &str) -> Option<String> {
         }
     }
     if steps.is_empty() {
-        return Some("powershell -Command \"exit 0\"".into());
+        return Some("powershell -Command exit 0".into());
     }
-    Some(format!("powershell -Command \"{}\"", steps.join("; ")))
+    // No outer quotes: run_cmdline hands everything after ` -Command ` to
+    // PowerShell as the script, and a quoted script is just a string literal
+    // that PowerShell echoes instead of executing.
+    Some(format!("powershell -Command {}", steps.join("; ")))
 }
 
 /// Run a capture and build the exact revert command for it.
@@ -220,9 +227,10 @@ fn capture_revert(cap: &ShowCapture) -> Option<String> {
                 // steps in order and aborts on the first failure; the final
                 // setactive makes the restored indexes effective immediately.
                 format!(
-                    "powershell -Command \"powercfg /setacvalueindex {guid} {subgroup} {setting} {ac}; \
+                    "powershell -Command powercfg /setacvalueindex {guid} {subgroup} {setting} {ac}; \
                      if ($LASTEXITCODE -eq 0) {{ powercfg /setdcvalueindex {guid} {subgroup} {setting} {dc}; \
-                     if ($LASTEXITCODE -eq 0) {{ powercfg /setactive scheme_current }} }}\""
+                     if ($LASTEXITCODE -eq 0) {{ powercfg /setactive scheme_current }} }}; \
+                     exit $LASTEXITCODE"
                 )
             })
         }
@@ -1162,6 +1170,20 @@ fn service_set_start(name: &str, mode: &str) -> Result<(), String> {
     .map(|_| ())
 }
 
+/// Journals written before this fix stored some reverts as
+/// `powershell -Command "<script>"`. Passed through verbatim, PowerShell
+/// evaluates that as an expandable string and merely prints it (exit 0), so
+/// the undo silently did nothing. Strip one pair of wrapping quotes when the
+/// script contains no other double quote (so `"a" + "b"` is left alone).
+fn unwrap_quoted_script(script: &str) -> &str {
+    let t = script.trim();
+    if t.len() >= 2 && t.starts_with('"') && t.ends_with('"') && !t[1..t.len() - 1].contains('"') {
+        &t[1..t.len() - 1]
+    } else {
+        t
+    }
+}
+
 fn run_cmdline(line: &str) -> Result<(), String> {
     // PowerShell wrapper lines (`powershell … -Command <expr>` from ps_expr
     // and the TCP tweak one-liners) pass the expression as ONE -Command
@@ -1173,7 +1195,7 @@ fn run_cmdline(line: &str) -> Result<(), String> {
         .is_some_and(|t| t.eq_ignore_ascii_case("powershell"))
     {
         if let Some(pos) = line.find(" -Command ") {
-            let script = &line[pos + " -Command ".len()..];
+            let script = unwrap_quoted_script(&line[pos + " -Command ".len()..]);
             return crate::ps::run(script).map(|_| ());
         }
     }
@@ -1769,5 +1791,37 @@ mod tests {
         }
         assert_eq!(parse_tcp_autotuning("SomethingElse"), None);
         assert_eq!(parse_tcp_autotuning(""), None);
+    }
+
+    #[test]
+    fn quoted_legacy_scripts_are_unwrapped_once() {
+        assert_eq!(unwrap_quoted_script("\"exit 3\""), "exit 3");
+        assert_eq!(unwrap_quoted_script("exit 3"), "exit 3");
+        // Inner quotes mean the outer pair is not a plain wrapper.
+        assert_eq!(unwrap_quoted_script("\"a\" + \"b\""), "\"a\" + \"b\"");
+    }
+
+    #[test]
+    fn nagle_revert_is_unquoted_and_rejects_non_numeric_captures() {
+        let guid = "{12345678-1234-1234-1234-123456789abc}";
+        let cmd = build_nagle_revert(&format!("{guid}|A|0")).unwrap();
+        assert!(cmd.starts_with("powershell -Command "));
+        assert!(
+            !cmd.contains("-Command \""),
+            "script must not be a string literal: {cmd}"
+        );
+        assert!(cmd.contains("-Value 0 -Type DWord"));
+        assert_eq!(build_nagle_revert(&format!("{guid}|A|0;calc")), None);
+    }
+
+    /// Regression for the silent no-op undo: a quoted `-Command` script used
+    /// to be echoed by PowerShell with exit 0. If it really executes, the
+    /// non-zero exit surfaces as an error.
+    #[cfg(windows)]
+    #[test]
+    fn run_cmdline_executes_quoted_and_unquoted_scripts() {
+        assert!(run_cmdline("powershell -Command \"exit 3\"").is_err());
+        assert!(run_cmdline("powershell -Command exit 3").is_err());
+        assert!(run_cmdline("powershell -Command exit 0").is_ok());
     }
 }
