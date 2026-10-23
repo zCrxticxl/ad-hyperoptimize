@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { api } from "../api";
 import { Card, ActionBtn } from "../components/ui";
 import { useLang } from "../i18n";
+import { FpsMeasure } from "../components/FpsMeasure";
 
 export default function Benchmark() {
   const { t } = useLang();
@@ -38,6 +39,8 @@ export default function Benchmark() {
       <div className="page-sub">
         {t("benchSub")}
       </div>
+
+      <FpsMeasure />
 
       {KINDS.map((k) => (
         <Card title={k.name} key={k.id} style={{ marginBottom: 14 }}>

@@ -99,6 +99,11 @@ export const api = {
   securityRemoveDriver:  (deviceId: string) => invoke<string>("cmd_security_remove_driver",  { deviceId }),
   runBenchmark: (kind: string) => invoke<any>("cmd_run_benchmark", { kind }),
   benchHistory: () => invoke<any[]>("cmd_bench_history"),
+  fpsImport: (csv: string, fileName: string, game: string, state: "before" | "after", note: string) =>
+    invoke<any>("cmd_fps_import", { csv, fileName, game, state, note }),
+  fpsRuns: () => invoke<any>("cmd_fps_runs"),
+  fpsDelete: (id: string) => invoke<any>("cmd_fps_delete", { id }),
+  fpsCompare: (game: string) => invoke<any>("cmd_fps_compare", { game }),
   profileList: () => invoke<any[]>("cmd_profile_list"),
   profileApply: (id: string, withBench: boolean) =>
     invoke<any>("cmd_profile_apply", { id, withBench }),

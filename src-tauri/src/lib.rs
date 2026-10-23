@@ -9,6 +9,7 @@ mod ctxmenu;
 mod debloater;
 mod diskanalyzer;
 mod drivers;
+mod frametime;
 mod gameboost;
 mod gamedb;
 mod gameprofile;
@@ -322,6 +323,44 @@ async fn cmd_security_remove_driver(device_id: String) -> Result<String, String>
 }
 
 // ---- benchmarks ----
+// Frame-time captures (PresentMon / CapFrameX / FrameView CSV) are only
+// parsed; nothing is executed.
+#[tauri::command(async)]
+async fn cmd_fps_import(
+    csv: String,
+    file_name: String,
+    game: String,
+    state: String,
+    note: String,
+) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        frametime::import(csv, file_name, game, state, note)
+    })
+    .await
+    .map_err(|_| "fps import task panicked".to_string())?
+}
+
+#[tauri::command(async)]
+async fn cmd_fps_runs() -> Value {
+    tauri::async_runtime::spawn_blocking(frametime::list)
+        .await
+        .unwrap_or_default()
+}
+
+#[tauri::command(async)]
+async fn cmd_fps_delete(id: String) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || frametime::delete(id))
+        .await
+        .map_err(|_| "fps task panicked".to_string())?
+}
+
+#[tauri::command(async)]
+async fn cmd_fps_compare(game: String) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || frametime::compare(game))
+        .await
+        .map_err(|_| "fps task panicked".to_string())?
+}
+
 #[tauri::command(async)]
 async fn cmd_run_benchmark(kind: String) -> Result<Value, String> {
     tauri::async_runtime::spawn_blocking(move || bench::run(&kind))
@@ -1766,6 +1805,10 @@ pub fn run() {
             cmd_schedtask_toggle,
             // benchmarks / profiles
             cmd_run_benchmark,
+            cmd_fps_import,
+            cmd_fps_runs,
+            cmd_fps_delete,
+            cmd_fps_compare,
             cmd_bench_history,
             cmd_profile_list,
             cmd_profile_apply,
