@@ -1200,10 +1200,30 @@ fn service_set_start(name: &str, mode: &str) -> Result<(), String> {
     // If the service doesn't exist (e.g. the VS diagnostics hub collector on a
     // non-developer machine), there's nothing to disable, treat as success
     // instead of surfacing a scary "service not found" PowerShell error.
+    // Failures are reduced to one line: ACCESS_DENIED (Win32 error 5, raised
+    // for services whose own ACL refuses even administrators) or the bare
+    // exception message, instead of PowerShell's multi-line error record.
     crate::ps::run(&format!(
-        "$s = Get-Service -Name '{name}' -ErrorAction SilentlyContinue; if (-not $s) {{ 'ABSENT' }} else {{ Set-Service -Name '{name}' -StartupType {mode} -ErrorAction Stop; 'OK' }}"
+        "$s = Get-Service -Name '{name}' -ErrorAction SilentlyContinue; if (-not $s) {{ 'ABSENT' }} else {{ \
+         try {{ Set-Service -Name '{name}' -StartupType {mode} -ErrorAction Stop; 'OK' }} catch {{ \
+         $x = $_.Exception; while ($x) {{ if ($x -is [System.ComponentModel.Win32Exception] -and $x.NativeErrorCode -eq 5) {{ \
+         [Console]::Error.WriteLine('ACCESS_DENIED'); exit 5 }}; $x = $x.InnerException }}; \
+         [Console]::Error.WriteLine($_.Exception.Message); exit 1 }} }}"
     ))
     .map(|_| ())
+    .map_err(|e| service_error_message(name, &e))
+}
+
+/// Human-readable form of a service_set_start failure.
+fn service_error_message(name: &str, err: &str) -> String {
+    if err.trim() == "ACCESS_DENIED" {
+        format!(
+            "Windows denied access to service '{name}': it is protected by its own permissions, \
+             so even administrators cannot change it. Nothing was changed."
+        )
+    } else {
+        err.trim().to_string()
+    }
 }
 
 /// Journals written before this fix stored some reverts as
@@ -2074,5 +2094,27 @@ mod tests {
         assert!(run_cmdline("powershell -Command \"exit 3\"").is_err());
         assert!(run_cmdline("powershell -Command exit 3").is_err());
         assert!(run_cmdline("powershell -Command exit 0").is_ok());
+    }
+
+    /// A refused Set-Service surfaces as one readable line, not PowerShell's
+    /// error record. Only meaningful unelevated, where Set-Service is always
+    /// denied; the target is the service's current mode, so nothing changes
+    /// even if the call were allowed.
+    #[cfg(windows)]
+    #[test]
+    fn denied_service_change_reports_access_denied_cleanly() {
+        if crate::ps::is_admin() {
+            return;
+        }
+        let mode = service_get_start("Spooler").unwrap();
+        if !matches!(mode.as_str(), "Automatic" | "Manual" | "Disabled") {
+            return;
+        }
+        let err = service_set_start("Spooler", &mode).unwrap_err();
+        assert!(
+            err.starts_with("Windows denied access to service 'Spooler'"),
+            "{err}"
+        );
+        assert!(!err.contains("CategoryInfo"), "{err}");
     }
 }

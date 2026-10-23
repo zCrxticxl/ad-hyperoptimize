@@ -230,7 +230,7 @@ pub fn set_startup(name: String, startup_type: String) -> Result<Value, String> 
     }
     items.push(crate::safety::ChangeItem::ServiceStartup {
         service: name.clone(),
-        prev: previous,
+        prev: previous.clone(),
         new: startup_type.clone(),
     });
 
@@ -282,8 +282,19 @@ pub fn set_startup(name: String, startup_type: String) -> Result<Value, String> 
 
     if let Some((idx, e)) = failure {
         // Roll back what was attempted; the entry ends up reverted, so no
-        // bogus undo is offered for a change that never took effect.
-        return match crate::tweaks::rollback_entry_items(&entry_id, &items[..=idx]) {
+        // bogus undo is offered for a change that never took effect. A failed
+        // startup change that left the service as it was (e.g. access denied
+        // by the service's own ACL) is not rolled back: retrying the same
+        // refused call would only fail again and strand the entry.
+        let startup_unchanged =
+            matches!(items[idx], crate::safety::ChangeItem::ServiceStartup { .. })
+                && current_startup(&name).is_ok_and(|now| now == previous);
+        let attempted = if startup_unchanged {
+            &items[..idx]
+        } else {
+            &items[..=idx]
+        };
+        return match crate::tweaks::rollback_entry_items(&entry_id, attempted) {
             Ok(()) => Err(format!("{e}; changes rolled back")),
             Err(re) => Err(format!(
                 "{e}; rollback incomplete ({re}); restore token: {entry_id}"
