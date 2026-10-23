@@ -101,8 +101,8 @@ pub fn analyze(scan: &Value, security: &Value, cleanup: &Value) -> Value {
                 let total_gb = total as f64 / 1_048_576.0;
                 findings.push(f(4, "high_mem_pressure", "High memory pressure",
                     format!("{used_pct:.0}% of {total_gb:.1} GB RAM in use at scan time. Sustained >85% causes paging and stutter."),
-                    "Review top memory processes on the Monitor page; consider disabling UWP background apps.",
-                    vec!["background_apps_off"],
+                    "Review top memory processes on the Monitor page; close what you do not need while gaming.",
+                    vec![],
                     json!({ "pct": (used_pct).round(), "totalGb": (total_gb * 10.0).round() / 10.0 })));
             }
         }

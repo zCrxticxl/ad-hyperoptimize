@@ -373,7 +373,19 @@ pub fn catalog() -> Vec<Tweak> {
             risk: "Low",
             requires_admin: false,
             reversible: true,
-            actions: vec![Action::RegSet { root: "HKCU", path: "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\VisualEffects", name: "VisualFXSetting", value: RegVal::Dword(2) }],
+            // VisualFXSetting alone only selects the radio button in the
+            // dialog; the effects themselves are the UserPreferencesMask bits,
+            // which the dialog writes when "best performance" is confirmed.
+            // Both are captured and restored exactly. Effective after sign-out.
+            actions: vec![
+                Action::RegSet { root: "HKCU", path: "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\VisualEffects", name: "VisualFXSetting", value: RegVal::Dword(2) },
+                Action::RegSet {
+                    root: "HKCU",
+                    path: "Control Panel\\Desktop",
+                    name: "UserPreferencesMask",
+                    value: RegVal::Raw { ty: "REG_BINARY".into(), hex: "9012038010000000".into() },
+                },
+            ],
         },
         Tweak {
             id: "telemetry_minimal",
@@ -1375,6 +1387,31 @@ fn may_help_performance(id: &str) -> bool {
     )
 }
 
+/// Every catalog id (the optimization registry must cover exactly these).
+#[cfg(test)]
+pub(crate) fn catalog_ids() -> Vec<&'static str> {
+    catalog().iter().map(|t| t.id).collect()
+}
+
+/// Live status of one tweak plus where it came from ("live" | "journal" |
+/// "none"), used to verify an apply against the real system.
+pub(crate) fn status_of(id: &str) -> Option<(&'static str, &'static str)> {
+    let t = catalog().into_iter().find(|t| t.id == id)?;
+    let live = detect_status(&t);
+    if live != "unknown" {
+        return Some((live, "live"));
+    }
+    let completed = safety::load_journal()
+        .unwrap_or_default()
+        .iter()
+        .any(|e| e.tweak_id == id && !e.reverted && e.completed);
+    Some(if completed {
+        ("applied", "journal")
+    } else {
+        ("unknown", "none")
+    })
+}
+
 /// Catalog + live status, ready for the UI.
 pub fn list_with_status() -> Value {
     // Display-only path: a broken journal degrades to "no undo entries"
@@ -1401,6 +1438,15 @@ pub fn list_with_status() -> Value {
                 "unknown" if completed => "applied",
                 s => s,
             };
+            // Where the status comes from: a live read of Windows, or only
+            // the journal (no readable state; the UI must say so).
+            let status_source = if live == "unknown" && completed {
+                "journal"
+            } else if live == "unknown" {
+                "none"
+            } else {
+                "live"
+            };
             // canUndo: true when we have a journal entry (precise restore with
             // saved previous values) OR when live detection confirms the tweak
             // is currently active AND a force-revert would not have to guess
@@ -1413,7 +1459,8 @@ pub fn list_with_status() -> Value {
                 "impact": t.impact, "risk": t.risk,
                 "performancePotential": may_help_performance(t.id),
                 "requiresAdmin": t.requires_admin, "reversible": t.reversible,
-                "status": status, "undoable": undoable, "canUndo": can_undo,
+                "status": status, "statusSource": status_source,
+                "undoable": undoable, "canUndo": can_undo,
             })
         })
         .collect();
@@ -1433,6 +1480,9 @@ fn force_revertable(t: &Tweak) -> bool {
 fn detect_status(t: &Tweak) -> &'static str {
     #[cfg(windows)]
     {
+        if let Some(status) = effective_status(t.id) {
+            return status;
+        }
         let mut checkable = 0;
         let mut matching = 0;
         let mut absent = 0;
@@ -1490,10 +1540,94 @@ fn detect_status(t: &Tweak) -> &'static str {
                 Action::Cmd { .. } => {}
             }
         }
+        // One-shot command tweaks whose effect is still readable: report the
+        // live state instead of trusting the journal.
+        if checkable == 0 && absent == 0 {
+            if let Some(applied) = cmd_live_state(t.id) {
+                return if applied { "applied" } else { "not_applied" };
+            }
+        }
         return classify_status(checkable, matching, absent);
     }
     #[allow(unreachable_code)]
     "unknown"
+}
+
+/// Tweaks whose effective state is not simply "all values equal the target",
+/// because Windows treats a missing value as a default.
+#[cfg(windows)]
+fn effective_status(id: &str) -> Option<&'static str> {
+    match id {
+        // Game Mode is on unless AutoGameModeEnabled is explicitly 0; a fresh
+        // install has no value at all.
+        "game_mode_on" => Some(game_mode_status(
+            reg_read("HKCU", r"Software\Microsoft\GameBar", "AutoGameModeEnabled")
+                .ok()
+                .flatten(),
+        )),
+        _ => None,
+    }
+}
+
+#[cfg(any(windows, test))]
+fn game_mode_status(value: Option<RegVal>) -> &'static str {
+    match value {
+        None => "applied",
+        Some(RegVal::Dword(0)) => "not_applied",
+        Some(RegVal::Dword(_)) => "applied",
+        Some(_) => "unknown",
+    }
+}
+
+/// Live state of command tweaks that have a readable effect. None = not
+/// readable (status then falls back to the journal and is marked as such).
+#[cfg(windows)]
+fn cmd_live_state(id: &str) -> Option<bool> {
+    const HIGH_PERFORMANCE: &str = "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c";
+    match id {
+        "power_high_performance" => {
+            let out = crate::ps::exec("powercfg.exe", &["/getactivescheme"]).ok()?;
+            let guid = parse_active_scheme_guid(&out)?;
+            Some(guid.eq_ignore_ascii_case(HIGH_PERFORMANCE))
+        }
+        "hibernate_off" => match reg_read(
+            "HKLM",
+            "SYSTEM\\CurrentControlSet\\Control\\Power",
+            "HibernateEnabled",
+        )
+        .ok()
+        .flatten()
+        {
+            Some(RegVal::Dword(v)) => Some(v == 0),
+            Some(_) => None,
+            // Without the value Windows decides from its default; the
+            // hibernation file exists exactly while hibernation is enabled.
+            None => {
+                let drive = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
+                let file = std::path::Path::new(&format!("{drive}\\")).join("hiberfil.sys");
+                Some(std::fs::symlink_metadata(file).is_err())
+            }
+        },
+        // Both cmdlets report English enum names on every display language.
+        "tcp_autotuning_normal" => crate::ps::run(
+            "(Get-NetTCPSetting -SettingName Internet -ErrorAction Stop).AutoTuningLevelLocal",
+        )
+        .ok()
+        .and_then(|s| live_flag(&s, "Normal")),
+        "net_rss_on" => {
+            crate::ps::run("(Get-NetOffloadGlobalSetting -ErrorAction Stop).ReceiveSideScaling")
+                .ok()
+                .and_then(|s| live_flag(&s, "Enabled"))
+        }
+        _ => None,
+    }
+}
+
+/// Some(applied) for a single non-empty cmdlet output line, None otherwise.
+#[cfg(any(windows, test))]
+fn live_flag(out: &str, applied_value: &str) -> Option<bool> {
+    let v = out.trim();
+    (!v.is_empty() && !v.contains('\n')).then(|| v.eq_ignore_ascii_case(applied_value))
 }
 
 /// Status from live-check counts. Absent services are excluded from the
@@ -2125,6 +2259,21 @@ mod tests {
         }
         assert_eq!(parse_tcp_autotuning("SomethingElse"), None);
         assert_eq!(parse_tcp_autotuning(""), None);
+    }
+
+    #[test]
+    fn game_mode_missing_value_means_windows_default_on() {
+        assert_eq!(game_mode_status(None), "applied");
+        assert_eq!(game_mode_status(Some(RegVal::Dword(0))), "not_applied");
+        assert_eq!(game_mode_status(Some(RegVal::Dword(1))), "applied");
+    }
+
+    #[test]
+    fn live_flag_needs_a_single_value() {
+        assert_eq!(live_flag("Normal\r\n", "Normal"), Some(true));
+        assert_eq!(live_flag("Disabled", "Normal"), Some(false));
+        assert_eq!(live_flag("", "Normal"), None);
+        assert_eq!(live_flag("a\nb", "Normal"), None);
     }
 
     #[test]

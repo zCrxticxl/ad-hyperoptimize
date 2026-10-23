@@ -18,6 +18,8 @@ mod hwmonitor;
 mod hwprofile;
 mod latency;
 mod monitor;
+mod optimizer;
+mod optregistry;
 mod perftweaks;
 mod powerplan;
 mod privacy;
@@ -200,6 +202,21 @@ async fn cmd_autoopt_score() -> Value {
 #[tauri::command(async)]
 async fn cmd_autoopt_apply(items: Vec<Value>) -> Value {
     tauri::async_runtime::spawn_blocking(move || autoopt::apply_selected(items))
+        .await
+        .unwrap_or_default()
+}
+
+// ---- system health check / verified optimization ----
+#[tauri::command(async)]
+async fn cmd_health_scan() -> Value {
+    tauri::async_runtime::spawn_blocking(optimizer::scan)
+        .await
+        .unwrap_or_default()
+}
+
+#[tauri::command(async)]
+async fn cmd_optimize_apply(ids: Vec<String>, restore_point: bool) -> Value {
+    tauri::async_runtime::spawn_blocking(move || optimizer::apply(ids, restore_point))
         .await
         .unwrap_or_default()
 }
@@ -1102,6 +1119,7 @@ mod smoke {
             ("debloater uwp", crate::debloater::list_uwp),
             ("debloater tweaks", crate::debloater::list_tweaks),
             ("gputweaks", crate::gputweaks::scan),
+            ("health check", crate::optimizer::scan),
             ("hwprofile", crate::hwprofile::hw_profile),
             ("msi", crate::perftweaks::msi_list),
             ("powerplan", crate::powerplan::list_plans),
@@ -1743,6 +1761,8 @@ pub fn run() {
             cmd_generate_report,
             // auto optimizer
             cmd_autoopt_scan,
+            cmd_health_scan,
+            cmd_optimize_apply,
             cmd_autoopt_score,
             cmd_autoopt_apply,
             // game profiles / auto-switcher
