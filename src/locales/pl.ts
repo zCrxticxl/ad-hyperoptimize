@@ -1206,7 +1206,6 @@ export const ui: Partial<UiText> = {
   dashSummaryNone: "Nie wykryto istotnych problemów. Konfiguracja systemu wygląda prawidłowo.",
   findHighMemPressureTitle: "Wysokie obciążenie pamięci",
   findHighMemPressureDetail: "{pct}% pamięci RAM ({totalGb} GB) jest używane w momencie skanowania. Utrzymanie powyżej 85% powoduje stronicowanie i zacięcia.",
-  findHighMemPressureRec: "Przejrzyj procesy zużywające najwięcej pamięci na stronie Monitor; rozważ wyłączenie aplikacji UWP działających w tle.",
   findSysDriveFullTitle: "Dysk systemowy prawie pełny",
   findSysDriveFullDetail: "Dysk C: ma {freePct}% wolnego miejsca. Poniżej ~10% wydajność aktualizacji Windows i stranicowania ulega pogorszeniu.",
   findSysDriveFullRec: "Uruchom Czyszczenie; rozważ wyłączenie hibernacji, aby odzyskać hiberfil.sys.",

@@ -570,3 +570,8 @@ pre, code, .svc-desc { user-select: text; -webkit-user-select: text; }
   .side-item, .side-unlock { justify-content: center; padding: 10px 0; }
 }
 @media (prefers-reduced-motion: reduce) { .side-item, .section-tab { transition: none; } }
+
+/* Optimize / Health Check section headings and inline search */
+.section-label { color: var(--muted); text-transform: uppercase; font-size: 12px; letter-spacing: .5px; margin: 0 0 8px; }
+.input { padding: 8px 11px; border: 1px solid var(--border); border-radius: 9px; background: var(--input-bg); color: var(--text); font: inherit; font-size: 13px; }
+.input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }

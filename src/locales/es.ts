@@ -1206,7 +1206,6 @@ export const ui: Partial<UiText> = {
   dashSummaryNone: "No se detectaron problemas significativos. La configuración del sistema parece saludable.",
   findHighMemPressureTitle: "Alta presión de memoria",
   findHighMemPressureDetail: "{pct}% de {totalGb} GB de RAM en uso al momento del escaneo. Un uso sostenido superior al 85% causa paginación y tirones.",
-  findHighMemPressureRec: "Revisa los procesos con mayor uso de memoria en la página Monitor; considera desactivar aplicaciones UWP en segundo plano.",
   findSysDriveFullTitle: "Unidad del sistema casi llena",
   findSysDriveFullDetail: "C: tiene {freePct}% libre. Por debajo del ~10% se degrada el rendimiento de actualizaciones de Windows y paginación.",
   findSysDriveFullRec: "Ejecuta Limpieza; considera desactivar la hibernación para recuperar hiberfil.sys.",

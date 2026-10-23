@@ -1206,7 +1206,6 @@ export const ui: Partial<UiText> = {
   dashSummaryNone: "Inga signifikanta problem upptäckta. Systemkonfigurationen ser frisk ut.",
   findHighMemPressureTitle: "Hög minnesbelastning",
   findHighMemPressureDetail: "{pct}% av {totalGb} GB RAM användes vid skanningen. Över 85% under längre tid orsakar paginering och ryck.",
-  findHighMemPressureRec: "Granska toppminnesprocesser på Övervakningssidan; överväg att inaktivera UWP-bakgrundsappr.",
   findSysDriveFullTitle: "Systemdisken nästan full",
   findSysDriveFullDetail: "C: har {freePct}% ledigt. Under ~10% försämras Windows-uppdatering och pagineringsprestanda.",
   findSysDriveFullRec: "Kör Rensning; överväg att inaktivera viloläge för att återställa hiberfil.sys.",

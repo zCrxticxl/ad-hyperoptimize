@@ -34,7 +34,8 @@ import PowerPlan from "./pages/PowerPlan";
 import Debloater from "./pages/Debloater";
 import DriverManager from "./pages/DriverManager";
 import GameBooster from "./pages/GameBooster";
-import AutoOptimizer from "./pages/AutoOptimizer";
+import OptimizeMyPc from "./pages/OptimizeMyPc";
+import SystemCheck from "./pages/SystemCheck";
 import RestorePointManager from "./pages/RestorePointManager";
 import GameProfiles from "./pages/GameProfiles";
 import SoftwareInstaller from "./pages/SoftwareInstaller";
@@ -55,7 +56,8 @@ type NavBuilder = (t: (key: TKey) => string) => NavGroup[];
 export const buildNav: NavBuilder = (t) => [
   { id: "home", group: t("navSecDashboard"), icon: "🏠", desc: t("secDescDashboard"), accent: "blue", items: [
     { id: "dashboard", icon: "📋", label: t("navDashboard"), desc: t("toolDescDashboard"), basic: true, keywords: "home start overview status" },
-    { id: "healthcheck", icon: "🩺", label: t("navHealthCheck"), desc: t("toolDescHealthCheck"), basic: true, keywords: "health scan diagnose check zustand" },
+    { id: "systemcheck", icon: "🔎", label: t("navSystemCheck"), desc: t("toolDescSystemCheck"), basic: true, keywords: "health check scan system diagnose recommendations empfehlungen zustand hardware" },
+    { id: "healthcheck", icon: "🩺", label: t("navHealthCheck"), desc: t("toolDescHealthCheck"), basic: true, keywords: "sfc dism repair reparatur systemdateien" },
   ] },
   { id: "optimize", group: t("navSecOptimize"), icon: "🚀", desc: t("secDescOptimize"), accent: "violet", items: [
     { id: "autoopt", icon: "⚡", label: t("navAutoOpt"), desc: t("toolDescAutoOpt"), basic: true, keywords: "auto automatic oneclick one-click recommended empfohlen automatisch" },
@@ -114,7 +116,7 @@ export type Mode = "beginner" | "expert";
  * get the "revertible" trust pill (a read-only page must not claim it), which
  * also links to the undo hub. */
 const REVERTIBLE_TOOLS = new Set([
-  "optimize", "autoopt", "regclean", "gputweaks", "nvcontrol",
+  "optimize", "autoopt", "systemcheck", "regclean", "gputweaks", "nvcontrol",
   "bootopt", "privacy", "services", "startup", "schedtasks", "healthcheck",
   "perftweaks", "powerplan", "gameboost", "restorepoints",
   "profiles", "gameprofiles", "ctxmenu",
@@ -169,7 +171,8 @@ function renderTool(page: string, mode: Mode, admin: boolean | null, go: (id: st
     case "security": return <Security mode={mode} admin={!!admin} go={go} />;
     case "benchmark": return <Benchmark />;
     case "reports": return <Reports />;
-    case "autoopt": return <AutoOptimizer admin={!!admin} />;
+    case "autoopt": return <OptimizeMyPc admin={!!admin} go={go} />;
+    case "systemcheck": return <SystemCheck mode={mode} go={go} />;
     case "restorepoints": return <RestorePointManager admin={!!admin} />;
     case "softinstaller": return <SoftwareInstaller admin={!!admin} />;
     case "pcconfig": return <PcConfigurator />;

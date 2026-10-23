@@ -50,9 +50,10 @@ export default function Dashboard({ mode, go }: { mode: Mode; go: (p: string, ta
           {actionable > 0 && <button className="btn ghost" onClick={() => go("optimize")}>{actionable} · {t("dashFixInOptimize")} →</button>}
         </div>
         {meta && <div className="analysis-meta"><span className="status-dot is-ready" />{meta.fromCache ? `${t("dashCached")} · ` : ""}{t("dashAnalyzed")} {fmtAge(meta.time)}</div>}
+        <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>{t("dashHealthScore")}: {t("dashScoreDef")}</div>
         {err && <div className="inline-error">{err}</div>}
       </div>
-      <div className="score-orbit" style={{ background: `conic-gradient(${ringColor} 0 ${arc}%, rgba(255,255,255,.09) ${arc}%)` }}>
+      <div className="score-orbit" title={t("dashScoreDef")} style={{ background: `conic-gradient(${ringColor} 0 ${arc}%, rgba(255,255,255,.09) ${arc}%)` }}>
         <div className="score-inner"><span className="score-value">{busy && score === null ? <Spinner /> : score ?? "-"}</span><span className="score-label">{t("dashHealthScore")}</span><span className="score-total">/ 100</span></div>
       </div>
     </section>

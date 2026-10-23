@@ -175,6 +175,8 @@ export const api = {
   deleteRestorePoint: (sequenceNumber: number) => invoke<string>("cmd_delete_restore_point", { sequenceNumber }),
   launchRstrui: () => invoke<string>("cmd_launch_rstrui"),
   // auto optimizer
+  healthScan: () => invoke<any>("cmd_health_scan"),
+  optimizeApply: (ids: string[], restorePoint: boolean) => invoke<any>("cmd_optimize_apply", { ids, restorePoint }),
   autooptScan: () => invoke<any>("cmd_autoopt_scan"),
   autooptScore: () => invoke<any>("cmd_autoopt_score"),
   autooptApply: (items: any[]) => invoke<any>("cmd_autoopt_apply", { items }),

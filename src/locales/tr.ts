@@ -1206,7 +1206,6 @@ export const ui: Partial<UiText> = {
   dashSummaryNone: "Önemli bir sorun tespit edilmedi. Sistem yapılandırması sağlıklı görünüyor.",
   findHighMemPressureTitle: "Yüksek bellek basıncı",
   findHighMemPressureDetail: "Tarama sırasında {totalGb} GB RAM'in {pct}%'si kullanımda. Sürekli %85'in üzerindeki kullanım sayfalama ve donmalara neden olur.",
-  findHighMemPressureRec: "Monitör sayfasında üst bellek süreçlerini inceleyin; UWP arka plan uygulamalarını devre dışı bırakmayı düşünün.",
   findSysDriveFullTitle: "Sistem diski neredeyse dolu",
   findSysDriveFullDetail: "C: sürücüsünde %{freePct} boş alan var. %10'un altına düştüğünde Windows güncellemesi ve sayfalama performansı düşer.",
   findSysDriveFullRec: "Temizleme'yi çalıştırın; hiberfil.sys geri kazanmak için hibernasyonu devre dışı bırakmayı düşünün.",

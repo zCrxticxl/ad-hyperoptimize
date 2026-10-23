@@ -1,122 +1,68 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { api } from "../api";
-import { Card, Badge, Spinner, ActionBtn } from "../components/ui";
-import { RiskBadge, RiskNotice } from "../components/HwWarnings";
-import { useHwProfile } from "../hooks/useHwProfile";
+import { ActionBtn, Card, ErrorBanner, Spinner } from "../components/ui";
+import { OptCard } from "../components/OptCard";
+import { useHealthScan } from "../hooks/useHealthScan";
 import { useFeatureFocus } from "../hooks/useFeatureFocus";
-import { useLang } from "../i18n";
+import { useLang, TKey } from "../i18n";
 import { localizeTweak } from "../localize";
+import { HealthItem, NEEDS_REVIEW } from "../lib/health";
 import type { Mode } from "../App";
 
-export default function Optimize({ mode, admin, focusId, onSwitchExpert }: { mode: Mode; admin: boolean; focusId?: string; onSwitchExpert?: () => void }) {
+/** Optimize: only optimizations that fit this PC are shown by default,
+ * grouped by what they are for. Everything else (no proven benefit,
+ * troubleshooting, privacy, not applicable) stays reachable under Advanced
+ * with its honest classification. Every state comes from a live scan. */
+export default function Optimize({ mode, admin, focusId }: { mode: Mode; admin: boolean; focusId?: string; onSwitchExpert?: () => void }) {
   const { t, lang } = useLang();
-  const [tweaks, setTweaks] = useState<any[] | null>(null);
-  const [open, setOpen] = useState<string | null>(null);
-  const [log, setLog] = useState<string[]>([]);
+  const { scan, busy, error, rescan } = useHealthScan();
+  const [showAdvanced, setShowAdvanced] = useState(mode === "expert");
+  const [query, setQuery] = useState("");
   const [rpStatus, setRpStatus] = useState("");
-  const [confirm, setConfirm] = useState<string | null>(null);
-  const [riskAck, setRiskAck] = useState<string | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
-  const profile = useHwProfile();
-  const focusHandled = useRef(false);
-  const [focusHidden, setFocusHidden] = useState(false);
-  const [focusReady, setFocusReady] = useState(false);
-  // Scroll + highlight is the shared hook; this page only decides whether the
-  // target is visible and expands it first.
-  useFeatureFocus(focusId, focusReady);
 
-  const refresh = () =>
-    api
-      .listTweaks()
-      .then(setTweaks)
-      .catch((e) => {
-        // Never reject: callers rely on refresh() inside finally to reset busy.
-        setLog((l) => [...l.slice(-200), `[${new Date().toLocaleTimeString()}] ${String(e)}`]);
-      });
-  useEffect(() => { refresh(); }, []);
-
-  // Deep-link from the Dashboard: expand + scroll to the relevant tweak once.
-  useEffect(() => {
-    if (!focusId || focusHandled.current || !tweaks) return;
-    if (!tweaks.some((tw) => tw.id === focusId)) return;
-    focusHandled.current = true;
-    // Beginner mode filters out non-Low tweaks, surface an honest hint instead
-    // of a silent no-op when the linked tweak is not visible here.
-    if (mode === "beginner" && !tweaks.some((tw) => tw.id === focusId && tw.performancePotential && profile?.tweakRisks?.[tw.id]?.severity !== "danger")) {
-      setFocusHidden(true);
-      return;
-    }
-    setOpen(focusId);
-    setFocusReady(true);
-  }, [focusId, tweaks]);
-
-  const interp = (tpl: string, params: Record<string, string>) => {
-    let s = tpl;
-    for (const [k, v] of Object.entries(params)) s = s.replaceAll(`{${k}}`, v);
-    return s;
+  const items = scan?.items ?? [];
+  const isRecommended = (i: HealthItem) => i.diagnosis === "recommended";
+  const isReview = (i: HealthItem) => NEEDS_REVIEW.includes(i.diagnosis);
+  const inGroup = (group: string) => (i: HealthItem) =>
+    i.group === group && ["available", "configured"].includes(i.diagnosis);
+  const shown = new Set<string>();
+  const take = (pred: (i: HealthItem) => boolean) => {
+    const out = items.filter((i) => !shown.has(i.id) && pred(i));
+    out.forEach((i) => shown.add(i.id));
+    return out;
   };
+  const sections: [TKey, HealthItem[]][] = [
+    ["optNeedsReview", take(isReview)],
+    ["optRecommended", take(isRecommended)],
+    ["optGaming", take(inGroup("gaming"))],
+    ["optSystem", take(inGroup("system"))],
+  ];
+  const q = query.trim().toLocaleLowerCase();
+  const advanced = items
+    .filter((i) => !shown.has(i.id))
+    .filter((i) => !q || `${localizeTweak({ id: i.id, name: i.name, description: i.description }, lang).name} ${i.description} ${i.id}`.toLocaleLowerCase().includes(q));
 
-  const push = (m: string) => setLog((l) => [...l.slice(-200), `[${new Date().toLocaleTimeString()}] ${m}`]);
-
-  const visible = (tweaks ?? []).filter((tw) => mode === "expert" || (tw.performancePotential && profile?.tweakRisks?.[tw.id]?.severity !== "danger"));
-  const cats = [...new Set(visible.map((tw) => tw.category))];
-
-  const doApply = async (tw: any) => {
-    if (busy) return;
-    setBusy(tw.id);
-    push(interp(t("optApplyingLog"), { name: tw.name }));
-    try {
-      await api.applyTweak(tw.id);
-      push(interp(t("optAppliedLog"), { name: tw.name }));
-    } catch (e: any) {
-      push(interp(t("optErrLog"), { name: tw.name, err: String(e) }));
-    } finally {
-      setConfirm(null);
-      setRiskAck(null);
-      await refresh();
-      setBusy(null);
-    }
-  };
-
-  const doRevert = async (tw: any) => {
-    if (busy) return;
-    setBusy(tw.id);
-    const label = tw.undoable ? t("optRevertingLog") : t("optForceResetLog");
-    push(interp(label, { name: tw.name }));
-    try {
-      const res = await api.revertTweak(tw.id);
-      if ((res as any)?.journaled === false) {
-        push(interp(t("optForceResetDone"), { name: tw.name }));
-      } else {
-        push(interp(t("optRevertedDone"), { name: tw.name }));
-      }
-    } catch (e: any) {
-      push(interp(t("optErrLog"), { name: tw.name, err: String(e) }));
-    } finally {
-      await refresh();
-      setBusy(null);
-    }
-  };
-
-  const statusLabel = (status: string) =>
-    status === "partial" ? t("optStatusPartial")
-    : status === "not_applied" ? t("optStatusNotApplied")
-    : status === "applied" ? t("optStatusApplied")
-    : status === "unsupported" ? t("optStatusUnsupported")
-    : t("optStatusUnknown");
+  // A deep link (search, dashboard) to an item that lives under Advanced
+  // opens Advanced so the target is visible.
+  const focusInAdvanced = !!focusId && advanced.some((i) => i.id === focusId);
+  useEffect(() => { if (focusInAdvanced) setShowAdvanced(true); }, [focusInAdvanced]);
+  useFeatureFocus(focusId, !!scan);
 
   return (
     <>
-      <h1 className="page-title">{t("optTitle")}</h1>
-      <div className="page-sub">
-        {t("optSub")}
-        {mode === "beginner" && ` ${t("optSubBeginner")}`}
+      <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12 }}>
+        <div>
+          <h1 className="page-title">{t("navOptimize")}</h1>
+          <div className="page-sub">{t("toolDescOptimize")}</div>
+        </div>
+        <button className="btn ghost" onClick={rescan} disabled={busy}>{busy ? <><Spinner /> {t("hcScanning")}</> : `↻ ${t("hcScan")}`}</button>
       </div>
 
       <Card title={t("optSafetyTitle")}>
         <div className="row">
           <ActionBtn
             label={t("optCreateRestorePoint")}
+            disabled={!admin}
             onRun={async () => {
               try {
                 setRpStatus(await api.createRestorePoint("AD HyperOptimize, before optimization"));
@@ -129,107 +75,38 @@ export default function Optimize({ mode, admin, focusId, onSwitchExpert }: { mod
         </div>
       </Card>
 
-      {focusHidden && (
-        <div className="warn-banner" style={{ marginTop: 14 }}>
-          <b>ℹ </b>{t("optFocusHidden")}{" "}
-          <button className="btn small" style={{ marginLeft: 8 }} onClick={() => onSwitchExpert?.()}>{t("modeSwitchExpert")}</button>
-        </div>
+      {error && <ErrorBanner msg={error} onRetry={rescan} />}
+      {!scan && !error && <div className="mt"><Spinner /> <span className="muted">{t("hcScanning")}</span></div>}
+
+      {scan && sections.every(([, list]) => list.length === 0) && (
+        <Card style={{ marginTop: 14 }}><div className="empty-state"><span>✓</span><b>{t("hcNoRecs")}</b></div></Card>
       )}
 
-      {!tweaks && <div className="mt"><Spinner /> <span className="muted">{t("optReadingState")}</span></div>}
-
-      {cats.map((cat) => (
-        <div key={cat} className="mt">
-          <h2 style={{ color: "var(--muted)", textTransform: "uppercase", fontSize: 12, letterSpacing: ".5px", marginBottom: 8 }}>{cat}</h2>
-          {visible.filter((tw) => tw.category === cat).map((tw) => {
-            tw = localizeTweak(tw, lang);
-            const hwRisk = profile?.tweakRisks?.[tw.id];
-            const needsAck = hwRisk?.severity === "danger" && riskAck !== tw.id;
-            // Apply is only shown when there is genuinely nothing to undo yet
-            // (no journal entry and not detected as applied). Once the tweak
-            // is applied / undoable, the primary action is Undo alone — never
-            // show Apply next to Undo (confusing dual buttons).
-            const applyTrigger =
-              !tw.canUndo && (tw.status === "not_applied" || tw.status === "unknown")
-                ? { idle: t("optApply"), confirmLabel: t("optConfirmApply"), cls: "btn small", title: undefined as string | undefined }
-                : null;
-            return (
-            <div className="tweak" key={tw.id} data-tweak-id={tw.id} data-focus-id={tw.id}>
-              <div className="tweak-head">
-                <span className="tweak-name">{tw.name}</span>
-                <Badge cls={`risk-${tw.risk}`}>{tw.risk === "Low" ? t("riskLow") : tw.risk === "Medium" ? t("riskMedium") : t("riskHigh")}</Badge>
-                <RiskBadge id={tw.id} />
-                <span title={tw.status === "unsupported" ? t("optStatusUnsupportedHint") : undefined}>
-                  <Badge cls={`st-${tw.status}`}>{statusLabel(tw.status)}</Badge>
-                </span>
-                {tw.requiresAdmin && <Badge cls="st-unknown">{t("optAdmin")}</Badge>}
-                <button className="btn small ghost" aria-expanded={open === tw.id} onClick={() => setOpen(open === tw.id ? null : tw.id)}>
-                  {open === tw.id ? t("optHide") : t("optDetails")}
-                </button>
-                {applyTrigger && (
-                  confirm === tw.id ? (
-                    needsAck ? (
-                      <button className="btn small ghost" onClick={() => { setConfirm(null); setRiskAck(null); }}>{t("cancel")}</button>
-                    ) : (
-                      <>
-                        <button className="btn small danger" disabled={busy !== null} onClick={() => doApply(tw)}>{applyTrigger.confirmLabel}</button>
-                        <button className="btn small ghost" disabled={busy !== null} onClick={() => { setConfirm(null); setRiskAck(null); }}>{t("cancel")}</button>
-                      </>
-                    )
-                  ) : (
-                    <button
-                      className={applyTrigger.cls}
-                      disabled={tw.requiresAdmin && !admin}
-                      title={applyTrigger.title}
-                      onClick={() => { setOpen(tw.id); setConfirm(tw.id); }}
-                    >
-                      {applyTrigger.idle}
-                    </button>
-                  )
-                )}
-                {tw.canUndo && (
-                  <button
-                    className="btn small ghost"
-                    disabled={busy !== null}
-                    title={tw.undoable ? t("optUndoTooltip") : t("optResetTooltip")}
-                    onClick={() => doRevert(tw)}
-                  >
-                    {tw.undoable ? t("optUndo") : t("optReset")}
-                  </button>
-                )}
-              </div>
-              <div className="tweak-desc">{tw.description}</div>
-              {open === tw.id && (
-                <div className="tweak-detail">
-                  <b>{t("optWhy")}</b> {tw.rationale}<br />
-                  <b>{t("optImpact")}</b> {tw.impact}<br />
-                  <b>{t("optRiskLabel")}</b> {tw.risk} · <b>{t("optReversibleLabel")}</b> {tw.reversible ? t("optReversibleYes") : t("optReversibleNo")}<br />
-                  <RiskNotice id={tw.id} />
-                  {confirm === tw.id && needsAck && (
-                    <div style={{ marginTop: 8 }}>
-                      <button className="btn small danger" onClick={() => setRiskAck(tw.id)}>
-                        {t("optRiskAck")}
-                      </button>
-                    </div>
-                  )}
-                  {confirm === tw.id && !needsAck && (
-                    <span style={{ color: "var(--yellow)" }}>
-                      {t("optConfirmHint")}
-                    </span>
-                  )}
-                </div>
-              )}
-            </div>
-            );
-          })}
+      {sections.map(([title, list]) => list.length > 0 && (
+        <div key={title} className="mt">
+          <h2 className="section-label">{t(title)}</h2>
+          {list.map((i) => <OptCard key={i.id} item={i} admin={admin} focused={i.id === focusId} />)}
         </div>
       ))}
 
-      <Card title={t("optLiveLog")} style={{ marginTop: 14 }}>
-        <div className="log-console">
-          {log.length === 0 ? <span className="muted">{t("optNoActions")}</span> : log.map((l, i) => <div key={i}>{l}</div>)}
+      {scan && (
+        <div className="mt">
+          <div className="row" style={{ justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+            <h2 className="section-label" style={{ margin: 0 }}>{t("optAdvanced")} ({items.filter((i) => !shown.has(i.id)).length})</h2>
+            <button className="btn small ghost" onClick={() => setShowAdvanced(!showAdvanced)} aria-expanded={showAdvanced}>
+              {showAdvanced ? t("optHideAdvanced") : t("optShowAdvanced")}
+            </button>
+          </div>
+          <div className="muted" style={{ fontSize: 12, margin: "6px 0 10px" }}>{t("optAdvancedHint")}</div>
+          {showAdvanced && (
+            <>
+              <input className="input" value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("optSearch")}
+                aria-label={t("optSearch")} style={{ width: "100%", maxWidth: 360, marginBottom: 10 }} />
+              {advanced.map((i) => <OptCard key={i.id} item={i} admin={admin} focused={i.id === focusId} />)}
+            </>
+          )}
         </div>
-      </Card>
+      )}
     </>
   );
 }
