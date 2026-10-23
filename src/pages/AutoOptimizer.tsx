@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo } from "react";
 import { api } from "../api";
-import { Badge, Card, Spinner } from "../components/ui";
+import { Badge, Card, ErrorBanner, Spinner } from "../components/ui";
 import { useLang } from "../i18n";
 
 type Rec = {
@@ -90,6 +90,10 @@ export default function AutoOptimizer({ admin }: { admin: boolean }) {
 
       {loading ? (
         <Card title=""><div className="row" style={{ gap: 10 }}><Spinner /><span className="muted">{t("autoScanning")}</span></div></Card>
+      ) : !data ? (
+        // The scan failed: show why and offer a retry instead of rendering a
+        // score from data that does not exist.
+        <ErrorBanner msg={results?.error ?? t("autoScanning")} onRetry={() => load(true)} />
       ) : (
         <>
           {/* Score + summary */}
