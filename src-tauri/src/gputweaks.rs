@@ -636,8 +636,17 @@ pub fn do_tweak(id: String, driver_key: String, applying: bool) -> Result<String
         // Re-applying while an earlier apply is still open would capture the
         // tweak's own values as "previous"; keep the original capture.
         if let Some(open) = tweaks::open_entry_id(&safety::load_journal()?, &tweak_id) {
-            return Ok(format!(
-                "{} is already applied (restore token: {open})",
+            if matches!(detect_status(tw, &actual_driver_key), "applied" | "partial") {
+                return Ok(format!(
+                    "{} is already applied (restore token: {open})",
+                    tw.name
+                ));
+            }
+            // E.g. a driver reinstall reset the values: claiming success would
+            // be false, and re-capturing would lose the original values.
+            return Err(format!(
+                "{} was applied earlier but is no longer in effect (e.g. after a driver \
+                 reinstall). Undo the earlier change first, then apply again.",
                 tw.name
             ));
         }

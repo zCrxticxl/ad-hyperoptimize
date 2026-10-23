@@ -258,7 +258,10 @@ export default function GpuTweaks({ admin, focusId }: { admin: boolean; focusId?
                   // Treat "partial" as applied for the buttons: the tweak IS
                   // applied, some values just settle only after a reboot. Showing
                   // Apply again would look permanently stuck. Undo stays available.
-                  const applied  = tw.status === "applied" || tw.status === "partial";
+                  // An open journal entry (canRevert) also counts: after a driver
+                  // reinstall the values are reset but the earlier apply must be
+                  // undone before the tweak can be applied again.
+                  const applied  = tw.status === "applied" || tw.status === "partial" || tw.canRevert;
                   const blocked  = tw.driverKeyMissing;
                   // Every GPU tweak writes HKLM (driver class key), so all of them need admin.
                   const needsAdmin = !admin;

@@ -492,7 +492,7 @@ function AppInner() {
                   ))}
                 </div>
               )}
-              <div className="page-content" role="tabpanel" key={route.tool}><ToolErrorBoundary resetKey={route.tool}>{renderTool(route.tool, mode, admin, openTool, setMode, route.target)}</ToolErrorBoundary></div>
+              <div className="page-content" role="tabpanel" key={`${route.tool}:${route.target ?? ""}`}><ToolErrorBoundary resetKey={route.tool}>{renderTool(route.tool, mode, admin, openTool, setMode, route.target)}</ToolErrorBoundary></div>
 
               {route.tool === "dashboard" && (
                 <section className="home-quick" aria-labelledby="home-quick-title">

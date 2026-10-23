@@ -189,19 +189,21 @@ fn is_protected_dest(path: &Path) -> bool {
 }
 
 fn is_protected_inner(path: &Path, allow_root: bool) -> bool {
-    if is_protected_str(path, allow_root) {
-        return true;
-    }
     // The string check alone is bypassable by aliases that resolve to a
-    // protected location (junctions/symlinks, 8.3 names the filter below
-    // misses, case/normalisation tricks). When the path exists, resolve it
-    // to its canonical long path and check that too.
+    // protected location (junctions/symlinks, 8.3 names, case/normalisation
+    // tricks). When the path exists, resolve it to its canonical long path
+    // and check that too; the canonical form already expands 8.3 aliases, so
+    // legitimate names like `Report~1.docx` are not refused. A path that
+    // does not exist cannot be resolved, so 8.3-looking segments are refused.
     match std::fs::canonicalize(path) {
         Ok(canon) => match strip_verbatim_prefix(&canon) {
-            Some(c) => is_protected_str(Path::new(&c), allow_root),
+            Some(c) => {
+                is_protected_str(path, allow_root, false)
+                    || is_protected_str(Path::new(&c), allow_root, false)
+            }
             None => true, // resolves to a UNC/device path, never a scan target
         },
-        Err(_) => false,
+        Err(_) => is_protected_str(path, allow_root, true),
     }
 }
 
@@ -216,7 +218,7 @@ fn strip_verbatim_prefix(p: &Path) -> Option<String> {
     }
 }
 
-fn is_protected_str(path: &Path, allow_root: bool) -> bool {
+fn is_protected_str(path: &Path, allow_root: bool, reject_short_names: bool) -> bool {
     let raw = path.to_string_lossy().replace('/', "\\");
 
     // `.` / `..` segments never come from the scanner.
@@ -231,11 +233,14 @@ fn is_protected_str(path: &Path, allow_root: bool) -> bool {
     }
 
     // 8.3 short names (`C:\PROGRA~1`, `C:\WINDOW~1`) alias long names the
-    // prefix list below would otherwise miss. Scans emit long names only.
-    if raw.split('\\').any(|seg| {
-        let b = seg.as_bytes();
-        b.windows(2).any(|w| w[0] == b'~' && w[1].is_ascii_digit())
-    }) {
+    // prefix list below would otherwise miss. Only applied to paths that
+    // could not be canonicalized (see is_protected_inner).
+    if reject_short_names
+        && raw.split('\\').any(|seg| {
+            let b = seg.as_bytes();
+            b.windows(2).any(|w| w[0] == b'~' && w[1].is_ascii_digit())
+        })
+    {
         return true;
     }
 
@@ -1231,13 +1236,20 @@ mod tests {
         // A temp dir under the user profile stays allowed after canonicalisation.
         let tmp = std::env::temp_dir().join("adho-protect-canon");
         std::fs::create_dir_all(&tmp).unwrap();
+        // A real file whose long name merely contains `~<digit>`.
+        let tilde = tmp.join("Report~1.txt");
+        std::fs::write(&tilde, b"x").unwrap();
         let canon_ok = !is_protected(&tmp);
+        let tilde_ok = !is_protected(&tilde);
         std::fs::remove_dir_all(&tmp).unwrap();
-        // temp_dir may itself be an 8.3 path (C:\Users\ADRIA~1\...); then the
-        // string filter refuses it by design. Only assert for long paths.
-        if !tmp.to_string_lossy().contains('~') {
-            assert!(canon_ok, "temp dir should be allowed: {}", tmp.display());
-        }
+        // Existing paths are judged by their canonical long form, so an 8.3
+        // temp dir (C:\Users\ADRIA~1\...) and `~1` file names are allowed.
+        assert!(canon_ok, "temp dir should be allowed: {}", tmp.display());
+        assert!(
+            tilde_ok,
+            "existing ~1 file should be allowed: {}",
+            tilde.display()
+        );
     }
 
     #[test]

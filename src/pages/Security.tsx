@@ -304,7 +304,8 @@ export default function Security({ mode, admin, go }: { mode: Mode; admin: boole
     },
     {
       label: t("secCloud"),
-      on: ok(d.MAPSReporting),
+      // MAPSReporting is a level (0 = off, 1 = basic, 2 = advanced), not a bool.
+      on: Number(d.MAPSReporting) > 0,
       toggle: (v: boolean) => api.defenderSetCloud(v).then(() => load(true)),
       offConfirm: t("secCloudOffConfirm"),
       canToggle: true,

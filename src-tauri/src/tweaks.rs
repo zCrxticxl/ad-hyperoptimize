@@ -1492,8 +1492,19 @@ pub fn apply(tweak_id: &str) -> Result<Value, String> {
     // 0. A second apply while an earlier one is still open would capture the
     //    tweak's OWN values as "previous" and make undo restore the tweak
     //    instead of the original state. Keep the oldest capture.
+    //    If the recorded change is no longer in effect (reset by Windows, a
+    //    driver reinstall or the user), reporting success would be false and
+    //    re-capturing would lose the original: the earlier entry must be
+    //    undone first.
     if let Some(open) = open_entry_id(&safety::load_journal()?, t.id) {
-        return Ok(json!({ "entryId": open, "status": "already_applied" }));
+        if matches!(detect_status(&t), "applied" | "partial") {
+            return Ok(json!({ "entryId": open, "status": "already_applied" }));
+        }
+        return Err(format!(
+            "'{}' was applied earlier but is no longer in effect. Undo the earlier change \
+             first (it restores the original values), then apply again.",
+            t.name
+        ));
     }
 
     // 1. Registry backups for every key we will touch. A missing key needs no

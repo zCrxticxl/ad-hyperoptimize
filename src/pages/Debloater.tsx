@@ -164,11 +164,17 @@ export default function Debloater({ admin, focusId }: { admin: boolean; focusId?
     for (const name of selBloat) {
       const app = uwpApps.find(a => a.Name === name);
       if (!app) continue;
-      try {
-        if (app.PackageFullName) await api.debloaterRemoveUwp(app.PackageFullName);
-        if (app.provisioned) await api.debloaterRemoveProvisioned(name);
-        removed++;
-      } catch (e) { failed++; errors.push(`${name}: ${String(e)}`); }
+      // Separate steps: a partial UWP removal (current user only) must not
+      // skip removing the provisioned copy, or the app returns for new users.
+      const stepErrors: string[] = [];
+      if (app.PackageFullName) {
+        try { await api.debloaterRemoveUwp(app.PackageFullName); } catch (e) { stepErrors.push(String(e)); }
+      }
+      if (app.provisioned) {
+        try { await api.debloaterRemoveProvisioned(name); } catch (e) { stepErrors.push(String(e)); }
+      }
+      if (stepErrors.length) { failed++; errors.push(`${name}: ${stepErrors.join(" / ")}`); }
+      else removed++;
     }
     setRemovingBloat(false);
     setSelBloat(new Set());

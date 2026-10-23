@@ -275,6 +275,7 @@ fn apply_power_plan_for_preset(game: &Game, preset: &str) -> Result<String, Stri
         _ => (PLAN_BALANCED.to_string(), "balanced".into()),
     };
     set_power_plan(&guid)?;
+    note_applied_plan(&guid);
     Ok(label)
 }
 
@@ -289,10 +290,49 @@ fn prev_plan_path() -> std::path::PathBuf {
         .join("prev-plan.txt")
 }
 
-fn load_prev_plan() -> Option<String> {
+/// The record is `<previous plan>` or `<previous plan>|<plan the app applied>`.
+/// Knowing the applied plan lets a stale record be detected: if the active
+/// plan is no longer the one the app set, the user changed it since, and
+/// restoring the old record would silently override their choice.
+fn load_prev_record() -> Option<(String, Option<String>)> {
     let raw = std::fs::read_to_string(prev_plan_path()).ok()?;
-    let g = raw.trim().to_string();
-    ps::is_guid(&g).then_some(g)
+    parse_prev_record(&raw)
+}
+
+fn parse_prev_record(raw: &str) -> Option<(String, Option<String>)> {
+    let mut parts = raw.trim().splitn(2, '|');
+    let prev = parts.next()?.trim().to_string();
+    if !ps::is_guid(&prev) {
+        return None;
+    }
+    let applied = parts
+        .next()
+        .map(|a| a.trim().to_string())
+        .filter(|a| ps::is_guid(a));
+    Some((prev, applied))
+}
+
+fn write_prev_record(prev: &str, applied: Option<&str>) -> Result<(), String> {
+    let path = prev_plan_path();
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    let body = match applied {
+        Some(a) => format!("{prev}|{a}"),
+        None => prev.to_string(),
+    };
+    std::fs::write(&path, body).map_err(|e| format!("saving previous plan failed: {e}"))
+}
+
+/// True when a record exists whose applied plan is no longer active.
+fn record_is_stale(applied: Option<&str>, active: Option<&str>) -> bool {
+    matches!((applied, active), (Some(a), Some(now)) if !a.eq_ignore_ascii_case(now))
+}
+
+fn note_applied_plan(guid: &str) {
+    if let Some((prev, _)) = load_prev_record() {
+        let _ = write_prev_record(&prev, Some(guid));
+    }
 }
 
 fn clear_prev_plan() {
@@ -301,17 +341,15 @@ fn clear_prev_plan() {
 
 /// Record the currently active plan as the one to restore, unless one is
 /// already recorded (a second apply must not overwrite the user's original
-/// plan with an already-applied game plan).
+/// plan with an already-applied game plan). A stale record (the user switched
+/// plans after the app's apply) is replaced by the current plan.
 fn record_prev_plan(state: Option<&SharedState>) -> Result<(), String> {
-    let prev = match load_prev_plan() {
-        Some(g) => g,
-        None => {
-            let g = get_active_plan_guid().ok_or("could not read the active power plan")?;
-            let path = prev_plan_path();
-            if let Some(dir) = path.parent() {
-                std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-            }
-            std::fs::write(&path, &g).map_err(|e| format!("saving previous plan failed: {e}"))?;
+    let active = get_active_plan_guid();
+    let prev = match load_prev_record() {
+        Some((g, applied)) if !record_is_stale(applied.as_deref(), active.as_deref()) => g,
+        _ => {
+            let g = active.ok_or("could not read the active power plan")?;
+            write_prev_record(&g, None)?;
             g
         }
     };
@@ -321,14 +359,23 @@ fn record_prev_plan(state: Option<&SharedState>) -> Result<(), String> {
     Ok(())
 }
 
-/// Restore the recorded previous plan. Ok(None) when nothing was recorded.
+/// Restore the recorded previous plan. Ok(None) when nothing was recorded, or
+/// when the user switched plans after the app's apply (their choice wins).
 /// The record is only cleared after the restore succeeded.
 fn revert_power_plan(state: &SharedState) -> Result<Option<String>, String> {
+    let record = load_prev_record();
+    if let Some((_, applied)) = &record {
+        if record_is_stale(applied.as_deref(), get_active_plan_guid().as_deref()) {
+            lock(state).prev_plan_guid = None;
+            clear_prev_plan();
+            return Ok(None);
+        }
+    }
     let recorded = lock(state)
         .prev_plan_guid
         .clone()
         .filter(|g| ps::is_guid(g))
-        .or_else(load_prev_plan);
+        .or(record.map(|(g, _)| g));
     let Some(guid) = recorded else {
         return Ok(None);
     };
@@ -353,6 +400,27 @@ mod tests {
     const LIST_DE: &str = "Bestehende Energieschemen (* Aktiv)\n-----------------------------------\nGUID des Energieschemas: 381b4222-f694-41f0-9685-ff5bb260df2e  (Ausbalanciert)\nGUID des Energieschemas: 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c  (Höchstleistung) *\nGUID des Energieschemas: d1a87a2d-32c1-4791-aad7-5902b0d8a2d5  (Ultimative Leistung)\n";
 
     const REGISTRY: &str = "381b4222-f694-41f0-9685-ff5bb260df2e|@C:\\WINDOWS\\system32\\powrprof.dll,-15,Balanced\n8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c|@C:\\WINDOWS\\system32\\powrprof.dll,-13,High performance\nd1a87a2d-32c1-4791-aad7-5902b0d8a2d5|@C:\\WINDOWS\\system32\\powrprof.dll,-19,Ultimate Performance\ne9a42b02-d5df-448d-aa00-03f14749eb61|@C:\\WINDOWS\\system32\\powrprof.dll,-19,Ultimate Performance\n";
+
+    #[test]
+    fn prev_record_parsing_and_staleness() {
+        let hp = PLAN_HIGH_PERFORMANCE;
+        let bal = PLAN_BALANCED;
+        assert_eq!(parse_prev_record(bal), Some((bal.to_string(), None)));
+        assert_eq!(
+            parse_prev_record(&format!(
+                "{bal}|{hp}
+"
+            )),
+            Some((bal.to_string(), Some(hp.to_string())))
+        );
+        assert_eq!(parse_prev_record("garbage"), None);
+        // The app's plan is still active: not stale, restore is correct.
+        assert!(!record_is_stale(Some(hp), Some(hp)));
+        // The user switched plans after the apply: stale, do not restore.
+        assert!(record_is_stale(Some(hp), Some(bal)));
+        // Legacy record without the applied plan: keep previous behavior.
+        assert!(!record_is_stale(None, Some(bal)));
+    }
 
     #[test]
     fn parses_guids_from_localized_list() {

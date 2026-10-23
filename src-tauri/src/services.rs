@@ -55,7 +55,16 @@ Get-Service -ErrorAction Stop | ForEach-Object {
         name        = $_.Name
         displayName = $_.DisplayName
         status      = $_.Status.ToString()
-        startType   = $_.StartType.ToString()
+        # StartType cannot express delayed start; read the service's flag so
+        # the list matches what set_startup compares against.
+        startType   = $(
+            $t = $_.StartType.ToString()
+            if ($t -eq 'Automatic') {
+                $d = (Get-ItemProperty -LiteralPath ('HKLM:\SYSTEM\CurrentControlSet\Services\' + $_.Name) -Name DelayedAutostart -ErrorAction SilentlyContinue).DelayedAutostart
+                if ($d -eq 1) { $t = 'AutomaticDelayedStart' }
+            }
+            $t
+        )
         description = if ($descMap[$_.Name]) { $descMap[$_.Name] } else { '' }
         path        = if ($pathMap[$_.Name]) { $pathMap[$_.Name] } else { '' }
     }
@@ -217,6 +226,19 @@ pub fn set_startup(name: String, startup_type: String) -> Result<Value, String> 
     // is journaled only when it is actually changed (target delayed), with
     // the real new value.
     let mut items = Vec::new();
+    if startup_type == "Automatic" && previous == DELAYED_AUTO {
+        // Set-Service -StartupType Automatic leaves DelayedAutostart=1, so the
+        // service would stay delayed and verification would fail.
+        let service_registry = format!(r"SYSTEM\CurrentControlSet\Services\{name}");
+        let prev = crate::tweaks::reg_read("HKLM", &service_registry, "DelayedAutostart")?;
+        items.push(crate::safety::ChangeItem::Registry {
+            root: "HKLM".into(),
+            path: service_registry,
+            name: "DelayedAutostart".into(),
+            prev,
+            new: crate::safety::RegVal::Dword(0),
+        });
+    }
     if startup_type == DELAYED_AUTO {
         let service_registry = format!(r"SYSTEM\CurrentControlSet\Services\{name}");
         let prev = crate::tweaks::reg_read("HKLM", &service_registry, "DelayedAutostart")?;

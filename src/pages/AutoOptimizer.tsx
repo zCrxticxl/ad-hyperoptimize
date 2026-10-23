@@ -93,7 +93,7 @@ export default function AutoOptimizer({ admin }: { admin: boolean }) {
       ) : !data ? (
         // The scan failed: show why and offer a retry instead of rendering a
         // score from data that does not exist.
-        <ErrorBanner msg={results?.error ?? t("autoScanning")} onRetry={() => load(true)} />
+        <ErrorBanner msg={results?.error ?? t("autoScanFailed")} onRetry={() => load(true)} />
       ) : (
         <>
           {/* Score + summary */}
