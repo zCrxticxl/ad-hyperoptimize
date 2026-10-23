@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import { Card, Spinner } from "../components/ui";
-import { useLang } from "../i18n";
+import { useLang, TKey } from "../i18n";
+import { APP_CATEGORIES, AppCategory, AppSort, categorize, sortApps } from "../lib/appCategory";
 
 /** Stable row identity: the registry key path when the backend provides it,
  * otherwise hive + name + version + uninstall command (names alone collide). */
@@ -22,6 +23,8 @@ export default function AppUninstaller({ admin }: { admin: boolean }) {
   const [loading, setLoading]       = useState(true);
   const [loadErr, setLoadErr]       = useState("");
   const [search, setSearch]         = useState("");
+  const [category, setCategory]     = useState<AppCategory | null>(null);
+  const [sortBy, setSortBy]         = useState<AppSort>("name");
   const [busy, setBusy]             = useState<string | null>(null);
   const [log, setLog]               = useState<Record<string, string>>({});
   // Per-app uninstall outcome, keyed by appKey: "error" must never unlock the
@@ -60,14 +63,21 @@ export default function AppUninstaller({ admin }: { admin: boolean }) {
 
   useEffect(() => { load(); }, []);
 
+  const withCat = useMemo(() => apps.map(a => ({ ...a, category: categorize(a) })), [apps]);
+  const counts = useMemo(() => {
+    const c: Partial<Record<AppCategory, number>> = {};
+    for (const a of withCat) c[a.category as AppCategory] = (c[a.category as AppCategory] ?? 0) + 1;
+    return c;
+  }, [withCat]);
+
   const filtered = useMemo(() => {
-    if (!search.trim()) return apps;
-    const q = search.toLowerCase();
-    return apps.filter(a =>
-      a.name?.toLowerCase().includes(q) ||
-      a.publisher?.toLowerCase().includes(q)
+    const q = search.trim().toLowerCase();
+    const hits = withCat.filter(a =>
+      (!category || a.category === category) &&
+      (!q || a.name?.toLowerCase().includes(q) || a.publisher?.toLowerCase().includes(q))
     );
-  }, [apps, search]);
+    return sortApps(hits, sortBy);
+  }, [withCat, search, category, sortBy]);
 
   const uninstall = async (app: any) => {
     if (!app.uninstallString) return;
@@ -136,15 +146,34 @@ export default function AppUninstaller({ admin }: { admin: boolean }) {
             onChange={e => setSearch(e.target.value)}
             style={{ flex: 1, padding: "5px 10px", fontSize: 13, background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 4, color: "var(--fg)" }}
           />
+          <select value={sortBy} onChange={e => setSortBy(e.target.value as AppSort)} aria-label={t("uninstSort")}
+            style={{ padding: "5px 8px", fontSize: 12, background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 4, color: "var(--fg)" }}>
+            {(["name", "size", "date", "publisher"] as AppSort[]).map(k => (
+              <option key={k} value={k}>{t(`uninstSort_${k}` as TKey)}</option>
+            ))}
+          </select>
           <button className="btn small ghost" onClick={load} disabled={loading}>↺ {t("uninstRefresh")}</button>
         </div>
+        {!loading && apps.length > 0 && (
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
+            <button className={`btn small ${category ? "ghost" : ""}`} onClick={() => setCategory(null)}>
+              {t("uninstCatAll")} ({apps.length})
+            </button>
+            {APP_CATEGORIES.filter(c => counts[c]).map(c => (
+              <button key={c} className={`btn small ${category === c ? "" : "ghost"}`} onClick={() => setCategory(category === c ? null : c)}>
+                {t(`uninstCat_${c}` as TKey)} ({counts[c]})
+              </button>
+            ))}
+            <span className="muted" style={{ fontSize: 11, alignSelf: "center" }}>{t("uninstCatHint")}</span>
+          </div>
+        )}
 
         {loading ? (
           <div className="row" style={{ gap: 10 }}><Spinner /><span className="muted">{t("uninstScanning")}</span></div>
         ) : loadErr ? (
           <div style={{ color: "var(--red)", marginBottom: 10 }}>{loadErr}</div>
         ) : filtered.length === 0 ? (
-          <div className="muted">{t("uninstNoApps")}{search ? ` ${t("uninstMatchingFilter")}` : ""}.</div>
+          <div className="muted">{t("uninstNoApps")}{search || category ? ` ${t("uninstMatchingFilter")}` : ""}.</div>
         ) : (
           <div style={{ maxHeight: "65vh", overflowY: "auto" }}>
             {filtered.map((app: any) => {
@@ -164,6 +193,8 @@ export default function AppUninstaller({ admin }: { admin: boolean }) {
                         {app.publisher && <span>{app.publisher}</span>}
                         {app.version && <span> · v{app.version}</span>}
                         {app.sizeMb > 0 && <span> · {fmtMb(app.sizeMb)}</span>}
+                        {/^\d{8}$/.test(app.installDate ?? "") && <span> · {app.installDate.slice(6, 8)}.{app.installDate.slice(4, 6)}.{app.installDate.slice(0, 4)}</span>}
+                        {!category && app.category !== "other" && <span> · {t(`uninstCat_${app.category}` as TKey)}</span>}
                       </div>
                     </div>
 
