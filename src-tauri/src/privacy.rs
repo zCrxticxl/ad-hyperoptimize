@@ -205,6 +205,32 @@ static TWEAKS: &[PrivacyTweak] = &[
     },
 ];
 
+/// Privacy items retired from the Privacy Center: (id, reason). They no
+/// longer control anything on current Windows, so they cannot be applied. The
+/// page lists one only while it is active, so it can be reset; the scan still
+/// checks them for that reason. A reset needs the journal entry with the
+/// captured original (never a guessed default).
+pub static RETIRED: &[(&str, &str)] = &[
+    (
+        "prv_ceip_off",
+        "The Customer Experience Improvement Program (SQM) was replaced by Windows diagnostic data in Windows 10; this policy no longer controls anything. Use 'Set Telemetry to Minimum' instead.",
+    ),
+    (
+        "prv_maps_update_off",
+        "Microsoft retired the Windows Maps app; without it there are no offline map updates to stop.",
+    ),
+];
+
+fn retired_reason(id: &str) -> Option<&'static str> {
+    RETIRED.iter().find(|(r, _)| *r == id).map(|(_, why)| *why)
+}
+
+/// Retired items are listed only while active (so they can be reset);
+/// everything else is always listed.
+fn listed(id: &str, applied: bool) -> bool {
+    retired_reason(id).is_none() || applied
+}
+
 // ── status check ─────────────────────────────────────────────────────────────
 
 /// Checks may be statement lists (`$v = ...; <expr>`), so they are wrapped in
@@ -515,28 +541,45 @@ pub fn scan() -> Value {
         Ok(entries) => entries,
         Err(error) => return json!({ "error": error, "tweaks": [], "applied": 0, "total": 0 }),
     };
-    let tweaks: Vec<Value> = TWEAKS
-        .iter()
-        .map(|t| {
-            json!({
-                "id":          t.id,
-                "name":        t.name,
-                "category":    t.category,
-                "description": t.description,
-                "risk":        t.risk,
-                "applied":     statuses.get(t.id).copied().unwrap_or(false),
-                "canRevert":   journal.iter().any(|entry| entry.tweak_id == format!("privacy:{}", t.id) && !entry.reverted),
-            })
-        })
-        .collect();
+    let mut tweaks = Vec::new();
+    let mut retired = Vec::new();
+    for t in TWEAKS {
+        let applied = statuses.get(t.id).copied().unwrap_or(false);
+        if !listed(t.id, applied) {
+            continue;
+        }
+        let entry = json!({
+            "id":          t.id,
+            "name":        t.name,
+            "category":    t.category,
+            "description": t.description,
+            "risk":        t.risk,
+            "applied":     applied,
+            "canRevert":   journal.iter().any(|entry| entry.tweak_id == format!("privacy:{}", t.id) && !entry.reverted),
+            "retired":     retired_reason(t.id).is_some(),
+            "retiredReason": retired_reason(t.id),
+        });
+        if retired_reason(t.id).is_some() {
+            retired.push(entry);
+        } else {
+            tweaks.push(entry);
+        }
+    }
     let applied = tweaks
         .iter()
         .filter(|t| t["applied"].as_bool().unwrap_or(false))
         .count();
-    json!({ "tweaks": tweaks, "applied": applied, "total": tweaks.len() })
+    // Retired items are reported separately: they are not part of the
+    // catalog score and have no apply action.
+    json!({ "tweaks": tweaks, "retired": retired, "applied": applied, "total": tweaks.len() })
 }
 
 pub fn apply(id: String) -> Result<Value, String> {
+    if retired_reason(&id).is_some() {
+        return Err(format!(
+            "'{id}' was retired because it no longer has any effect. Only reset is still available."
+        ));
+    }
     let t = TWEAKS
         .iter()
         .find(|t| t.id == id)
@@ -593,7 +636,7 @@ pub fn revert(id: String) -> Result<Value, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{expected_dword, registry_targets, service_target, TWEAKS};
+    use super::{expected_dword, listed, registry_targets, service_target, RETIRED, TWEAKS};
 
     /// Regression: a statement-list check inside `[bool]( )` made the whole
     /// scan script unparsable, so the Privacy Center showed a parser error.
@@ -647,6 +690,32 @@ mod tests {
                 "missing snapshot targets for {}",
                 tweak.id
             );
+        }
+    }
+
+    #[test]
+    fn retired_items_exist_and_keep_an_exact_undo_target() {
+        for (id, reason) in RETIRED {
+            assert!(TWEAKS.iter().any(|t| t.id == *id), "{id} not in catalog");
+            assert!(!registry_targets(id).is_empty(), "{id} has no undo target");
+            assert!(!reason.is_empty());
+        }
+    }
+
+    #[test]
+    fn retired_items_are_listed_only_while_active() {
+        assert!(!listed("prv_ceip_off", false));
+        assert!(listed("prv_ceip_off", true));
+        assert!(!listed("prv_maps_update_off", false));
+        assert!(listed("prv_telemetry_basic", false));
+        assert!(listed("prv_telemetry_basic", true));
+    }
+
+    #[test]
+    fn retired_items_cannot_be_applied() {
+        for (id, _) in RETIRED {
+            let err = super::apply(id.to_string()).unwrap_err();
+            assert!(err.contains("retired"), "{id}: {err}");
         }
     }
 }

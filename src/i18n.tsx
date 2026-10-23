@@ -1629,6 +1629,12 @@ const de = {
   gsStatus_warning: "Handeln",
   gsStatus_info: "Hinweis",
   gsStatus_unknown: "Unbekannt",
+  wdTitle: "Nicht mehr angeboten",
+  wdPrivacyHint: "Diese Einträge haben unter aktuellem Windows keine Wirkung mehr und werden nicht mehr angeboten. Sie erscheinen nur, solange sie noch aktiv sind. Zurücksetzen stellt den vor dem Anwenden gespeicherten Originalwert wieder her; danach verschwinden sie.",
+  wdReset: "Zurücksetzen",
+  wdNoCapture: "Kein gespeicherter Originalwert (außerhalb der App oder mit einer älteren Version gesetzt). Die App rät keinen Standardwert; bei Bedarf manuell zurücksetzen.",
+  wdReason_prv_ceip_off: "Das Programm zur Verbesserung der Benutzerfreundlichkeit (SQM) wurde in Windows 10 durch die Windows-Diagnosedaten ersetzt; diese Richtlinie steuert nichts mehr. Stattdessen „Telemetrie auf Minimum“ nutzen.",
+  wdReason_prv_maps_update_off: "Microsoft hat die Windows-Karten-App eingestellt; ohne sie gibt es keine Offline-Kartenupdates mehr, die man abschalten könnte.",
 };
 
 // ── English ───────────────────────────────────────────────────────────────────
@@ -3231,6 +3237,12 @@ const en: typeof de = {
   gsStatus_warning: "Action",
   gsStatus_info: "Note",
   gsStatus_unknown: "Unknown",
+  wdTitle: "No longer offered",
+  wdPrivacyHint: "These items no longer have any effect on current Windows and are no longer offered. They only appear while still active. Reset restores the original value saved before they were applied; afterwards they disappear.",
+  wdReset: "Reset",
+  wdNoCapture: "No saved original value (set outside the app or by an older version). The app does not guess a default; reset it manually if needed.",
+  wdReason_prv_ceip_off: "The Customer Experience Improvement Program (SQM) was replaced by Windows diagnostic data in Windows 10; this policy no longer controls anything. Use \"Set Telemetry to Minimum\" instead.",
+  wdReason_prv_maps_update_off: "Microsoft retired the Windows Maps app; without it there are no offline map updates to stop.",
 };
 
 export type UiText = typeof en;

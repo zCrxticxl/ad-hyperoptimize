@@ -1,12 +1,13 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { Card, Spinner, Badge } from "../components/ui";
-import { useLang } from "../i18n";
+import { useLang, TKey } from "../i18n";
 import { useFeatureFocus } from "../hooks/useFeatureFocus";
 
 type PTweak = {
   id: string; name: string; category: string;
   description: string; risk: "Low" | "Medium" | "High"; applied: boolean; canRevert: boolean;
+  retiredReason?: string | null;
 };
 
 const RISK_CLS: Record<string, string> = { Low: "risk-Low", Medium: "risk-Medium", High: "risk-High" };
@@ -38,6 +39,8 @@ export default function PrivacyCenter({ admin, focusId }: { admin: boolean; focu
     "Netzwerk":         t("catNetzwerk"),
   };
   const [tweaks, setTweaks]   = useState<PTweak[]>([]);
+  // Retired items, only present while still active (backend filters).
+  const [retired, setRetired] = useState<PTweak[]>([]);
   const [applied, setApplied] = useState(0);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy]       = useState<string | null>(null);
@@ -46,6 +49,13 @@ export default function PrivacyCenter({ admin, focusId }: { admin: boolean; focu
   const [filter, setFilter]   = useState<string | null>(null);
   useFeatureFocus(focusId, !loading);
   const [openId, setOpenId]   = useState<string | null>(null);
+
+  // Localized reason; the backend text is the fallback for unknown ids.
+  const reason = (id: string, fallback?: string | null) => {
+    const key = `wdReason_${id}`;
+    const text = t(key as TKey);
+    return text === key ? fallback ?? "" : text;
+  };
 
   const push = (m: string) =>
     setLog(l => [`[${new Date().toLocaleTimeString()}] ${m}`, ...l.slice(0, 49)]);
@@ -59,6 +69,7 @@ export default function PrivacyCenter({ admin, focusId }: { admin: boolean; focu
         if (r.error) throw new Error(String(r.error));
         setErr("");
         setTweaks(r.tweaks ?? []);
+        setRetired(r.retired ?? []);
         setApplied(r.applied ?? 0);
       })
       .catch(e => setErr(String(e)))
@@ -232,6 +243,31 @@ export default function PrivacyCenter({ admin, focusId }: { admin: boolean; focu
             })}
           </Card>
         </>
+      )}
+
+      {!loading && retired.length > 0 && (
+        <div className="mt">
+          <Card title={`${t("wdTitle")} (${retired.length})`}>
+            <div className="muted" style={{ fontSize: 12.5, marginBottom: 10 }}>{t("wdPrivacyHint")}</div>
+            {retired.map(tw => (
+              <div className="tweak" key={tw.id} data-focus-id={tw.id}>
+                <div className="tweak-head">
+                  <span className="tweak-name">{tw.name}</span>
+                  <Badge cls="st-partial">{t("active")}</Badge>
+                  {tw.canRevert && (
+                    <button className="btn small ghost" disabled={!!busy || !admin} onClick={() => doRevert(tw)}>
+                      {busy === tw.id ? <Spinner /> : t("wdReset")}
+                    </button>
+                  )}
+                </div>
+                <div className="tweak-detail">
+                  <p>{reason(tw.id, tw.retiredReason)}</p>
+                  {!tw.canRevert && <p className="muted">{t("wdNoCapture")}</p>}
+                </div>
+              </div>
+            ))}
+          </Card>
+        </div>
       )}
 
       {log.length > 0 && (
