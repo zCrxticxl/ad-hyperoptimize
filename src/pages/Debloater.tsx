@@ -41,7 +41,13 @@ const RECOMMENDED_BLOAT = [
   "king.com.CandyCrushSaga","king.com.CandyCrushFriends","BytedancePte.Ltd.TikTok",
 ];
 
-type Tweak = { id: string; name: string; desc: string; cat: string; applied: boolean };
+type PageRef = { page: "privacy" | "optimize"; id: string };
+type Tweak = {
+  id: string; name: string; desc: string; cat: string; applied: boolean;
+  related?: PageRef | null;
+  // Withdrawn tweaks only: listed while the Debloater holds their captured state.
+  reason?: string; movedTo?: PageRef | null;
+};
 type OptionalApp = { Name: string; PackageFullName: string | null; provisioned: boolean; recommended?: boolean };
 
 function ProgressBar({ done, total }: { done: number; total: number }) {
@@ -57,6 +63,7 @@ function ProgressBar({ done, total }: { done: number; total: number }) {
 export default function Debloater({ admin, focusId }: { admin: boolean; focusId?: string }) {
   const { t } = useLang();
   const [tweaks, setTweaks]       = useState<Tweak[]>([]);
+  const [withdrawn, setWithdrawn] = useState<Tweak[]>([]);
   const [loading, setLoading]     = useState(true);
   const [err, setErr]             = useState("");
   const [busy, setBusy]           = useState<Record<string, boolean>>({});
@@ -91,13 +98,20 @@ export default function Debloater({ admin, focusId }: { admin: boolean; focusId?
   const refresh = () => {
     setLoading(true);
     api.debloaterTweaksList()
-      .then(d => { setTweaks(d?.tweaks ?? []); })
+      .then(d => { setTweaks(d?.tweaks ?? []); setWithdrawn(d?.withdrawn ?? []); })
       .catch((e: any) => setErr(String(e)))
       .finally(() => setLoading(false));
   };
 
   const applied   = tweaks.filter(t => t.applied).length;
   const unapplied = tweaks.filter(t => !t.applied);
+
+  // Localized text for an id; the backend text is the fallback for unknown ids.
+  const textFor = (prefix: string, id: string, fallback = "") => {
+    const key = `${prefix}${id}`;
+    const text = t(key as TKey);
+    return text === key ? fallback : text;
+  };
 
   const requireAdmin = () => {
     if (!admin) { setLog({ msg: t("debloatAdminRequiredMsg"), ok: false }); return false; }
@@ -268,6 +282,11 @@ export default function Debloater({ admin, focusId }: { admin: boolean; focusId?
                 <div style={{ flex: 1 }}>
                   <div style={{ fontWeight: 600, fontSize: 13 }}>{tw.name}</div>
                   <div className="muted" style={{ fontSize: 11 }}>{tw.desc}</div>
+                  {tw.related && (
+                    <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
+                      {t("wdRelated")} {t(`wdPage_${tw.related.page}` as TKey)}. {textFor("wdRelated_", tw.id)}
+                    </div>
+                  )}
                 </div>
                 <span style={{ fontSize: 11, fontWeight: 600, color: tw.applied ? "var(--green)" : "var(--muted)" }}>
                   {tw.applied ? t("debloatApplied") : t("debloatNotApplied")}
@@ -277,6 +296,35 @@ export default function Debloater({ admin, focusId }: { admin: boolean; focusId?
           </div>
         );
       })}
+
+      {/* Withdrawn tweaks: reset only, they disappear once reset */}
+      {!loading && withdrawn.length > 0 && (
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+            <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.07em", color: "var(--muted)" }}>
+              ⏏ {t("wdTitle")} ({withdrawn.length})
+            </span>
+            <div style={{ flex: 1, borderBottom: "1px solid var(--border)" }} />
+          </div>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>{t("wdDebloatHint")}</div>
+          {withdrawn.map(tw => (
+            <div key={tw.id} data-focus-id={tw.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 0", borderBottom: "1px solid var(--border)", opacity: busy[tw.id] ? 0.7 : 1 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 600, fontSize: 13 }}>{tw.name}</div>
+                <div className="muted" style={{ fontSize: 11 }}>{textFor("wdReason_", tw.id, tw.reason)}</div>
+                {tw.movedTo && (
+                  <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
+                    {t("wdMovedTo")} {t(`wdPage_${tw.movedTo.page}` as TKey)}
+                  </div>
+                )}
+              </div>
+              <button className="btn small ghost" onClick={() => toggle(tw)} disabled={!admin || applyingAll || !!busy[tw.id]}>
+                {busy[tw.id] ? <Spinner /> : t("wdReset")}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* UWP Bloatware */}
       <div style={{ marginTop: 8 }}>

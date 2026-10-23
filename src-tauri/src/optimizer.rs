@@ -424,6 +424,26 @@ pub fn classify_after_reset(id: &str, readback: (&str, &str)) -> (Outcome, Strin
     }
 }
 
+/// Outcome of one retired-tweak reset: the engine's revert result plus the
+/// state read back afterwards. A failed engine revert still counts as reset
+/// when Windows confirms the original state: the Debloater duplicate may have
+/// held the setting, and after restoring it the engine finds nothing to undo.
+pub fn classify_reset(
+    id: &str,
+    revert: Result<(), String>,
+    readback: Option<(&str, &str)>,
+) -> (Outcome, String) {
+    match (revert, readback) {
+        (_, Some(("not_applied", "live"))) => classify_after_reset(id, ("not_applied", "live")),
+        (Err(e), _) => (Outcome::Failed, e),
+        (Ok(()), Some(rb)) => classify_after_reset(id, rb),
+        (Ok(()), None) => (
+            Outcome::Unverified,
+            "The setting could not be read back.".into(),
+        ),
+    }
+}
+
 // ── Gaming setup checks (pure) ───────────────────────────────────────────────
 
 /// Rated speed encoded in a memory kit's part number, in MT/s. Kingston/HyperX
@@ -1058,7 +1078,11 @@ pub fn scan() -> Value {
 
 /// Retired tweaks that the Debloater also offers under its own id and state
 /// file: (tweak id, debloater id).
-const DEBLOATER_DUPLICATES: &[(&str, &str)] = &[("cortana_off", "cortana_off")];
+/// `gamedvr_off` also wrote the FSE values of `fse_optimizations_off`.
+const DEBLOATER_DUPLICATES: &[(&str, &str)] = &[
+    ("cortana_off", "cortana_off"),
+    ("fse_optimizations_off", "gamedvr_off"),
+];
 
 /// Resets every retired tweak that is still active (journaled undo with the
 /// captured originals, else the engine's verified force-revert), then reads
@@ -1099,16 +1123,8 @@ pub fn reset_retired() -> Value {
                     let _ = crate::debloater::revert_tweak(dup.to_string());
                 }
             }
-            let (outcome, detail) = match crate::tweaks::revert(id) {
-                Err(e) => (Outcome::Failed, e),
-                Ok(_) => match crate::tweaks::status_of(id) {
-                    Some(readback) => classify_after_reset(id, readback),
-                    None => (
-                        Outcome::Unverified,
-                        "The setting could not be read back.".into(),
-                    ),
-                },
-            };
+            let revert = crate::tweaks::revert(id).map(|_| ());
+            let (outcome, detail) = classify_reset(id, revert, crate::tweaks::status_of(id));
             results.push(
                 json!({ "id": id, "name": name, "outcome": outcome.as_str(), "detail": detail }),
             );
@@ -1403,6 +1419,54 @@ mod tests {
             classify_after_reset("nagle_off", ("unknown", "none")).0,
             Outcome::Unverified
         );
+    }
+
+    #[test]
+    fn reset_trusts_the_readback_not_the_engine_message() {
+        // The Debloater duplicate held the setting: after restoring it the
+        // engine has nothing to undo, but Windows confirms the original.
+        let nothing = Err("tweak is not currently active, nothing to undo".to_string());
+        assert_eq!(
+            classify_reset(
+                "cortana_off",
+                nothing.clone(),
+                Some(("not_applied", "live"))
+            )
+            .0,
+            Outcome::Verified
+        );
+        // A failed revert with the setting still active stays a failure.
+        let (o, detail) = classify_reset(
+            "cortana_off",
+            Err("denied".into()),
+            Some(("applied", "live")),
+        );
+        assert_eq!(o, Outcome::Failed);
+        assert_eq!(detail, "denied");
+        assert_eq!(
+            classify_reset("nagle_off", nothing, None).0,
+            Outcome::Failed
+        );
+        assert_eq!(
+            classify_reset("nagle_off", Ok(()), None).0,
+            Outcome::Unverified
+        );
+        assert_eq!(
+            classify_reset("cortana_off", Ok(()), Some(("applied", "live"))).0,
+            Outcome::Failed
+        );
+    }
+
+    #[test]
+    fn debloater_duplicates_pair_retired_tweaks_with_real_debloater_ids() {
+        for (tweak, dup) in DEBLOATER_DUPLICATES {
+            assert!(optregistry::is_retired(tweak), "{tweak} is not retired");
+            assert!(
+                crate::debloater::is_withdrawn(dup),
+                "{dup} is still offered"
+            );
+        }
+        assert!(DEBLOATER_DUPLICATES.contains(&("fse_optimizations_off", "gamedvr_off")));
     }
 
     #[test]

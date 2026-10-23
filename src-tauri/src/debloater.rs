@@ -350,6 +350,95 @@ static TWEAKS: &[Tweak] = &[
     },
 ];
 
+/// A Debloater tweak that is no longer offered here: it is obsolete, uses the
+/// wrong mechanism, or the same setting has a single home on another page.
+/// It is listed only while the Debloater holds its captured pre-apply state,
+/// so it can be reset exactly; it can never be applied again, and it is never
+/// reset with the guessed-default `undo` (that could undo a change the other
+/// page made to the same value).
+struct Withdrawn {
+    id: &'static str,
+    reason: &'static str,
+    /// (page, id) of the single source that now offers this setting.
+    moved_to: Option<(&'static str, &'static str)>,
+}
+
+static WITHDRAWN: &[Withdrawn] = &[
+    Withdrawn {
+        id: "cortana_off",
+        reason: "Microsoft retired the Cortana app; this policy has nothing left to disable.",
+        moved_to: None,
+    },
+    Withdrawn {
+        id: "taskbar_widgets_off",
+        reason: "This value only hid News and Interests on Windows 10; Windows 11 Widgets ignore it. Optimize offers the working Widgets setting.",
+        moved_to: Some(("optimize", "widgets_off")),
+    },
+    Withdrawn {
+        id: "gamedvr_off",
+        reason: "Also forced exclusive fullscreen (FSEBehaviorMode = 2), a separate setting with no proven benefit. Optimize offers a DVR switch that changes only recording.",
+        moved_to: Some(("optimize", "game_dvr_off")),
+    },
+    Withdrawn {
+        id: "telemetry_off",
+        reason: "Same policy value as in the Privacy Center, which is now the single place for it.",
+        moved_to: Some(("privacy", "prv_telemetry_basic")),
+    },
+    Withdrawn {
+        id: "diagtrack_stop",
+        reason: "Same service setting as in the Privacy Center, which is now the single place for it.",
+        moved_to: Some(("privacy", "prv_diagtrack_off")),
+    },
+    Withdrawn {
+        id: "activity_history",
+        reason: "Same policy values as in the Privacy Center, which is now the single place for it.",
+        moved_to: Some(("privacy", "prv_activity_history_off")),
+    },
+    Withdrawn {
+        id: "advertising_id",
+        reason: "Same setting as in the Privacy Center, which is now the single place for it.",
+        moved_to: Some(("privacy", "prv_adid_off")),
+    },
+    Withdrawn {
+        id: "app_suggestions",
+        reason: "Same Start suggestion values as in the Privacy Center, which is now the single place for them.",
+        moved_to: Some(("privacy", "prv_startmenu_suggestions_off")),
+    },
+    Withdrawn {
+        id: "feedback_off",
+        reason: "Same setting as in the Privacy Center, which is now the single place for it.",
+        moved_to: Some(("privacy", "prv_feedback_never")),
+    },
+    Withdrawn {
+        id: "error_reporting_off",
+        reason: "Same service as in the Privacy Center, which is now the single place for it.",
+        moved_to: Some(("privacy", "prv_wer_off")),
+    },
+];
+
+/// Offered tweaks that overlap a setting on another page without being the
+/// same mechanism: (id, page, id there). Shown as a cross-reference.
+static RELATED: &[(&str, &str, &str)] = &[
+    // Settings → Location (ConsentStore) here; the Privacy Center disables the
+    // location service (lfsvc) instead.
+    ("location_off", "privacy", "prv_location_off"),
+];
+
+fn withdrawn(id: &str) -> Option<&'static Withdrawn> {
+    WITHDRAWN.iter().find(|w| w.id == id)
+}
+
+#[cfg(test)]
+pub(crate) fn is_withdrawn(id: &str) -> bool {
+    withdrawn(id).is_some()
+}
+
+/// Whether the list shows a tweak: offered ones always, withdrawn ones only
+/// while the Debloater can reset them from a captured state.
+fn listed(id: &str, captured: bool) -> bool {
+    withdrawn(id).is_none() || captured
+}
+
 pub fn list_tweaks() -> Value {
     // Check all tweak states in a single PS call
     let checks: Vec<String> = TWEAKS
@@ -364,28 +453,45 @@ pub fn list_tweaks() -> Value {
         _ => vec![false; TWEAKS.len()],
     };
 
-    let tweaks: Vec<Value> = TWEAKS
-        .iter()
-        .enumerate()
-        .map(|(i, t)| {
-            let live = states.get(i).copied().unwrap_or(false);
-            // A tweak we successfully applied always has a captured state file.
-            // The live registry check can be flaky on some systems (value
-            // read-back differs from what we wrote), so treat "we applied it
-            // in this app" as applied too, revert uses that exact state file,
-            // so the status never wrongly flips back to "not applied".
-            let applied = live || state_path(t.id).is_ok_and(|p| p.exists());
-            json!({
-                "id":      t.id,
-                "name":    t.name,
-                "desc":    t.desc,
-                "cat":     t.cat,
-                "applied": applied,
-            })
-        })
-        .collect();
+    let mut tweaks = Vec::new();
+    let mut withdrawn_active = Vec::new();
+    for (i, t) in TWEAKS.iter().enumerate() {
+        let live = states.get(i).copied().unwrap_or(false);
+        // A tweak we successfully applied always has a captured state file.
+        // The live registry check can be flaky on some systems (value
+        // read-back differs from what we wrote), so treat "we applied it
+        // in this app" as applied too, revert uses that exact state file,
+        // so the status never wrongly flips back to "not applied".
+        let captured = has_captured_state(t.id);
+        if !listed(t.id, captured) {
+            continue;
+        }
+        let related = RELATED
+            .iter()
+            .find(|(id, _, _)| *id == t.id)
+            .map(|(_, page, id)| json!({ "page": page, "id": id }));
+        let mut entry = json!({
+            "id":      t.id,
+            "name":    t.name,
+            "desc":    t.desc,
+            "cat":     t.cat,
+            "applied": live || captured,
+            "related": related,
+        });
+        match withdrawn(t.id) {
+            Some(w) => {
+                entry["withdrawn"] = json!(true);
+                entry["reason"] = json!(w.reason);
+                entry["movedTo"] = json!(w
+                    .moved_to
+                    .map(|(page, id)| json!({ "page": page, "id": id })));
+                withdrawn_active.push(entry);
+            }
+            None => tweaks.push(entry),
+        }
+    }
 
-    json!({ "tweaks": tweaks })
+    json!({ "tweaks": tweaks, "withdrawn": withdrawn_active })
 }
 
 // ── Exact undo: capture pre-apply state, restore it on revert ─────────────────
@@ -520,6 +626,12 @@ fn restore_script(state: &serde_json::Value) -> String {
 }
 
 pub fn apply_tweak(id: String) -> Result<String, String> {
+    if let Some(w) = withdrawn(&id) {
+        return Err(format!(
+            "'{id}' is no longer offered by the Debloater: {} Only reset is still available.",
+            w.reason
+        ));
+    }
     let t = TWEAKS
         .iter()
         .find(|t| t.id == id)
@@ -596,6 +708,11 @@ pub fn revert_tweak(id: String) -> Result<String, String> {
                 )),
             }
         }
+        // A withdrawn tweak's value may now be owned by another page (same
+        // registry value); the guessed default would undo that page's change.
+        None if withdrawn(&id).is_some() => Err(format!(
+            "No captured state for {id}: the Debloater did not change this setting, so it does not reset it."
+        )),
         // No captured state (apply happened outside this app or the state was
         // lost), fall back to the documented-default undo.
         None => ps::run(t.undo).map(|_| format!("Reverted: {}", t.name)),
@@ -620,5 +737,93 @@ mod tests {
     fn both_teams_generations_are_listed() {
         assert!(OPTIONAL_APPS.contains(&"Microsoft.Teams"));
         assert!(OPTIONAL_APPS.contains(&"MSTeams"));
+    }
+
+    #[test]
+    fn withdrawn_tweaks_exist_and_point_to_a_live_single_source() {
+        for w in WITHDRAWN {
+            assert!(
+                TWEAKS.iter().any(|t| t.id == w.id),
+                "{} not in catalog",
+                w.id
+            );
+            assert!(!w.reason.is_empty());
+            if let Some((page, target)) = w.moved_to {
+                match page {
+                    "privacy" => assert!(
+                        crate::privacy::is_offered(target),
+                        "{}: {target} is not offered in the Privacy Center",
+                        w.id
+                    ),
+                    "optimize" => {
+                        assert!(crate::optregistry::meta(target).is_some(), "{target}");
+                        assert!(
+                            !crate::optregistry::is_retired(target),
+                            "{target} is retired"
+                        );
+                    }
+                    other => panic!("unknown page {other}"),
+                }
+            }
+        }
+        for (id, page, target) in RELATED {
+            assert!(TWEAKS.iter().any(|t| t.id == *id), "{id}");
+            assert!(withdrawn(id).is_none(), "{id} is withdrawn and related");
+            assert_eq!(*page, "privacy");
+            assert!(crate::privacy::is_offered(target), "{target}");
+        }
+    }
+
+    #[test]
+    fn requested_cleanup_is_withdrawn() {
+        for id in [
+            "cortana_off",
+            "taskbar_widgets_off",
+            "gamedvr_off",
+            "telemetry_off",
+            "advertising_id",
+            "app_suggestions",
+        ] {
+            assert!(withdrawn(id).is_some(), "{id}");
+        }
+        // Still offered: no equivalent elsewhere.
+        for id in [
+            "location_off",
+            "clipboard_sync_off",
+            "bing_search",
+            "xbox_gamebar",
+        ] {
+            assert!(withdrawn(id).is_none(), "{id}");
+        }
+    }
+
+    #[test]
+    fn withdrawn_tweaks_are_listed_only_with_a_captured_state() {
+        assert!(!listed("cortana_off", false));
+        assert!(listed("cortana_off", true));
+        assert!(!listed("telemetry_off", false));
+        assert!(listed("location_off", false));
+        assert!(listed("location_off", true));
+    }
+
+    #[test]
+    fn withdrawn_tweaks_cannot_be_applied() {
+        for w in WITHDRAWN {
+            let err = apply_tweak(w.id.to_string()).unwrap_err();
+            assert!(err.contains("no longer offered"), "{}: {err}", w.id);
+        }
+    }
+
+    #[test]
+    fn gamedvr_reset_restores_the_fse_values_it_changed() {
+        // Old applies also wrote the FSE values; their captured originals must
+        // stay restorable (and accepted on state migration).
+        let t = TWEAKS.iter().find(|t| t.id == "gamedvr_off").unwrap();
+        for name in [
+            "GameDVR_FSEBehaviorMode",
+            "GameDVR_HonorUserFSEBehaviorMode",
+        ] {
+            assert!(t.capture.iter().any(|(_, _, n)| *n == name), "{name}");
+        }
     }
 }

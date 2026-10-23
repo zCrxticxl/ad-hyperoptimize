@@ -225,6 +225,12 @@ fn retired_reason(id: &str) -> Option<&'static str> {
     RETIRED.iter().find(|(r, _)| *r == id).map(|(_, why)| *why)
 }
 
+/// In the catalog and not retired (the single source other pages point to).
+#[cfg(test)]
+pub(crate) fn is_offered(id: &str) -> bool {
+    TWEAKS.iter().any(|t| t.id == id) && retired_reason(id).is_none()
+}
+
 /// Retired items are listed only while active (so they can be reset);
 /// everything else is always listed.
 fn listed(id: &str, applied: bool) -> bool {
