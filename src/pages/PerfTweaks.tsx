@@ -299,14 +299,13 @@ function NetCard({ admin }: { admin: boolean }) {
   );
 }
 
-// ─── RAM Standby Cleaner ──────────────────────────────────────────────────────
+// ─── RAM usage (read-only) ────────────────────────────────────────────────────
+// The "flush standby cache" action was removed: standby memory is reclaimable
+// cache, so purging it frees nothing a game could not already get.
 
-function RamCard({ admin }: { admin: boolean }) {
+function RamCard() {
   const { t } = useLang();
   const [data, setData] = useState<any>(null);
-  const [busy, setBusy] = useState(false);
-  const [log, setLog] = useState("");
-
   const [err, setErr] = useState("");
   const load = useCallback(async () => {
     setErr("");
@@ -314,13 +313,6 @@ function RamCard({ admin }: { admin: boolean }) {
     catch (e: any) { setErr(String(e)); }
   }, []);
   useEffect(() => { load(); }, [load]);
-
-  const flush = async () => {
-    setBusy(true);
-    try { setLog(await api.ramFlushStandby()); await load(); }
-    catch (e: any) { setLog(String(e)); }
-    finally { setBusy(false); }
-  };
 
   const standbyPct = data?.totalMb > 0 ? Math.round((data.standbyMb / data.totalMb) * 100) : 0;
   const usedPct    = data?.totalMb > 0 ? Math.round((data.usedMb    / data.totalMb) * 100) : 0;
@@ -355,14 +347,9 @@ function RamCard({ admin }: { admin: boolean }) {
             <tr><td className="muted">{t("perfRamFree")}</td><td style={{ color: "var(--green)" }}>{mb(data.freeMb)}</td></tr>
           </tbody></table>
           <div className="row" style={{ gap: 8, alignItems: "center" }}>
-            <button className="btn small" onClick={flush} disabled={busy || !admin}>
-              {busy ? <><Spinner /> {t("perfRamFlushing")}</> : `⚡ ${t("perfRamFlushStandby")}`}
-            </button>
-            <button className="btn small ghost" onClick={load} disabled={busy}>↺ {t("perfRefresh")}</button>
-            <RiskBadge id="ram_flush_standby" />
+            <button className="btn small ghost" onClick={load}>↺ {t("perfRefresh")}</button>
           </div>
-          {!admin && <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>⚠ {t("perfAdminRequired")}</div>}
-          {log && <div className="mono muted" style={{ fontSize: 11, marginTop: 8 }}>{log}</div>}
+          <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>{t("perfRamFlushRemoved")}</div>
         </>
       )}
     </Card>
@@ -534,7 +521,7 @@ export default function PerfTweaks({ admin }: { admin: boolean }) {
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
         <TimerCard admin={admin} />
-        <RamCard admin={admin} />
+        <RamCard />
       </div>
 
       <div style={{ marginTop: 14 }}>

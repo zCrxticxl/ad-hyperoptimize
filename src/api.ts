@@ -48,7 +48,6 @@ export const api = {
   netTweakAllGaming: () => invoke<string>("cmd_net_tweak_all_gaming"),
   netResetAll: () => invoke<string>("cmd_net_reset_all"),
   ramInfo: () => invoke<any>("cmd_ram_info"),
-  ramFlushStandby: () => invoke<string>("cmd_ram_flush_standby"),
   pagefileInfo: () => invoke<any>("cmd_pagefile_info"),
   pagefileSetAuto: () => invoke<string>("cmd_pagefile_set_auto"),
   pagefileSetCustom: (path: string, initMb: number, maxMb: number) => invoke<string>("cmd_pagefile_set_custom", { path, initMb, maxMb }),

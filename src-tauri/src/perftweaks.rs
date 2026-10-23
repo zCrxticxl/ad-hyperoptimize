@@ -1,4 +1,4 @@
-//! Performance tweaks: Timer Resolution, MSI Mode, Network Adapter, RAM Standby, Pagefile.
+//! Performance tweaks: Timer Resolution, MSI Mode, Network Adapter, RAM usage (read-only), Pagefile.
 
 use crate::ps;
 use serde_json::{json, Value};
@@ -459,7 +459,7 @@ fn summarize_net_reset(out: &str) -> Result<String, String> {
     ))
 }
 
-// ── RAM Standby Cleaner ───────────────────────────────────────────────────────
+// ── RAM usage (read-only) ─────────────────────────────────────────────────────
 
 pub fn ram_info() -> Value {
     // Use sysinfo (already a dep) for reliable cross-version RAM info.
@@ -490,61 +490,11 @@ pub fn ram_info() -> Value {
     })
 }
 
-pub fn ram_flush_standby() -> Result<String, String> {
-    // NtSetSystemInformation(80 = SystemMemoryListInformation, payload=4 = MemoryPurgeStandbyList)
-    // requires SeProfileSingleProcessPrivilege ENABLED in the caller's token;
-    // admins hold it but it is disabled by default, so enable it first via
-    // AdjustTokenPrivileges (inline C#, no extra Rust crate features).
-    // Purging the standby list only discards cached file data: it is not a
-    // performance gain by itself and can make the next file reads slower.
-    let script = r#"
-Add-Type @'
-using System;
-using System.Runtime.InteropServices;
-public class RamFlush {
-    [StructLayout(LayoutKind.Sequential, Pack = 4)]
-    struct TokPriv1Luid { public int Count; public long Luid; public int Attr; }
-    [DllImport("ntdll.dll")] static extern uint NtSetSystemInformation(int cls, IntPtr buf, int len);
-    [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
-    [DllImport("kernel32.dll", SetLastError = true)] static extern bool CloseHandle(IntPtr h);
-    [DllImport("advapi32.dll", SetLastError = true)] static extern bool OpenProcessToken(IntPtr p, int access, out IntPtr tok);
-    [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)] static extern bool LookupPrivilegeValue(string sys, string name, out long luid);
-    [DllImport("advapi32.dll", SetLastError = true)] static extern bool AdjustTokenPrivileges(IntPtr tok, bool disableAll, ref TokPriv1Luid np, int len, IntPtr prev, IntPtr retLen);
-    public static string EnablePrivilege() {
-        IntPtr tok;
-        if (!OpenProcessToken(GetCurrentProcess(), 0x0020 | 0x0008, out tok)) return "OpenProcessToken failed: " + Marshal.GetLastWin32Error();
-        try {
-            var tp = new TokPriv1Luid { Count = 1, Attr = 0x00000002 };
-            if (!LookupPrivilegeValue(null, "SeProfileSingleProcessPrivilege", out tp.Luid)) return "LookupPrivilegeValue failed: " + Marshal.GetLastWin32Error();
-            if (!AdjustTokenPrivileges(tok, false, ref tp, 0, IntPtr.Zero, IntPtr.Zero)) return "AdjustTokenPrivileges failed: " + Marshal.GetLastWin32Error();
-            int err = Marshal.GetLastWin32Error();
-            if (err == 1300) return "SeProfileSingleProcessPrivilege is not held (run the app as administrator)";
-            return null;
-        } finally { CloseHandle(tok); }
-    }
-    public static uint PurgeStandby() {
-        var p = Marshal.AllocHGlobal(4);
-        Marshal.WriteInt32(p, 4);
-        try { return NtSetSystemInformation(80, p, 4); }
-        finally { Marshal.FreeHGlobal(p); }
-    }
-}
-'@
-$priv = [RamFlush]::EnablePrivilege()
-if ($priv) { "Flush result: privilege error: $priv"; return }
-$r = [RamFlush]::PurgeStandby()
-if ($r -eq 0) { "Standby list flushed successfully" } else { "Flush result: 0x$($r.ToString('X8'))" }
-"#;
-    ps::run(script)
-        .map(|s| {
-            let s = s.trim();
-            if s.starts_with("Flush result:") {
-                return Err(s.to_string());
-            }
-            Ok(s.to_string())
-        })
-        .and_then(|r| r)
-}
+// The "Flush Standby Cache" action (NtSetSystemInformation
+// MemoryPurgeStandbyList) was removed: the standby list is reclaimable cache
+// Windows hands to programs on demand, so purging it frees nothing a game
+// could not already get, and the next file reads come from disk instead of
+// RAM. It changed no persistent setting, so there is nothing to reset.
 
 // ── Pagefile ─────────────────────────────────────────────────────────────────
 

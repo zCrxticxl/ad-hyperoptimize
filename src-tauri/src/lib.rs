@@ -1405,13 +1405,6 @@ async fn cmd_ram_info() -> Value {
 }
 
 #[tauri::command(async)]
-async fn cmd_ram_flush_standby() -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(perftweaks::ram_flush_standby)
-        .await
-        .map_err(|_| "perf tweak task panicked".to_string())?
-}
-
-#[tauri::command(async)]
 async fn cmd_pagefile_info() -> Value {
     tauri::async_runtime::spawn_blocking(perftweaks::pagefile_info)
         .await
@@ -1677,7 +1670,6 @@ pub fn run() {
             cmd_net_tweak_all_gaming,
             cmd_net_reset_all,
             cmd_ram_info,
-            cmd_ram_flush_standby,
             cmd_pagefile_info,
             cmd_pagefile_set_auto,
             cmd_pagefile_set_custom,
