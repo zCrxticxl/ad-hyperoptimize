@@ -33,19 +33,12 @@ if (-not $plans) { '[]' } else { @($plans) | ConvertTo-Json -Compress }
         Err(error) => return json!({ "error": error, "plans": [] }),
     };
 
-    let ultimate = plans.as_array().and_then(|arr| {
-        arr.iter().find(|p| {
-            let name = p["name"].as_str().unwrap_or("").to_lowercase();
-            p["guid"].as_str() == Some(ULTIMATE_GUID)
-                || name.contains("ultimate performance")
-                || name.contains("ultimative leistung")
-        })
-    });
+    let remembered = read_remembered_ultimate();
+    let ultimate = plans
+        .as_array()
+        .and_then(|arr| find_ultimate(arr, remembered.as_deref()));
     let ultimate_available = ultimate.is_some();
-    let ultimate_guid = ultimate
-        .and_then(|p| p["guid"].as_str())
-        .unwrap_or(ULTIMATE_GUID)
-        .to_string();
+    let ultimate_guid = ultimate.unwrap_or_else(|| ULTIMATE_GUID.to_string());
     if let Some(arr) = plans.as_array_mut() {
         for plan in arr {
             plan["isUltimate"] = json!(plan["guid"].as_str() == Some(ultimate_guid.as_str()));
@@ -57,6 +50,64 @@ if (-not $plans) { '[]' } else { @($plans) | ConvertTo-Json -Compress }
         "ultimateAvailable": ultimate_available,
         "ultimateGuid": ultimate_guid,
     })
+}
+
+/// File in the app data dir holding the GUID `/duplicatescheme` returned
+/// when this app unlocked Ultimate Performance. Plan names are localized,
+/// so the GUID is the only locale-independent way to find the copy again.
+fn ultimate_marker() -> std::path::PathBuf {
+    crate::safety::app_data_dir().join("ultimate_plan_guid.txt")
+}
+
+fn read_remembered_ultimate() -> Option<String> {
+    let s = std::fs::read_to_string(ultimate_marker()).ok()?;
+    let g = s.trim().to_lowercase();
+    is_guid(&g).then_some(g)
+}
+
+/// Ultimate plan among `plans`: the original GUID, then the copy this app
+/// remembered (only if it still exists), then English/German name matching
+/// for copies created before the GUID was remembered.
+fn find_ultimate(plans: &[Value], remembered: Option<&str>) -> Option<String> {
+    let guid_of = |p: &Value| p["guid"].as_str().map(str::to_lowercase);
+    plans
+        .iter()
+        .find(|p| guid_of(p).as_deref() == Some(ULTIMATE_GUID))
+        .or_else(|| {
+            remembered.and_then(|r| plans.iter().find(|p| guid_of(p).as_deref() == Some(r)))
+        })
+        .or_else(|| {
+            plans.iter().find(|p| {
+                let name = p["name"].as_str().unwrap_or("").to_lowercase();
+                name.contains("ultimate performance") || name.contains("ultimative leistung")
+            })
+        })
+        .and_then(guid_of)
+}
+
+/// The new scheme GUID from `/duplicatescheme` output (localized text, but
+/// the GUID token itself is not). The source GUID is skipped.
+fn parse_duplicated_guid(out: &str) -> Option<String> {
+    out.split(|c: char| c.is_whitespace() || c == '(' || c == ')')
+        .map(str::to_lowercase)
+        .find(|t| is_guid(t) && t != ULTIMATE_GUID)
+}
+
+/// Plan names are embedded in a PowerShell string: reject quotes (ASCII and
+/// the typographic U+2018..U+201F that PowerShell also treats as quotes),
+/// `$`, backtick and control chars.
+fn validate_plan_name(name: &str) -> Result<&str, String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("Plan name cannot be empty".into());
+    }
+    if name.len() > 128 {
+        return Err("Plan name too long (max 128 chars)".into());
+    }
+    if !ps::is_safe_ident(name) {
+        return Err("Plan name contains unsupported characters".into());
+    }
+    Ok(name)
 }
 
 /// Canonical 36-char GUID shape: 8-4-4-4-12 hex digits with dashes.
@@ -105,17 +156,17 @@ pub fn unlock_ultimate() -> Result<String, String> {
         return Ok("Ultimate Performance plan activated".into());
     }
     let output = ps::exec("powercfg.exe", &["/duplicatescheme", ULTIMATE_GUID])?;
-    let created = list_plans();
-    if let Some(error) = created["error"].as_str() {
-        return Err(format!("Cannot verify created power plan: {error}"));
+    let guid = parse_duplicated_guid(&output)
+        .ok_or_else(|| format!("Ultimate plan GUID not found in powercfg output: {output}"))?;
+    // Remember the copy so later clicks reuse it on any display language
+    // instead of duplicating again.
+    let remember = std::fs::write(ultimate_marker(), &guid);
+    set_active(guid.clone())?;
+    if let Err(e) = remember {
+        return Ok(format!(
+            "Ultimate Performance plan created and activated: {guid} (could not remember it: {e})"
+        ));
     }
-    let guid = created["ultimateGuid"]
-        .as_str()
-        .ok_or_else(|| format!("Ultimate plan not found after creation: {output}"))?;
-    if created["ultimateAvailable"] != true {
-        return Err(format!("Ultimate plan not found after creation: {output}"));
-    }
-    set_active(guid.to_string())?;
     Ok(format!(
         "Ultimate Performance plan created and activated: {guid}"
     ))
@@ -146,27 +197,26 @@ pub fn delete_plan(guid: String) -> Result<String, String> {
 }
 
 pub fn create_custom(name: String, base_guid: String) -> Result<String, String> {
-    let name = name.trim();
-    if name.is_empty() {
-        return Err("Plan name cannot be empty".into());
-    }
-    if name.len() > 128 {
-        return Err("Plan name too long (max 128 chars)".into());
-    }
-    // The name is embedded in a double-quoted PS string: reject every char
-    // that could terminate or escape the quote (`"`, `$`, backtick, `'`).
-    if !ps::is_safe_ident(name) {
-        return Err("Plan name contains unsupported characters".into());
-    }
+    let name = validate_plan_name(&name)?;
     if !is_guid(&base_guid) {
         return Err(format!("Invalid base plan GUID: {base_guid}"));
     }
+    // Validated above and additionally single-quoted (quote_single doubles
+    // ASCII and typographic single quotes), so nothing in it is expanded.
+    let quoted = ps::quote_single(name);
     let script = format!(
         r#"
 $out = powercfg /duplicatescheme {base_guid} 2>&1
-if ($out -match '([0-9a-fA-F]{{8}}(?:-[0-9a-fA-F]{{4}}){{3}}-[0-9a-fA-F]{{12}})') {{
+if ($LASTEXITCODE -eq 0 -and "$out" -match '([0-9a-fA-F]{{8}}(?:-[0-9a-fA-F]{{4}}){{3}}-[0-9a-fA-F]{{12}})') {{
     $newGuid = $Matches[1].Trim()
-    powercfg /changename $newGuid "{name}" 2>$null
+    $rename = powercfg /changename $newGuid {quoted} 2>&1
+    $rc = $LASTEXITCODE
+    if ($rc -ne 0) {{
+        # Don't leave an unnamed duplicate behind.
+        powercfg /delete $newGuid 2>&1 | Out-Null
+        $cleanup = if ($LASTEXITCODE -eq 0) {{ 'the copy was removed' }} else {{ "the copy $newGuid could not be removed" }}
+        throw "Renaming the new plan failed (exit $rc): $rename; $cleanup"
+    }}
     "Created: $newGuid"
 }} else {{
     throw "Failed to duplicate scheme: $out"
@@ -178,7 +228,65 @@ if ($out -match '([0-9a-fA-F]{{8}}(?:-[0-9a-fA-F]{{4}}){{3}}-[0-9a-fA-F]{{12}})'
 
 #[cfg(test)]
 mod tests {
-    use super::is_guid;
+    use super::{find_ultimate, is_guid, parse_duplicated_guid, validate_plan_name, ULTIMATE_GUID};
+    use serde_json::json;
+
+    #[test]
+    fn ultimate_copy_is_found_by_remembered_guid_on_any_locale() {
+        let copy = "11111111-2222-3333-4444-555555555555";
+        let plans = vec![
+            json!({ "guid": "381b4222-f694-41f0-9685-ff5bb260df2e", "name": "Équilibré" }),
+            json!({ "guid": copy, "name": "Performances optimales" }),
+        ];
+        assert_eq!(find_ultimate(&plans, Some(copy)).as_deref(), Some(copy));
+        assert_eq!(find_ultimate(&plans, None), None);
+        // Remembered copy was deleted: no false positive.
+        assert_eq!(find_ultimate(&plans[..1], Some(copy)), None);
+        let named = vec![json!({ "guid": copy, "name": "Ultimate Performance" })];
+        assert_eq!(find_ultimate(&named, None).as_deref(), Some(copy));
+        let orig = vec![json!({ "guid": ULTIMATE_GUID, "name": "x" })];
+        assert_eq!(find_ultimate(&orig, None).as_deref(), Some(ULTIMATE_GUID));
+    }
+
+    #[test]
+    fn duplicated_guid_is_parsed_locale_independent() {
+        let en = "Power Scheme GUID: 11111111-2222-3333-4444-555555555555  (Ultimate Performance)";
+        let de =
+            "GUID des Energieschemas: 11111111-2222-3333-4444-555555555555  (Ultimative Leistung)";
+        for out in [en, de] {
+            assert_eq!(
+                parse_duplicated_guid(out).as_deref(),
+                Some("11111111-2222-3333-4444-555555555555")
+            );
+        }
+        assert_eq!(
+            parse_duplicated_guid(&format!("GUID: {ULTIMATE_GUID}")),
+            None
+        );
+        assert_eq!(parse_duplicated_guid("error"), None);
+    }
+
+    #[test]
+    fn plan_names_reject_ascii_and_typographic_quotes() {
+        assert_eq!(validate_plan_name("  Gaming  "), Ok("Gaming"));
+        for bad in [
+            "a'b",
+            "a\"b",
+            "a$b",
+            "a`b",
+            "a\u{2018}b",
+            "a\u{2019}b",
+            "a\u{201C}b",
+            "a\u{201D}b",
+            "a\u{201E}b",
+            "a\u{201F}b",
+            "",
+            "   ",
+        ] {
+            assert!(validate_plan_name(bad).is_err(), "{bad:?}");
+        }
+        assert!(validate_plan_name(&"x".repeat(129)).is_err());
+    }
 
     #[test]
     fn guid_validation() {

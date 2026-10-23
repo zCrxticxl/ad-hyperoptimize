@@ -4,10 +4,12 @@
 //! 1. Per-core DPC / interrupt pressure via WMI formatted perf counters
 //!    (`Win32_PerfFormattedData_Counters_ProcessorInformation`), class and
 //!    property names are locale-independent, unlike `Get-Counter` paths.
-//! 2. Execution-stall probe: a pinned spinning thread timestamps continuously;
-//!    any gap between consecutive reads is time the thread was preempted by
-//!    DPCs/ISRs/scheduler, the same signal LatencyMon's "highest measured
-//!    interrupt to process latency" reflects.
+//! 2. Execution-stall probe: a spinning thread timestamps continuously; any
+//!    gap between consecutive reads is time the thread was preempted by
+//!    DPCs/ISRs/scheduler, similar to LatencyMon's "highest measured
+//!    interrupt to process latency". The thread is NOT pinned to a core (no
+//!    affinity is set), so the scheduler may migrate it and a gap can also be
+//!    plain preemption by other threads, not only driver DPC/ISR time.
 //! 3. Deep trace: drives the built-in `wpr.exe` (Windows Performance
 //!    Recorder) CPU profile for per-driver DPC attribution in WPA.
 
@@ -35,7 +37,8 @@ pub fn counters(samples: u32) -> Value {
 }
 
 /// Layer 2: spin-probe. Returns stall distribution in microseconds.
-/// A gap > ~250µs on an idle-ish core almost always means a long DPC/ISR.
+/// The probe thread is unpinned; on an otherwise idle system a gap > ~250µs
+/// usually means a long DPC/ISR, but under load it can be ordinary preemption.
 pub fn stall_probe(seconds: u32) -> Value {
     let seconds = seconds.clamp(1, 30) as u64;
     let handle = std::thread::spawn(move || {

@@ -198,8 +198,8 @@ fn catalog() -> Vec<GpuTweak> {
             name: "Maximum Performance (Disable PowerMizer)",
             category: "Clock & Power",
             vendor: "nvidia",
-            description: "Disables PowerMizer, NVIDIA otherwise aggressively lowers GPU clocks at idle and under load.",
-            impact: "GPU stays at maximum clocks permanently; power saving fully disabled. Not recommended for laptops on battery.",
+            description: "LEGACY, no effect: writes the old PowerMizer registry values. Current NVIDIA drivers do not read them; power management lives in the driver profile (NVIDIA Control Panel > Power management mode).",
+            impact: "No effect on current drivers. Hidden for new applies; shown only so an earlier apply can be undone. Use the NVIDIA Control Panel instead.",
             risk: "Low",
             reboot: false,
             actions: vec![
@@ -238,12 +238,12 @@ fn catalog() -> Vec<GpuTweak> {
         },
         GpuTweak {
             id: "nv_telemetry_svc_off",
-            name: "Disable NVIDIA Telemetry Container Service",
+            name: "Set NVIDIA LocalSystem Container to Manual",
             category: "Privacy",
             vendor: "nvidia",
-            description: "Sets NvContainerLocalSystem to Manual, prevents the NVIDIA telemetry container from auto-starting.",
-            impact: "No NVIDIA telemetry process on boot. GeForce Experience and drivers continue to work normally.",
-            risk: "Low",
+            description: "Sets NvContainerLocalSystem (the NVIDIA App / GeForce Experience LocalSystem container, not a dedicated telemetry service) to Manual so it does not auto-start.",
+            impact: "Breaks the NVIDIA App / GeForce Experience overlay, Instant Replay / ShadowPlay recording, and in-app driver updates until set back to Automatic. Display driver and games keep working. No measurable FPS change.",
+            risk: "Medium",
             reboot: false,
             actions: vec![
                 TweakAction::Svc { name: "NvContainerLocalSystem", apply: "Manual", revert: "Automatic" },
@@ -254,8 +254,8 @@ fn catalog() -> Vec<GpuTweak> {
             name: "Enable NVIDIA Threaded Optimization",
             category: "Rendering",
             vendor: "nvidia",
-            description: "Forces ThreadedOptimization globally, allows the NVIDIA driver to use multi-threading for OpenGL/D3D calls.",
-            impact: "Higher CPU-GPU throughput in many titles. Explicitly setting this prevents per-app overrides.",
+            description: "LEGACY, no effect: writes an old NVTweak registry value. Current NVIDIA drivers read Threaded Optimization only from the driver profile (NVIDIA Control Panel > Manage 3D settings).",
+            impact: "No effect on current drivers. Hidden for new applies; shown only so an earlier apply can be undone.",
             risk: "Low",
             reboot: false,
             actions: vec![
@@ -275,10 +275,10 @@ fn catalog() -> Vec<GpuTweak> {
             name: "Disable ULPS (Ultra Low Power State)",
             category: "Clock & Power",
             vendor: "amd",
-            description: "Disables Ultra Low Power State, AMD GPUs otherwise enter a deep sleep that requires a wake-up cycle.",
-            impact: "Eliminates the most common AMD micro-stutters on the first frame after idle. No measurable power increase during gaming.",
-            risk: "Low",
-            reboot: false,
+            description: "Disables Ultra Low Power State, which lets idle secondary GPUs (CrossFire / hybrid laptops) power down. REBOOT REQUIRED.",
+            impact: "Can fix wake-up stutter or black screens on multi-GPU / hybrid systems. Higher idle power draw and heat (the GPU no longer powers fully down), noticeable on laptops. Little to no effect on single-GPU desktops.",
+            risk: "Medium",
+            reboot: true,
             actions: vec![
                 TweakAction::DriverReg { name: "EnableUlps",   apply: 0, revert: 1 },
                 TweakAction::DriverReg { name: "EnableUlpsNV", apply: 0, revert: 1 },
@@ -302,9 +302,9 @@ fn catalog() -> Vec<GpuTweak> {
             name: "Disable Compute Preemption",
             category: "Rendering",
             vendor: "amd",
-            description: "Disables preemptive interruption of compute workloads, reduces driver overhead.",
-            impact: "Lower driver latency for compute tasks; less frametime variance in DX12/Vulkan titles.",
-            risk: "Medium",
+            description: "EXPERT ONLY: disables compute preemption in the AMD kernel driver. Long-running compute work can then no longer be interrupted by Windows' GPU scheduler.",
+            impact: "No documented gaming benefit. A long compute dispatch can exceed the Windows TDR timeout, causing driver resets, black screens or full system hangs. Apply only for a specific, verified problem; undo immediately if anything misbehaves.",
+            risk: "High",
             reboot: true,
             actions: vec![
                 TweakAction::DriverReg { name: "KMD_EnableComputePreemption", apply: 0, revert: 1 },
@@ -343,8 +343,8 @@ fn catalog() -> Vec<GpuTweak> {
             name:        "Max Pre-Rendered Frames = 1",
             category:    "Low Latency",
             vendor:      "nvidia",
-            description: "Limits NVIDIA frame queue to 1 pre-rendered frame (default: 3). Reduces buffering between CPU and GPU, less input lag, especially at high FPS.",
-            impact:      "3-10 ms lower input lag. May cause minor stutter if CPU is the bottleneck.",
+            description: "LEGACY, no effect: writes the old Prerenderlimit NVTweak value. Current NVIDIA drivers take Max Pre-Rendered Frames / Low Latency Mode only from the driver profile (NVIDIA Control Panel).",
+            impact:      "No effect on current drivers. Hidden for new applies; shown only so an earlier apply can be undone. Use Low Latency Mode in the NVIDIA Control Panel or Reflex in-game.",
             risk:        "Low",
             reboot:      false,
             actions: vec![
@@ -362,8 +362,8 @@ fn catalog() -> Vec<GpuTweak> {
             name:        "NVIDIA Low Latency Ultra Mode",
             category:    "Low Latency",
             vendor:      "nvidia",
-            description: "Sets NVIDIA frame submission to Ultra Low Latency (RTHM_MODE=2). GPU renders frames just-in-time, minimises the CPU→GPU pipeline delay.",
-            impact:      "Lowest possible input lag in GPU-bound games. Best effect at 60-144 Hz with VSYNC off.",
+            description: "LEGACY, no effect: writes NVPCFLatencyPolicy / RTHM_MODE registry values that current NVIDIA drivers do not read. Ultra Low Latency is a driver-profile setting (NVIDIA Control Panel > Low Latency Mode).",
+            impact:      "No effect on current drivers. Hidden for new applies; shown only so an earlier apply can be undone.",
             risk:        "Low",
             reboot:      false,
             actions: vec![
@@ -523,13 +523,34 @@ fn apply_action(_action: &TweakAction, _driver_key: &str, _applying: bool) -> Re
 
 // ── Public API ──────────────────────────────────────────────────────────────
 
+/// No verified effect or no safe restore path: never listed, never applied.
+fn is_blocked(id: &str) -> bool {
+    matches!(id, "amd_rx_tex_cache" | "dx_shader_cache_unlimited")
+}
+
+/// Registry values current NVIDIA drivers no longer read (these settings live
+/// in the driver's DRS profile). New applies are refused; an earlier,
+/// journaled apply stays listed so it can still be undone.
+fn is_legacy_noop(id: &str) -> bool {
+    matches!(
+        id,
+        "nv_threaded_opt" | "nv_prerender_limit_1" | "nv_low_latency_ultra" | "nv_power_max_perf"
+    )
+}
+
 pub fn scan() -> serde_json::Value {
     let (vendor, gpu_name, driver_key) = detect_gpu();
     let tweaks_data = catalog();
     let journal = safety::load_journal().unwrap_or_default();
     let tweaks: Vec<serde_json::Value> = tweaks_data
         .iter()
-        .filter(|tw| !matches!(tw.id, "amd_rx_tex_cache" | "dx_shader_cache_unlimited"))
+        .filter(|tw| !is_blocked(tw.id))
+        .filter(|tw| {
+            !is_legacy_noop(tw.id)
+                || journal.iter().any(|entry| {
+                    entry.tweak_id == format!("gpu:{}", tw.id) && entry.completed && !entry.reverted
+                })
+        })
         .map(|tw| {
             let vendor_str = format!("{:?}", vendor).to_lowercase();
             let applicable = tw.vendor == "any" || tw.vendor == vendor_str;
@@ -559,6 +580,7 @@ pub fn scan() -> serde_json::Value {
                 "applicable":      applicable,
                 "driverKeyMissing": driver_key_missing,
                 "canRevert": can_revert,
+                "deprecated": is_legacy_noop(tw.id),
             })
         })
         .collect();
@@ -572,11 +594,15 @@ pub fn scan() -> serde_json::Value {
 }
 
 pub fn do_tweak(id: String, driver_key: String, applying: bool) -> Result<String, String> {
-    if matches!(
-        id.as_str(),
-        "amd_rx_tex_cache" | "dx_shader_cache_unlimited"
-    ) {
+    if is_blocked(&id) {
         return Err("GPU tweak has no verified effect or safe restore path".into());
+    }
+    if applying && is_legacy_noop(&id) {
+        return Err(
+            "Current NVIDIA drivers ignore this registry value (the setting lives in the driver \
+             profile); use the NVIDIA Control Panel instead"
+                .into(),
+        );
     }
     let tweaks = catalog();
     let tw = tweaks
@@ -607,6 +633,14 @@ pub fn do_tweak(id: String, driver_key: String, applying: bool) -> Result<String
     #[cfg(windows)]
     {
         let _engine = tweaks::engine_guard()?;
+        // Re-applying while an earlier apply is still open would capture the
+        // tweak's own values as "previous"; keep the original capture.
+        if let Some(open) = tweaks::open_entry_id(&safety::load_journal()?, &tweak_id) {
+            return Ok(format!(
+                "{} is already applied (restore token: {open})",
+                tw.name
+            ));
+        }
         let mut items = Vec::new();
         for action in &tw.actions {
             match action {
@@ -921,7 +955,36 @@ if ($exe) {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_valid_driver_key, GPU_CLASS};
+    use super::{catalog, is_blocked, is_legacy_noop, is_valid_driver_key, GPU_CLASS};
+
+    #[test]
+    fn legacy_nvidia_registry_tweaks_are_flagged_but_kept_for_undo() {
+        for id in [
+            "nv_threaded_opt",
+            "nv_prerender_limit_1",
+            "nv_low_latency_ultra",
+            "nv_power_max_perf",
+        ] {
+            assert!(is_legacy_noop(id), "{id}");
+            assert!(!is_blocked(id), "{id} must keep its revert path");
+            assert!(catalog().iter().any(|t| t.id == id), "{id} missing");
+        }
+        assert!(!is_legacy_noop("nv_dynamic_pstate_off"));
+        assert!(is_blocked("amd_rx_tex_cache"));
+    }
+
+    #[test]
+    fn risky_amd_tweaks_are_labelled_honestly() {
+        let cat = catalog();
+        let ulps = cat.iter().find(|t| t.id == "amd_ulps_off").unwrap();
+        assert!(ulps.reboot);
+        assert!(!ulps.impact.contains("No measurable power increase"));
+        let pre = cat
+            .iter()
+            .find(|t| t.id == "amd_compute_preemption_off")
+            .unwrap();
+        assert_eq!(pre.risk, "High");
+    }
 
     #[test]
     fn driver_key_validation() {

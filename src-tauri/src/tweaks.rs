@@ -249,7 +249,7 @@ pub struct Tweak {
     pub description: &'static str,
     pub rationale: &'static str,
     pub impact: &'static str,
-    pub risk: &'static str, // Low | Medium
+    pub risk: &'static str, // Low | Medium | High (High = advanced / situational)
     pub requires_admin: bool,
     pub reversible: bool,
     pub actions: Vec<Action>,
@@ -320,8 +320,8 @@ pub fn catalog() -> Vec<Tweak> {
             name: "Visual effects: best performance",
             category: "Memory",
             description: "Sets the visual-effects preference to 'Adjust for best performance'.",
-            rationale: "Animations and transparency cost GPU/CPU time and RAM, most noticeable on iGPUs and low-RAM systems.",
-            impact: "Snappier UI on low-end hardware; cosmetic downgrade.",
+            rationale: "Disables shell animations, shadows and smoothing. On any GPU from the last decade DWM composites these effects at negligible cost, so this is a preference, not a performance fix; it can still feel snappier on very old iGPUs or in remote sessions.",
+            impact: "No measurable gain on modern hardware; mostly cosmetic.",
             risk: "Low",
             requires_admin: false,
             reversible: true,
@@ -360,8 +360,8 @@ pub fn catalog() -> Vec<Tweak> {
             category: "Services",
             description: "Sets the SysMain service to Disabled.",
             rationale: "SysMain's prefetching helps HDDs; on SSDs it adds background I/O and RAM pressure with negligible benefit. Only apply if your system drive is an SSD.",
-            impact: "Less background disk activity on SSDs. Do NOT apply on HDD systems.",
-            risk: "Medium",
+            impact: "Less background disk activity on SSDs, but app launches can get slower without prefetch. Do NOT apply on HDD systems. Advanced: undo if launches feel slower.",
+            risk: "High",
             requires_admin: true,
             reversible: true,
             actions: vec![Action::Service { name: "SysMain", target: "Disabled" }],
@@ -414,8 +414,8 @@ pub fn catalog() -> Vec<Tweak> {
             name: "Disable UWP background apps (global)",
             category: "Background",
             description: "Prevents Store apps from running in the background for this user.",
-            rationale: "Each background UWP app costs RAM and wake-ups. Apps still work when opened; they just can't idle in the background.",
-            impact: "Lower idle RAM/CPU. Live tiles and some notifications stop updating.",
+            rationale: "Stops Store apps from idling in the background. Suspended UWP apps already use almost no CPU, and Windows 11 ignores this global switch for many apps, so the effect is about notifications/privacy, not speed.",
+            impact: "No measurable performance gain on typical systems. Some app notifications, live tiles and background sync stop.",
             risk: "Medium",
             requires_admin: false,
             reversible: true,
@@ -484,9 +484,9 @@ pub fn catalog() -> Vec<Tweak> {
             id: "priority_separation",
             name: "Foreground priority boost (Win32PrioritySeparation 0x26)",
             category: "Gaming",
-            description: "Sets scheduler quanta to short, fixed, 3:1 foreground boost.",
-            rationale: "Default Windows gives the foreground app a variable boost; 0x26 makes quanta short and fixed with maximum foreground bias, the classic esports scheduler tweak, keeping the game responsive when background tasks fire.",
-            impact: "More consistent foreground frametimes under background load.",
+            description: "Sets Win32PrioritySeparation to 0x26: short, variable quanta with a 3:1 foreground boost.",
+            rationale: "0x26 decodes to short / variable / 3:1, which is exactly what the Windows client default (2) already resolves to. The widely shared claim that it gives short FIXED quanta is wrong for this value. Writing it explicitly only matters if another tool changed the value before.",
+            impact: "No measurable change on a default Windows client install; it only restores client scheduling if the value was altered.",
             risk: "Medium",
             requires_admin: true,
             reversible: true,
@@ -498,8 +498,8 @@ pub fn catalog() -> Vec<Tweak> {
             category: "Gaming",
             description: "Globally disables Windows power throttling of background processes. REBOOT RECOMMENDED.",
             rationale: "EcoQoS forces processes onto efficiency states/E-cores; it sometimes misclassifies game launchers, overlays, OBS or anti-cheat helpers, starving them mid-game.",
-            impact: "No process gets force-throttled. Higher idle power draw, skip on laptops running on battery.",
-            risk: "Medium",
+            impact: "No process gets force-throttled. Higher idle power draw and heat; Advanced: do NOT use on laptops (battery life and thermals suffer). Helps only where a specific helper process was misclassified.",
+            risk: "High",
             requires_admin: true,
             reversible: true,
             actions: vec![Action::RegSet { root: "HKLM", path: "SYSTEM\\CurrentControlSet\\Control\\Power\\PowerThrottling", name: "PowerThrottlingOff", value: RegVal::Dword(1) }],
@@ -509,7 +509,7 @@ pub fn catalog() -> Vec<Tweak> {
             name: "MMCSS 'Games' task: maximum priority",
             category: "Gaming",
             description: "Raises the multimedia scheduler's Games profile: CPU Priority 6 (default 2) and Scheduling Category High (default Medium).",
-            rationale: "Games registering with MMCSS (most DirectX titles) inherit this profile. Only CPU Priority and Scheduling Category are read by Windows; the widely-copied 'GPU Priority 8' and 'SFIO Priority High' values are documented as unused by Microsoft, so they are deliberately not written.",
+            rationale: "Only threads that explicitly register with MMCSS for the 'Games' task (AvSetMmThreadCharacteristics) inherit this profile; most games never do, so many titles are unaffected. Only CPU Priority and Scheduling Category are read by Windows; the widely-copied 'GPU Priority 8' and 'SFIO Priority High' values are documented as unused by Microsoft, so they are deliberately not written.",
             impact: "Games registered with MMCSS run in the High scheduling band with a higher base thread priority; most games already get this from the built-in profile, so gains are game-dependent.",
             risk: "Medium",
             requires_admin: true,
@@ -525,8 +525,8 @@ pub fn catalog() -> Vec<Tweak> {
             category: "Gaming",
             description: "Sets DWM OverlayTestMode=5, disabling multiplane overlays. REBOOT REQUIRED. NOTE: Windows 11 25H2 reportedly ignores this value; on 25H2+ the effect may not apply.",
             rationale: "MPO causes stutter, flicker and black-screen glitches on a range of GPU/monitor combos, both NVIDIA and AMD have historically recommended this exact toggle as the workaround. Confirmed working through Windows 11 24H2.",
-            impact: "Fixes MPO-related flicker/stutter if present. Slightly higher DWM GPU load. Only apply if you see flicker/stutter; undo if no change.",
-            risk: "Medium",
+            impact: "Fixes MPO-related flicker/stutter if present. Slightly higher DWM GPU load and possibly higher latency in windowed/borderless games. Advanced: only apply if you see flicker/stutter; undo if no change.",
+            risk: "High",
             requires_admin: true,
             reversible: true,
             actions: vec![Action::RegSet { root: "HKLM", path: "SOFTWARE\\Microsoft\\Windows\\Dwm", name: "OverlayTestMode", value: RegVal::Dword(5) }],
@@ -601,7 +601,7 @@ pub fn catalog() -> Vec<Tweak> {
             id: "widgets_off",
             name: "Disable Widgets / News & Interests (Policy)",
             category: "Background",
-            description: "Disables the Widget Board (Win11) via the Dsh policy and hides the widget taskbar button. NOTE: on very recent builds Microsoft's UCPD driver may block the policy write; the taskbar fallback still applies.",
+            description: "Disables the Widget Board (Win11) via the Dsh policy and hides the widget taskbar button. NOTE: on recent builds Microsoft's UCPD driver protects the per-user TaskbarDa value, so the taskbar-button write may be blocked; the machine Dsh policy is what reliably disables Widgets.",
             rationale: "The widget process (msedgewebview2) runs permanently, fetches news, and costs RAM + network.",
             impact: "Permanently saves RAM and background traffic. Widget button disappears.",
             risk: "Medium",
@@ -654,8 +654,8 @@ pub fn catalog() -> Vec<Tweak> {
             category: "Gaming",
             description: "Prevents Windows from putting USB devices to sleep during use.",
             rationale: "Selective Suspend causes USB audio dropouts, micro-stutters with mice/headsets, and controller reconnects.",
-            impact: "Stable USB devices; slightly higher power draw (negligible on desktop, noticeable on laptop battery).",
-            risk: "Medium",
+            impact: "Only helps if you actually have USB dropouts/reconnects; otherwise no measurable change. Higher power draw (noticeable on laptop battery). Applies to the active power plan only. Advanced.",
+            risk: "High",
             requires_admin: true,
             reversible: true,
             actions: vec![
@@ -699,9 +699,9 @@ pub fn catalog() -> Vec<Tweak> {
             name: "Disable CPU Core Parking",
             category: "Gaming",
             description: "Keeps all CPU cores permanently active (Core Parking Min Cores = 100%). REBOOT RECOMMENDED.",
-            rationale: "Windows parks cores at idle to save power. Waking parked cores takes a few milliseconds, visible as frametime spikes on first load increase in a game.",
-            impact: "Lower startup frametimes and fewer latency spikes; slightly higher idle power draw (negligible on desktop, noticeable on laptop battery).",
-            risk: "Medium",
+            rationale: "Windows parks cores at idle to save power; unparking is fast on modern CPUs, so gains are situational. WARNING: on AMD dual-CCD X3D CPUs (7950X3D/7900X3D/9950X3D/9900X3D) the AMD driver uses core parking to keep games on the V-Cache CCD, and on Intel hybrid CPUs (12th gen and newer) parking steers work between P- and E-cores; forcing every core unparked can make games slower there.",
+            impact: "Situational: may reduce rare unpark latency on older CPUs; can hurt on dual-CCD X3D and Intel hybrid CPUs. Higher idle power draw. Applies to the active power plan only. Advanced: benchmark before/after.",
+            risk: "High",
             requires_admin: true,
             reversible: true,
             actions: vec![
@@ -721,8 +721,8 @@ pub fn catalog() -> Vec<Tweak> {
             name: "Disable NTFS Last-Access Timestamp",
             category: "Storage",
             description: "Prevents NTFS from writing the last-accessed timestamp on every read.",
-            rationale: "Every read otherwise triggers an MFT write. On heavily-read SSDs this adds up to unnecessary write amplification and latency spikes.",
-            impact: "Significantly fewer background writes on all NTFS volumes. Pure performance gain on SSDs.",
+            rationale: "Since Windows 10 1803 last-access updates are system-managed and already disabled by default on volumes larger than 128 GB, and NTFS only flushes them lazily (about once per hour per file). Setting 1 makes it user-managed and always off.",
+            impact: "No measurable gain on most systems (already off by default on large volumes). Tools relying on last-access times lose that data.",
             risk: "Low",
             requires_admin: true,
             reversible: true,
@@ -755,8 +755,8 @@ pub fn catalog() -> Vec<Tweak> {
             name: "Set Xbox Background Services to Manual",
             category: "Services",
             description: "Sets XblAuthManager, XblGameSave, and XboxNetApiSvc to Manual.",
-            rationale: "These services run permanently but are only needed for Xbox Live multiplayer and Game Pass cloud sync, most PC gamers without an Xbox account never use them.",
-            impact: "Less idle RAM and service overhead. Xbox Live auth and cloud saves must be set back to Automatic if needed.",
+            rationale: "These services are already Manual (trigger-start) by default and only run when an Xbox / Game Pass app needs them, so there is nothing to gain at idle.",
+            impact: "No measurable performance change. If something set them to Automatic, this restores the on-demand default.",
             risk: "Medium",
             requires_admin: true,
             reversible: true,
@@ -772,7 +772,7 @@ pub fn catalog() -> Vec<Tweak> {
             category: "Services",
             description: "Sets the RemoteRegistry service to Disabled.",
             rationale: "Allows external programs to access the registry over the network, a known attack vector that home users never need.",
-            impact: "Improved security; no more remote registry access over the network.",
+            impact: "Security hardening only, no performance change (the service is already Disabled on Home and idle on Pro).",
             risk: "Low",
             requires_admin: true,
             reversible: true,
@@ -808,7 +808,7 @@ pub fn catalog() -> Vec<Tweak> {
             id: "search_highlights_off",
             name: "Disable Search Highlights & Trending Content",
             category: "Privacy",
-            description: "Disables dynamic news and trending content in the Windows search box.",
+            description: "Disables dynamic search highlights in the Windows search box (IsDynamicSearchBoxEnabled=0) and hides the Windows 10 News and Interests taskbar feed (ShellFeedsTaskbarViewMode=2; no effect on Windows 11).",
             rationale: "The search box downloads new highlight content daily and shows it on open, background traffic and distraction with no value.",
             impact: "No network fetching by the search box; calmer, faster search box.",
             risk: "Low",
@@ -849,7 +849,7 @@ pub fn catalog() -> Vec<Tweak> {
             category: "Privacy",
             description: "Sets the Geolocation service to Manual.",
             rationale: "lfsvc continuously sends location requests when active. Apps needing GPS/location start it themselves on demand.",
-            impact: "No permanent location tracking; Maps/weather apps can still start the service.",
+            impact: "Privacy only, no performance change (lfsvc is trigger-started and idle when unused). Maps/weather apps can still start the service.",
             risk: "Low",
             requires_admin: true,
             reversible: true,
@@ -905,11 +905,11 @@ pub fn catalog() -> Vec<Tweak> {
         },
         Tweak {
             id: "svc_diag_tracking_off",
-            name: "Disable Diagnostic Tracking Service",
-            category: "Privacy",
-            description: "Sets diagnosticshub.standardcollector.service to Disabled.",
-            rationale: "Collects runtime diagnostic traces for Microsoft Visual Studio and Windows Diagnostics. Unnecessary on non-developer systems.",
-            impact: "Visual Studio diagnostic tools stop working, irrelevant for normal gaming/desktop use.",
+            name: "Disable Diagnostics Hub Standard Collector (Visual Studio)",
+            category: "Services",
+            description: "Sets diagnosticshub.standardcollector.service (Microsoft Diagnostics Hub Standard Collector) to Disabled. This is NOT the DiagTrack telemetry service.",
+            rationale: "This Manual-start service collects ETW traces for Visual Studio / developer diagnostics tools. It only runs when a profiler requests it, so disabling it changes nothing at idle.",
+            impact: "No performance or telemetry change; Visual Studio diagnostic tools stop working.",
             risk: "Low",
             requires_admin: true,
             reversible: true,
@@ -921,8 +921,8 @@ pub fn catalog() -> Vec<Tweak> {
             category: "Services",
             description: "Sets the WSearch service to Manual.",
             rationale: "The indexer can cause sustained disk/CPU churn. Manual keeps search functional (slower, non-indexed) while stopping background indexing.",
-            impact: "Less background I/O; Start-menu file search becomes slower.",
-            risk: "Medium",
+            impact: "Less background I/O while indexing; Start-menu, Outlook and Explorer search become slow and incomplete. Advanced.",
+            risk: "High",
             requires_admin: true,
             reversible: true,
             actions: vec![Action::Service { name: "WSearch", target: "Manual" }],
@@ -932,8 +932,8 @@ pub fn catalog() -> Vec<Tweak> {
             name: "Disable Nagle's Algorithm",
             category: "Network",
             description: "Sets TcpAckFrequency=1 and TCPNoDelay=1 on all network adapters, eliminating Nagle's packet-coalescing delay.",
-            rationale: "Nagle batches small TCP packets to reduce overhead, great for throughput, terrible for latency. Disabling it cuts ping spikes in competitive games.",
-            impact: "Lower ping variance and reduced input-to-server latency in online games.",
+            rationale: "Nagle only coalesces small TCP sends. Almost all online games use UDP, and games that use TCP already set TCP_NODELAY on their own sockets, so these per-interface values do not change in-game ping.",
+            impact: "No measurable effect on game latency in practice; may matter only for old TCP-based games that do not set TCP_NODELAY.",
             risk: "Low",
             requires_admin: true,
             reversible: true,
@@ -954,8 +954,8 @@ pub fn catalog() -> Vec<Tweak> {
             name: "Reduce TCP TIME_WAIT Delay",
             category: "Network",
             description: "Sets TCPTimedWaitDelay to 30 seconds (default: 120). Frees up ports faster after connections close.",
-            rationale: "High-frequency game traffic opens/closes many short TCP connections. The default 120-second wait exhausts the ephemeral port range under load.",
-            impact: "Faster port recycling; eliminates 'unable to connect' errors during packet storms.",
+            rationale: "Only relevant for servers or tools that open thousands of short outbound TCP connections per minute; games use few long-lived (mostly UDP) connections and never exhaust the ephemeral port range.",
+            impact: "No measurable effect for desktop/gaming use. Kept for heavy connection-churn workloads.",
             risk: "Low",
             requires_admin: true,
             reversible: true,
@@ -968,8 +968,8 @@ pub fn catalog() -> Vec<Tweak> {
             name: "Increase Network IRP Stack Size",
             category: "Network",
             description: "Sets IRPStackSize to 32 for the Server service (default: 15). Allows more simultaneous I/O request packets.",
-            rationale: "The default stack size can become a bottleneck when multiple games, voice chat, and streaming tools all hammer the network at once.",
-            impact: "Reduced network stalls under concurrent load (gaming + Discord + stream).",
+            rationale: "IRPStackSize is read only by the LanmanServer (file-sharing server) service; it has nothing to do with game, voice or streaming traffic. Raising it historically fixed 'not enough server storage' errors on shared folders.",
+            impact: "No effect on gaming/network latency. Only relevant if this PC shares folders and logs IRP stack errors.",
             risk: "Low",
             requires_admin: true,
             reversible: true,
@@ -996,8 +996,8 @@ pub fn catalog() -> Vec<Tweak> {
             name: "Set TCP Auto-Tuning to Normal",
             category: "Network",
             description: "Forces TCP receive window auto-tuning to 'normal' level for consistent throughput.",
-            rationale: "Auto-tuning can behave erratically behind some routers and cause latency spikes mid-game. 'Normal' gives a stable, well-tested tuning level.",
-            impact: "More consistent download speeds and lower jitter in online games.",
+            rationale: "'Normal' is already the Windows default. This only restores it if another tool disabled or restricted auto-tuning, which can cap download throughput.",
+            impact: "No change on a default install; restores download throughput if auto-tuning was restricted. No effect on game latency.",
             risk: "Low",
             requires_admin: true,
             reversible: true,
@@ -1014,8 +1014,8 @@ pub fn catalog() -> Vec<Tweak> {
             name: "Enable Receive Side Scaling (RSS)",
             category: "Network",
             description: "Ensures RSS is enabled so network interrupts are spread across CPU cores instead of hammering core 0.",
-            rationale: "Without RSS, all NIC interrupts fire on a single core. On a 16-core gaming rig that's a wasted opportunity, RSS distributes load and reduces per-core latency spikes.",
-            impact: "Lower CPU-side network latency; fewer frame drops when download/upload peaks.",
+            rationale: "RSS is enabled by default on Windows. This global switch only re-enables it if something turned it off; it matters for multi-gigabit throughput, not for game ping.",
+            impact: "No change on a default install; restores multi-core receive processing if it was disabled. No measurable gaming gain.",
             risk: "Low",
             requires_admin: true,
             reversible: true,
@@ -1039,6 +1039,15 @@ fn hive(root: &str) -> RegKey {
     } else {
         HKEY_CURRENT_USER
     })
+}
+
+#[cfg(windows)]
+fn reg_key_exists(root: &str, path: &str) -> Result<bool, String> {
+    match hive(root).open_subkey_with_flags(path, KEY_READ) {
+        Ok(_) => Ok(true),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(format!("open {root}\\{path}: {e}")),
+    }
 }
 
 #[cfg(windows)]
@@ -1134,11 +1143,28 @@ fn reg_delete(root: &str, path: &str, name: &str) -> Result<(), String> {
 // band from real StartType values ("Automatic"/"Manual"/"Disabled"/…).
 const SERVICE_ABSENT: &str = "__ABSENT__";
 
+/// Internal startup-type token for "Automatic (Delayed Start)". Windows
+/// PowerShell 5.1's Set-Service rejects it, so it is applied via sc.exe.
+const DELAYED_AUTO: &str = "AutomaticDelayedStart";
+
 fn service_get_start(name: &str) -> Result<String, String> {
+    if !crate::ps::is_safe_ident(name) {
+        return Err(format!(
+            "refusing to query service with unsafe name '{name}'"
+        ));
+    }
     // SilentlyContinue + explicit sentinel: a missing service must not blow up
     // status detection or the apply's "capture previous state" step.
+    // PowerShell 5.1 reports delayed-auto services as plain "Automatic"; the
+    // DelayedAutostart registry flag distinguishes them so undo is exact.
     crate::ps::run(&format!(
-        "$s = Get-Service -Name '{name}' -ErrorAction SilentlyContinue; if ($s) {{ $s.StartType }} else {{ '{SERVICE_ABSENT}' }}"
+        "$s = Get-Service -Name '{name}' -ErrorAction SilentlyContinue; \
+         if (-not $s) {{ '{SERVICE_ABSENT}' }} else {{ \
+           $t = [string]$s.StartType; \
+           if ($t -eq 'Automatic') {{ \
+             $d = (Get-ItemProperty -LiteralPath ('HKLM:\\SYSTEM\\CurrentControlSet\\Services\\' + $s.ServiceName) -Name DelayedAutostart -ErrorAction SilentlyContinue).DelayedAutostart; \
+             if ($d -eq 1) {{ $t = '{DELAYED_AUTO}' }} \
+           }}; $t }}"
     ))
     .map(|s| s.trim().to_string())
 }
@@ -1148,12 +1174,22 @@ fn service_set_start(name: &str, mode: &str) -> Result<(), String> {
     if mode == SERVICE_ABSENT {
         return Ok(());
     }
+    if mode == DELAYED_AUTO {
+        if !crate::ps::is_safe_ident(name) {
+            return Err(format!(
+                "refusing to touch service with unsafe name '{name}'"
+            ));
+        }
+        if service_get_start(name)? == SERVICE_ABSENT {
+            return Ok(());
+        }
+        // Separate argv entries: sc.exe requires `start=` and the value as
+        // two tokens.
+        return crate::ps::exec("sc.exe", &["config", name, "start=", "delayed-auto"]).map(|_| ());
+    }
     // `mode` is interpolated into the PowerShell command; only documented
     // startup types may ever reach it (blocks injection via journal data).
-    if !matches!(
-        mode,
-        "Automatic" | "AutomaticDelayedStart" | "Manual" | "Disabled"
-    ) {
+    if !matches!(mode, "Automatic" | "Manual" | "Disabled") {
         return Err(format!("refusing to set invalid startup type '{mode}'"));
     }
     if !crate::ps::is_safe_ident(name) {
@@ -1229,7 +1265,8 @@ pub(crate) fn engine_guard() -> Result<std::sync::MutexGuard<'static, ()>, Strin
 // silently guess a wrong startup type.
 fn service_default(name: &str) -> Option<&'static str> {
     match name {
-        "DiagTrack" | "SysMain" | "MapsBroker" | "TrkWks" | "WSearch" => Some("Automatic"),
+        "DiagTrack" | "SysMain" | "TrkWks" => Some("Automatic"),
+        "MapsBroker" | "WSearch" => Some(DELAYED_AUTO),
         // Tweaks set these to Disabled. Manual is the factory default for
         // most editions; RemoteRegistry ships Disabled on Home SKUs (and
         // Manual on Pro/Enterprise), so Disabled is the safe revert for it.
@@ -1246,6 +1283,10 @@ fn service_default(name: &str) -> Option<&'static str> {
     }
 }
 
+/// Tweaks with a plausible, measurable performance effect. The UI's beginner
+/// mode shows only these. Situational/advanced tweaks (risk "High": core
+/// parking, power throttling, USB suspend, SysMain, WSearch, MPO) and
+/// tweaks with no measurable gain stay available in expert mode only.
 fn may_help_performance(id: &str) -> bool {
     matches!(
         id,
@@ -1253,31 +1294,16 @@ fn may_help_performance(id: &str) -> bool {
             | "game_dvr_off"
             | "mmcss_gaming"
             | "startup_delay_off"
-            | "visual_fx_performance"
-            | "sysmain_off"
-            | "background_apps_off"
             | "game_mode_on"
             | "fse_optimizations_off"
             | "hags_on"
-            | "priority_separation"
-            | "power_throttling_off"
             | "mmcss_games_task"
-            | "mpo_off"
             | "transparency_off"
             | "min_animate_off"
             | "widgets_off"
-            | "usb_suspend_off"
-            | "core_parking_off"
-            | "ntfs_last_access_off"
             | "ntfs_8dot3_off"
-            | "xbox_services_off"
             | "edge_prelaunch_off"
             | "svc_maps_off"
-            | "svc_diag_tracking_off"
-            | "wsearch_manual"
-            | "nagle_off"
-            | "tcp_autotuning_normal"
-            | "net_rss_on"
     )
 }
 
@@ -1309,10 +1335,10 @@ pub fn list_with_status() -> Value {
             };
             // canUndo: true when we have a journal entry (precise restore with
             // saved previous values) OR when live detection confirms the tweak
-            // is currently active, covers the "app reinstalled / journal lost"
-            // case for all RegSet + Service tweaks. Cmd-only tweaks return
-            // "unknown" from detect_status so they still require the journal.
-            let can_undo = undoable || live == "applied";
+            // is currently active AND a force-revert would not have to guess
+            // (covers "app reinstalled / journal lost" for RegSet + Service
+            // tweaks). Captured Cmd tweaks always require the journal.
+            let can_undo = undoable || (live == "applied" && force_revertable(t));
             json!({
                 "id": t.id, "name": t.name, "category": t.category,
                 "description": t.description, "rationale": t.rationale,
@@ -1326,12 +1352,22 @@ pub fn list_with_status() -> Value {
     json!(out)
 }
 
+/// False when a journal-less revert would have to run a hardcoded guess:
+/// Cmd actions with a pre-apply capture only have an exact undo in the
+/// journal (the catalog `revert` is a default, not the user's prior state).
+fn force_revertable(t: &Tweak) -> bool {
+    !t.actions
+        .iter()
+        .any(|a| matches!(a, Action::Cmd { show: Some(_), .. }))
+}
+
 #[cfg_attr(not(windows), allow(unused_variables))]
 fn detect_status(t: &Tweak) -> &'static str {
     #[cfg(windows)]
     {
         let mut checkable = 0;
         let mut matching = 0;
+        let mut absent = 0;
         for a in &t.actions {
             match a {
                 Action::RegSet {
@@ -1349,31 +1385,76 @@ fn detect_status(t: &Tweak) -> &'static str {
                         }
                     }
                 }
-                Action::Service { name, target } => {
-                    checkable += 1;
-                    if let Ok(cur) = service_get_start(name) {
-                        // Absent service = target already satisfied (it can't run).
-                        if cur.eq_ignore_ascii_case(target) || cur == SERVICE_ABSENT {
+                Action::Service { name, target } => match service_get_start(name) {
+                    // A service that isn't installed is not "applied": the
+                    // tweak simply doesn't apply to this machine.
+                    Ok(cur) if cur == SERVICE_ABSENT => absent += 1,
+                    Ok(cur) => {
+                        checkable += 1;
+                        if cur.eq_ignore_ascii_case(target) {
                             matching += 1;
+                        }
+                    }
+                    Err(_) => checkable += 1,
+                },
+                // powercfg setting tweaks: read the AC index back from the
+                // active scheme. Other Cmd tweaks have no readable state.
+                Action::Cmd {
+                    apply,
+                    show: Some(ShowCapture::PowerSettingIndex { subgroup, setting }),
+                    ..
+                } => {
+                    if let Some(want) = power_cmd_target(apply) {
+                        if let Some((ac, _dc)) = crate::ps::exec(
+                            "powercfg.exe",
+                            &["/query", "scheme_current", subgroup, setting],
+                        )
+                        .ok()
+                        .and_then(|out| parse_power_indexes(&out))
+                        {
+                            checkable += 1;
+                            if ac == want {
+                                matching += 1;
+                            }
                         }
                     }
                 }
                 Action::Cmd { .. } => {}
             }
         }
-        if checkable == 0 {
-            return "unknown";
-        }
-        if matching == checkable {
-            return "applied";
-        }
-        if matching > 0 {
-            return "partial";
-        }
-        return "not_applied";
+        return classify_status(checkable, matching, absent);
     }
     #[allow(unreachable_code)]
     "unknown"
+}
+
+/// Status from live-check counts. Absent services are excluded from the
+/// checkable set; a tweak whose only targets are absent is "unsupported"
+/// (the UI then offers neither Apply nor force-Undo).
+#[cfg(any(windows, test))]
+fn classify_status(checkable: usize, matching: usize, absent: usize) -> &'static str {
+    if checkable == 0 {
+        return if absent > 0 { "unsupported" } else { "unknown" };
+    }
+    if matching == checkable {
+        "applied"
+    } else if matching > 0 {
+        "partial"
+    } else {
+        "not_applied"
+    }
+}
+
+/// Target AC index of a `powercfg /setacvalueindex … <value>` apply line.
+#[cfg(any(windows, test))]
+fn power_cmd_target(apply: &str) -> Option<u32> {
+    let mut toks = apply.split_whitespace();
+    if !toks.next()?.eq_ignore_ascii_case("powercfg")
+        || !toks.next()?.eq_ignore_ascii_case("/setacvalueindex")
+    {
+        return None;
+    }
+    toks.last()?.parse().ok()
 }
 
 /// Apply a tweak: backup → write-ahead journal → mutate. Returns the journal
@@ -1388,21 +1469,28 @@ pub fn apply(tweak_id: &str) -> Result<Value, String> {
         return Err("This tweak needs administrator rights. Restart the app as admin.".into());
     }
 
-    // 1. Registry backups for every key we will touch. A missing key is fine
-    //    (the apply creates it), but a full disk or a denied reg.exe must not
-    //    silently skip the advertised backup stage.
+    // 0. A second apply while an earlier one is still open would capture the
+    //    tweak's OWN values as "previous" and make undo restore the tweak
+    //    instead of the original state. Keep the oldest capture.
+    if let Some(open) = open_entry_id(&safety::load_journal()?, t.id) {
+        return Ok(json!({ "entryId": open, "status": "already_applied" }));
+    }
+
+    // 1. Registry backups for every key we will touch. A missing key needs no
+    //    backup (the apply creates it); that is decided via the registry API,
+    //    never by parsing reg.exe's localized stderr. Any other failure (full
+    //    disk, denied reg.exe) must not silently skip the backup stage.
     let mut backups = Vec::new();
     for a in &t.actions {
         if let Action::RegSet { root, path, .. } = a {
-            match safety::backup_registry_key(root, path) {
-                Ok(f) => backups.push(f),
-                Err(e) => {
-                    let msg = e.to_lowercase();
-                    if !(msg.contains("unable to find") || msg.contains("not find")) {
-                        return Err(format!("registry backup failed: {e}"));
-                    }
-                }
+            #[cfg(windows)]
+            if !reg_key_exists(root, path)? {
+                continue;
             }
+            backups.push(
+                safety::backup_registry_key(root, path)
+                    .map_err(|e| format!("registry backup failed: {e}"))?,
+            );
         }
     }
 
@@ -1517,6 +1605,17 @@ pub fn apply(tweak_id: &str) -> Result<Value, String> {
     Ok(json!({ "entryId": entry_id, "status": "applied" }))
 }
 
+/// Id of the newest unreverted entry for `tweak_id` that actually changed
+/// something (same "undoable" rule the UI uses). An entry interrupted before
+/// its first mutation (attempted == 0, not completed) does not block.
+pub(crate) fn open_entry_id(journal: &[JournalEntry], tweak_id: &str) -> Option<String> {
+    journal
+        .iter()
+        .rev()
+        .find(|e| e.tweak_id == tweak_id && !e.reverted && (e.completed || e.attempted > 0))
+        .map(|e| e.id.clone())
+}
+
 pub(crate) fn apply_item(item: &ChangeItem) -> Result<(), String> {
     match item {
         #[cfg(windows)]
@@ -1582,12 +1681,11 @@ pub(crate) fn rollback_entry_items(entry_id: &str, items: &[ChangeItem]) -> Resu
 /// Undo the most recent non-reverted journal entry for a tweak.
 /// If no journal entry exists but the tweak is currently active (detected via
 /// live registry / service state), falls back to a synthesized force-revert:
-///   • RegSet  → deletes the value we wrote  (restores Windows default-absent state)
+///   • RegSet  → imports the newest .reg backup, then verifies the value changed
 ///   • Service → resets to the known Windows default startup type
-///   • Cmd     → executes the catalog's revert command
-/// Cmd-only tweaks (powercfg / fsutil) with no live detection still require a
-/// journal entry, if the journal is gone for those, return an error telling
-/// the user to apply-then-undo.
+///   • Cmd     → only uncaptured helper commands; captured ones need the journal
+/// Tweaks with no live signal ("unknown") or a captured Cmd return an error:
+/// without a journal entry the previous value is unknown.
 pub fn revert(tweak_id: &str) -> Result<Value, String> {
     let _engine = engine_guard()?;
     // ── 1. Journal path (precise: uses saved previous values + reg backups) ──
@@ -1627,26 +1725,29 @@ pub fn revert(tweak_id: &str) -> Result<Value, String> {
         .ok_or_else(|| format!("unknown tweak '{tweak_id}'"))?;
 
     let live = detect_status(&t);
-    if live == "not_applied" {
-        return Err("tweak is not currently active, nothing to undo".into());
-    }
-    if live == "unknown" {
-        // Cmd-only tweak: we have no live signal. Running the revert command
-        // blind is still safe, offer it anyway so users who applied these
-        // manually (or lost the journal) can still reset.
-        let mut errs = Vec::new();
-        for a in t.actions.iter().rev() {
-            if let Action::Cmd { revert, .. } = a {
-                if let Err(e) = run_cmdline(revert) {
-                    errs.push(e);
-                }
-            }
+    match live {
+        "not_applied" => return Err("tweak is not currently active, nothing to undo".into()),
+        "unsupported" => {
+            return Err("this tweak does not apply to this system, nothing to undo".into())
         }
-        return if errs.is_empty() {
-            Ok(json!({ "status": "force_reverted", "journaled": false }))
-        } else {
-            Err(format!("force revert errors: {}", errs.join("; ")))
-        };
+        // No journal entry and no live signal: running the catalog's
+        // hardcoded revert would impose a guessed default (e.g. Balanced
+        // plan, rss=disabled), not the user's previous state.
+        "unknown" => {
+            return Err(
+                "nothing recorded to undo: no journal entry exists for this tweak and its \
+                 current state cannot be read back, so the previous value is unknown"
+                    .into(),
+            )
+        }
+        _ => {}
+    }
+    if !force_revertable(&t) {
+        return Err(
+            "nothing recorded to undo: the previous value of this setting was only stored in \
+             the journal, which has no entry for it; refusing to guess a default"
+                .into(),
+        );
     }
 
     // live == "applied" | "partial" → undo each action using catalog defaults
@@ -1685,6 +1786,32 @@ pub fn revert(tweak_id: &str) -> Result<Value, String> {
         };
         if let Err(e) = res {
             errs.push(e);
+        }
+    }
+
+    // A .reg import "succeeds" even when the backup was taken after the tweak
+    // was applied (it then re-imports the tweak's own values). Only report
+    // success when every value really differs from what the tweak writes.
+    #[cfg(windows)]
+    if errs.is_empty() {
+        for a in &t.actions {
+            if let Action::RegSet {
+                root,
+                path,
+                name,
+                value,
+            } = a
+            {
+                match reg_read(root, path, name) {
+                    Ok(Some(cur)) if vals_eq(&cur, value) => errs.push(format!(
+                        "{root}\\{path}\\{name} still holds the tweak value after restoring \
+                         the newest backup (the backup already contained it); the original \
+                         value is unknown, so it was NOT restored"
+                    )),
+                    Ok(_) => {}
+                    Err(e) => errs.push(format!("could not verify restore: {e}")),
+                }
+            }
         }
     }
 
@@ -1747,6 +1874,130 @@ mod tests {
         assert!(!may_help_performance("qos_bandwidth_free"));
         assert!(!may_help_performance("advertising_id_off"));
         assert!(!may_help_performance("disable_paging_executive"));
+    }
+
+    #[test]
+    fn no_gain_and_advanced_tweaks_are_not_performance_candidates() {
+        for id in [
+            "priority_separation",
+            "nagle_off",
+            "tcp_autotuning_normal",
+            "net_rss_on",
+            "xbox_services_off",
+            "ntfs_last_access_off",
+            "visual_fx_performance",
+            "irp_stack_high",
+            "tcp_timed_wait_low",
+            "qos_bandwidth_free",
+            "remote_registry_off",
+            "svc_geolocation_off",
+            "cortana_off",
+            "background_apps_off",
+            "disable_paging_executive",
+            "core_parking_off",
+            "power_throttling_off",
+            "usb_suspend_off",
+            "sysmain_off",
+            "wsearch_manual",
+            "mpo_off",
+        ] {
+            assert!(!may_help_performance(id), "{id}");
+            // Every listed id must still exist: capability is kept.
+            assert!(catalog().iter().any(|t| t.id == id), "{id} missing");
+        }
+        for id in [
+            "core_parking_off",
+            "power_throttling_off",
+            "usb_suspend_off",
+            "sysmain_off",
+            "wsearch_manual",
+            "mpo_off",
+        ] {
+            let t = catalog().into_iter().find(|t| t.id == id).unwrap();
+            assert_eq!(t.risk, "High", "{id}");
+        }
+    }
+
+    #[test]
+    fn delayed_auto_services_default_to_delayed_start() {
+        assert_eq!(service_default("MapsBroker"), Some(DELAYED_AUTO));
+        assert_eq!(service_default("WSearch"), Some(DELAYED_AUTO));
+        assert_eq!(service_default("SysMain"), Some("Automatic"));
+        assert_eq!(service_default("NotInCatalog"), None);
+    }
+
+    #[test]
+    fn status_classification_treats_absent_services_as_unsupported() {
+        assert_eq!(classify_status(0, 0, 1), "unsupported");
+        assert_eq!(classify_status(0, 0, 0), "unknown");
+        assert_eq!(classify_status(2, 2, 1), "applied");
+        assert_eq!(classify_status(2, 1, 0), "partial");
+        assert_eq!(classify_status(1, 0, 2), "not_applied");
+    }
+
+    #[test]
+    fn power_cmd_target_reads_the_ac_index() {
+        assert_eq!(
+            power_cmd_target("powercfg /setacvalueindex scheme_current 2a737441-1930-4402-8d77-b2bebba308a3 48e6b7a6-50f5-4782-a5d4-53bb8f07e226 0"),
+            Some(0)
+        );
+        assert_eq!(
+            power_cmd_target("powercfg /setacvalueindex scheme_current a b 100"),
+            Some(100)
+        );
+        assert_eq!(power_cmd_target("powercfg /setactive scheme_current"), None);
+        assert_eq!(power_cmd_target("powercfg /h off"), None);
+    }
+
+    #[test]
+    fn power_tweaks_have_readable_targets() {
+        for id in ["usb_suspend_off", "core_parking_off"] {
+            let t = catalog().into_iter().find(|t| t.id == id).unwrap();
+            assert!(t.actions.iter().any(|a| matches!(
+                a,
+                Action::Cmd { apply, show: Some(ShowCapture::PowerSettingIndex { .. }), .. }
+                    if power_cmd_target(apply).is_some()
+            )));
+            assert!(!force_revertable(&t));
+        }
+    }
+
+    fn entry(
+        id: &str,
+        tweak: &str,
+        reverted: bool,
+        completed: bool,
+        attempted: usize,
+    ) -> JournalEntry {
+        JournalEntry {
+            id: id.into(),
+            tweak_id: tweak.into(),
+            tweak_name: tweak.into(),
+            origin: None,
+            time: String::new(),
+            items: vec![],
+            reverted,
+            backup_files: vec![],
+            completed,
+            attempted,
+            reverted_items: 0,
+        }
+    }
+
+    #[test]
+    fn open_entry_blocks_reapply_only_when_something_was_changed() {
+        let j = vec![
+            entry("a1", "a", true, true, 1),
+            entry("b1", "b", false, false, 0),
+            entry("c1", "c", false, false, 1),
+            entry("a2", "a", false, true, 1),
+        ];
+        assert_eq!(open_entry_id(&j, "a").as_deref(), Some("a2"));
+        // Interrupted before the first mutation: nothing to protect.
+        assert_eq!(open_entry_id(&j, "b"), None);
+        // Partially applied: its capture is the real original.
+        assert_eq!(open_entry_id(&j, "c").as_deref(), Some("c1"));
+        assert_eq!(open_entry_id(&j, "zzz"), None);
     }
 
     #[test]
