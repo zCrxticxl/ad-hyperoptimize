@@ -181,6 +181,11 @@ export default function PcConfigurator() {
     );
   }
 
+  // RAM and storage scores are always heuristics (capacity/type), CPU and GPU
+  // only when the part was not found in the catalog (fallback scoring).
+  const isEstimate = (key: string) =>
+    key === "ram" || key === "storage" || (key === "cpu" && !matchedCpu) || (key === "gpu" && !matchedGpu);
+
   function ComponentRow({ cr }: { cr: ComponentRating }) {
     return (
       <div style={{ marginBottom: 14 }}>
@@ -189,7 +194,10 @@ export default function PcConfigurator() {
           <Badge cls={RATING_CLS[cr.rating]}>{t(RATING_KEY[cr.rating] as any)}</Badge>
         </div>
         <Bar pct={cr.score} />
-        <div className="muted" style={{ fontSize: 12, marginTop: 3 }}>{t("pcconfScoreLabel")}: {Math.round(cr.score)}/100</div>
+        <div className="muted" style={{ fontSize: 12, marginTop: 3 }}>
+          {t("pcconfScoreLabel")}: {isEstimate(cr.key) ? "~" : ""}{Math.round(cr.score)}/100
+          {isEstimate(cr.key) && <> · {t("pcconfEstimateTag")}</>}
+        </div>
       </div>
     );
   }
@@ -358,7 +366,7 @@ export default function PcConfigurator() {
                     { key: "storage", label: t("pcconfComponentStorage"), weight: 5, cur: curStorageScore, eff: effStorageScore },
                   ].map((c) => (
                     <div key={c.key} className="row" style={{ justifyContent: "space-between", padding: "3px 0" }}>
-                      <span>{c.label} ({c.weight}%)</span>
+                      <span>{c.label} ({c.weight}%){isEstimate(c.key) && <span className="muted"> · {t("pcconfEstimateTag")}</span>}</span>
                       <span>
                         {Math.round(c.cur)} →{" "}
                         <b style={{ color: c.eff > c.cur ? "var(--green)" : c.eff < c.cur ? "var(--red)" : "var(--text)" }}>

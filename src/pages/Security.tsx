@@ -225,13 +225,40 @@ function HostsCard({ count, hoDisabledCount }: { count: number; hoDisabledCount:
   );
 }
 
-export default function Security({ mode }: { mode: Mode }) {
+const DISABLED_DRIVERS_KEY = "security.disabledDrivers";
+
+export default function Security({ mode, admin, go }: { mode: Mode; admin: boolean; go: (id: string, target?: string) => void }) {
   const { t } = useLang();
   const [sec, setSec] = useState<any | null>(null);
   const [meta, setMeta] = useState<{ time: string; fromCache: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
   const [taskMsg, setTaskMsg] = useState<{ text: string; ok: boolean } | null>(null);
   const [driverBusy, setDriverBusy] = useState<string | null>(null);
+  const [scanBusy, setScanBusy] = useState(false);
+  const [scanOut, setScanOut] = useState<{ text: string; ok: boolean } | null>(null);
+  // The scan does not report a device's enabled state, so remember which
+  // devices were disabled from here to offer "Enable" for them.
+  const [disabledDrivers, setDisabledDrivers] = useState<Set<string>>(() => {
+    try {
+      const v = JSON.parse(localStorage.getItem(DISABLED_DRIVERS_KEY) || "[]");
+      return new Set(Array.isArray(v) ? v.filter((x) => typeof x === "string") : []);
+    } catch { return new Set(); }
+  });
+  const markDriver = (id: string, disabled: boolean) =>
+    setDisabledDrivers((prev) => {
+      const next = new Set(prev);
+      if (disabled) next.add(id); else next.delete(id);
+      try { localStorage.setItem(DISABLED_DRIVERS_KEY, JSON.stringify([...next])); } catch {}
+      return next;
+    });
+
+  const quickScan = async () => {
+    setScanBusy(true);
+    setScanOut(null);
+    try { setScanOut({ text: await api.defenderQuickScan(), ok: true }); }
+    catch (e: any) { setScanOut({ text: String(e), ok: false }); }
+    finally { setScanBusy(false); }
+  };
 
   const load = (force: boolean) => {
     setBusy(true);
@@ -271,13 +298,15 @@ export default function Security({ mode }: { mode: Mode }) {
     {
       label: t("secRealTime"),
       on: ok(d.RealTimeProtectionEnabled),
-      toggle: (v: boolean) => api.defenderSetRealtime(v).then(() => load(false)),
+      toggle: (v: boolean) => api.defenderSetRealtime(v).then(() => load(true)),
+      offConfirm: t("secRealtimeOffConfirm"),
       canToggle: true,
     },
     {
       label: t("secCloud"),
       on: ok(d.MAPSReporting),
-      toggle: (v: boolean) => api.defenderSetCloud(v).then(() => load(false)),
+      toggle: (v: boolean) => api.defenderSetCloud(v).then(() => load(true)),
+      offConfirm: t("secCloudOffConfirm"),
       canToggle: true,
     },
     {
@@ -294,7 +323,9 @@ export default function Security({ mode }: { mode: Mode }) {
   const susDrivers   = (sec.unsigned_drivers?.items ?? []) as any[];
   const startupItems: any[] = Array.isArray(sec.autoruns?.startup_folder) ? sec.autoruns.startup_folder : [];
   const taskItems: any[]    = Array.isArray(sec.autoruns?.tasks_nonms)     ? sec.autoruns.tasks_nonms     : [];
-  const susAutoruns = [...startupItems, ...taskItems];
+  // Startup-folder entries are files, not scheduled tasks: they are listed
+  // separately and managed in the Startup tool, never via the task API.
+  const susAutoruns = taskItems;
 
   return (
     <>
@@ -302,13 +333,23 @@ export default function Security({ mode }: { mode: Mode }) {
       <div className="page-sub">{t("secSub")}</div>
 
       <div className="row" style={{ gap: 8, marginBottom: 12 }}>
-        <button className="btn small" disabled={busy} onClick={() => load(false)}>
+        <button className="btn small" disabled={busy} onClick={() => load(true)}>
           {busy ? <Spinner /> : `⟳ ${t("secRefresh")}`}
         </button>
-        <button className="btn small ghost" disabled={busy} onClick={() => load(true)}>
-          {busy ? <Spinner /> : `🛡 ${t("secQuickScan")}`}
+        <button className="btn small ghost" disabled={scanBusy} onClick={quickScan}>
+          {scanBusy ? <><Spinner /> {t("secQuickScanRunning")}</> : t("secQuickScan")}
         </button>
+        {meta && (
+          <span className="muted" style={{ fontSize: 12, alignSelf: "center" }}>
+            {t("dataAsOf").replace("{age}", fmtAge(meta.time))}{meta.fromCache ? ` (${t("fromCacheTag")})` : ""}
+          </span>
+        )}
       </div>
+      {scanOut && (
+        <div role={scanOut.ok ? "status" : "alert"} style={{ marginBottom: 10, fontSize: 13, color: scanOut.ok ? "var(--green)" : "var(--red)" }}>
+          {scanOut.ok ? "✓" : "✗"} {scanOut.text}
+        </div>
+      )}
 
       {sec.error && (
         <div style={{ color: "var(--red)", marginBottom: 10, fontSize: 13 }}>⚠ {sec.error}</div>
@@ -322,12 +363,15 @@ export default function Security({ mode }: { mode: Mode }) {
               <span className="muted">{r.label}</span>
               <div className="row" style={{ gap: 8, alignItems: "center" }}>
                 {light(r.on)}
-                {r.canToggle && (
+                {/* Turning protection off is Expert-only and always confirmed. */}
+                {r.canToggle && (!r.on || mode === "expert") && (
                   <button
                     className="btn small ghost"
                     style={{ fontSize: 11, padding: "2px 8px", color: r.on ? "var(--red)" : "var(--green)", borderColor: r.on ? "var(--red)" : "var(--green)" }}
-                    disabled={busy}
+                    disabled={busy || !admin}
+                    title={!admin ? t("adminRequired") : undefined}
                     onClick={async () => {
+                    if (r.on && r.offConfirm && !window.confirm(r.offConfirm)) return;
                     setBusy(true);
                     try { if (r.toggle) await r.toggle(!r.on); }
                     catch (e: any) { setTaskMsg({ text: String(e), ok: false }); }
@@ -336,6 +380,9 @@ export default function Security({ mode }: { mode: Mode }) {
                   >
                     {r.on ? t("secDisable") : t("secEnable")}
                   </button>
+                )}
+                {r.canToggle && r.on && mode !== "expert" && (
+                  <span className="muted" style={{ fontSize: 10 }} title={t("secDisableExpertOnly")}>🔒</span>
                 )}
               </div>
             </div>
@@ -373,10 +420,12 @@ export default function Security({ mode }: { mode: Mode }) {
                   const label = dr.device || dr.name || t("secUnknownDriver");
                   const deviceId: string = dr.deviceId || "";
                   const rowBusy = driverBusy === deviceId;
+                  const isOff = !!deviceId && disabledDrivers.has(deviceId);
                   const run = async (
                     action: (id: string) => Promise<string>,
                     confirmMsg: string | null,
-                    busyLabel: string
+                    busyLabel: string,
+                    after?: () => void
                   ) => {
                     if (!deviceId) {
                       setTaskMsg({ text: `No device instance ID for "${label}", open Device Manager instead.`, ok: false });
@@ -386,6 +435,7 @@ export default function Security({ mode }: { mode: Mode }) {
                     setDriverBusy(deviceId);
                     try {
                       const msg = await action(deviceId);
+                      after?.();
                       setTaskMsg({ text: `${busyLabel} "${label}": ${msg}`, ok: true });
                       load(true);
                     } catch (e: any) {
@@ -405,23 +455,38 @@ export default function Security({ mode }: { mode: Mode }) {
                         </div>
                       </div>
                       <div className="row" style={{ gap: 6, flexShrink: 0 }}>
-                        <button
-                          className="btn small ghost"
-                          style={{ fontSize: 11 }}
-                          disabled={rowBusy || !deviceId}
-                          onClick={() => run(api.securityDisableDriver, null, t("secDisabledAction"))}
-                        >
-                          {rowBusy ? "…" : t("secDisable")}
-                        </button>
+                        {isOff ? (
+                          <button
+                            className="btn small ghost"
+                            style={{ fontSize: 11 }}
+                            disabled={rowBusy || !admin}
+                            title={!admin ? t("adminRequired") : undefined}
+                            onClick={() => run(api.securityEnableDriver, null, t("secEnabledDriverAction"), () => markDriver(deviceId, false))}
+                          >
+                            {rowBusy ? "…" : t("secEnable")}
+                          </button>
+                        ) : (
+                          <button
+                            className="btn small ghost"
+                            style={{ fontSize: 11 }}
+                            disabled={rowBusy || !deviceId || !admin}
+                            title={!admin ? t("adminRequired") : undefined}
+                            onClick={() => run(api.securityDisableDriver, interp(t("secDriverDisableConfirm"), { label }), t("secDisabledAction"), () => markDriver(deviceId, true))}
+                          >
+                            {rowBusy ? "…" : t("secDisable")}
+                          </button>
+                        )}
                         <button
                           className="btn small ghost danger"
                           style={{ fontSize: 11 }}
-                          disabled={rowBusy || !deviceId}
+                          disabled={rowBusy || !deviceId || !admin}
+                          title={!admin ? t("adminRequired") : undefined}
                           onClick={() =>
                             run(
                               api.securityRemoveDriver,
                               interp(t("secRemoveConfirm"), { label }),
-                              t("secRemovedAction")
+                              t("secRemovedAction"),
+                              () => markDriver(deviceId, false)
                             )
                           }
                         >
@@ -474,7 +539,8 @@ export default function Security({ mode }: { mode: Mode }) {
                     <button
                       className="btn small ghost"
                       style={{ fontSize: 11, flexShrink: 0, color: isDisabled ? "var(--green)" : "var(--red)", borderColor: isDisabled ? "var(--green)" : "var(--red)" }}
-                      disabled={busy}
+                      disabled={busy || !admin}
+                      title={!admin ? t("adminRequired") : undefined}
                       onClick={async () => {
                         setBusy(true);
                         setTaskMsg(null);
@@ -483,21 +549,8 @@ export default function Security({ mode }: { mode: Mode }) {
                             ? await api.enableScheduledTask(taskPath, taskName)
                             : await api.disableScheduledTask(taskPath, taskName);
                           setTaskMsg({ text: msg || interp(isDisabled ? t("secEnabledAction") : t("secDisabledAction2"), { name: taskName }), ok: true });
-                          // optimistic UI flip
-                          setSec((prev: any) => {
-                            if (!prev?.autoruns?.tasks_nonms) return prev;
-                            return {
-                              ...prev,
-                              autoruns: {
-                                ...prev.autoruns,
-                                tasks_nonms: prev.autoruns.tasks_nonms.map((t: any) =>
-                                  t.TaskName === taskName && t.TaskPath === taskPath
-                                    ? { ...t, State: isDisabled ? "Ready" : "Disabled" }
-                                    : t
-                                ),
-                              },
-                            };
-                          });
+                          // Re-read the real state instead of showing cached data.
+                          load(true);
                         } catch (e: any) {
                           setTaskMsg({ text: String(e), ok: false });
                         } finally {
@@ -510,6 +563,20 @@ export default function Security({ mode }: { mode: Mode }) {
                   </div>
                 );
               })}
+            </div>
+          )}
+          {startupItems.length > 0 && (
+            <div style={{ marginTop: 12 }}>
+              <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 4 }}>📂 {t("secStartupFolderTitle")} ({startupItems.length})</div>
+              <div className="muted" style={{ fontSize: 11, marginBottom: 6 }}>{t("secStartupFolderHint")}</div>
+              {startupItems.map((a: any, i: number) => (
+                <div key={a.FullName ?? i} className="mono" title={a.FullName ?? a.Name} style={{ fontSize: 11, padding: "3px 0", borderBottom: "1px solid var(--border)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {a.Name ?? a.name ?? a.FullName}
+                </div>
+              ))}
+              <button className="btn small ghost" style={{ marginTop: 8, fontSize: 11 }} onClick={() => go("startup")}>
+                {t("secOpenStartup")}
+              </button>
             </div>
           )}
         </Card>

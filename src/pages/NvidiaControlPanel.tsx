@@ -24,24 +24,28 @@ type RowProps = {
   tokens: Record<SettingKey, string | null>;
   setSetting: (setting: SettingKey, v: string) => void;
   undoSetting: (setting: SettingKey) => void;
-  t: (key: "revert") => string;
+  t: (key: "revert" | "nvcpUnknownValue") => string;
   Spinner: React.ComponentType;
+  disabled: boolean;
 };
 
-function Row({ setting, label, value, options, busy, tokens, setSetting, undoSetting, t, Spinner }: RowProps) {
+function Row({ setting, label, value, options, busy, tokens, setSetting, undoSetting, t, Spinner, disabled }: RowProps) {
+  // An unreadable value must not be shown as if it were the current setting.
+  const known = value !== undefined && options.some(([v]) => v === value);
   return (
     <div className="row" style={{ padding: "10px 0", borderBottom: "1px solid var(--border)", gap: 12, alignItems: "center" }}>
       <div style={{ flex: 1, fontWeight: 600, fontSize: 13 }}>{label}</div>
       <select
-        value={value ?? options[0][0]}
-        disabled={busy === setting}
-        onChange={(e) => setSetting(setting, e.target.value)}
+        value={known ? value : ""}
+        disabled={busy === setting || disabled}
+        onChange={(e) => { if (e.target.value) setSetting(setting, e.target.value); }}
         style={{ minWidth: 200 }}
       >
+        {!known && <option value="" disabled>{t("nvcpUnknownValue")}</option>}
         {options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
       </select>
       {tokens[setting] && (
-        <button className="btn small ghost" disabled={busy === setting} onClick={() => undoSetting(setting)}>
+        <button className="btn small ghost" disabled={busy === setting || disabled} onClick={() => undoSetting(setting)}>
           {busy === setting ? <Spinner /> : t("revert")}
         </button>
       )}
@@ -50,7 +54,7 @@ function Row({ setting, label, value, options, busy, tokens, setSetting, undoSet
 }
 
 
-export default function NvidiaControlPanel() {
+export default function NvidiaControlPanel({ admin }: { admin: boolean }) {
   const { t } = useLang();
   const [data, setData] = useState<NvData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -132,6 +136,9 @@ export default function NvidiaControlPanel() {
 
       {data && data.supported && (
         <Card title={`${t("nvcpGlobalSettings")}, ${data.name ?? "NVIDIA"}`}>
+          {!admin && (
+            <div style={{ color: "var(--yellow)", fontSize: 12, marginBottom: 8 }}>{t("adminRestart")}</div>
+          )}
           {data.driverKeyMissing && (
             <div style={{ color: "var(--orange)", fontSize: 12, marginBottom: 8 }}>{t("gpuNoKeyDesc")}</div>
           )}
@@ -143,6 +150,7 @@ export default function NvidiaControlPanel() {
           undoSetting={undoSetting}
           t={t}
           Spinner={Spinner}
+          disabled={!admin}
             setting="powerManagementMode"
             label={t("nvcpPowerMode")}
             value={data.powerManagementMode}
@@ -158,6 +166,7 @@ export default function NvidiaControlPanel() {
           undoSetting={undoSetting}
           t={t}
           Spinner={Spinner}
+          disabled={!admin}
             setting="maxPreRenderedFrames"
             label={t("nvcpPrerender")}
             value={data.maxPreRenderedFrames}
@@ -175,6 +184,7 @@ export default function NvidiaControlPanel() {
           undoSetting={undoSetting}
           t={t}
           Spinner={Spinner}
+          disabled={!admin}
             setting="lowLatencyMode"
             label={t("nvcpLowLatency")}
             value={data.lowLatencyMode}
@@ -191,6 +201,7 @@ export default function NvidiaControlPanel() {
           undoSetting={undoSetting}
           t={t}
           Spinner={Spinner}
+          disabled={!admin}
             setting="threadedOptimization"
             label={t("nvcpThreadedOpt")}
             value={data.threadedOptimization}

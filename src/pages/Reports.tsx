@@ -20,7 +20,10 @@ export default function Reports() {
     loadHistory();
   }, []);
 
-  const undoEntry = async (id: string) => {
+  const undoEntry = async (id: string, name: string) => {
+    // One undo at a time: entries can touch the same keys and must not interleave.
+    if (undoBusy) return;
+    if (!window.confirm(t("repUndoConfirm").replace("{name}", name || id))) return;
     setUndoBusy(id);
     setUndoErr("");
     try {
@@ -67,7 +70,7 @@ export default function Reports() {
                 <td className="muted">{h.backup_files?.length ?? 0} {t("repRegFiles")}</td>
                 <td>
                   {!h.reverted && h.id && (
-                    <button className="btn small ghost" disabled={undoBusy === h.id} onClick={() => undoEntry(h.id)}>
+                    <button className="btn small ghost" disabled={undoBusy !== null} onClick={() => undoEntry(h.id, h.tweak_name)}>
                       {undoBusy === h.id ? "…" : t("revert")}
                     </button>
                   )}

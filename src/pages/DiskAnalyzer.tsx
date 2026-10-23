@@ -602,23 +602,45 @@ function OrganizeTab() {
   const [root, setRoot]         = useState("C:\\Users");
   const [preview, setPreview]   = useState<OrgPreview | null>(null);
   const [busy, setBusy]         = useState(false);
-  const [log, setLog]           = useState<string | null>(null);
+  const [log, setLog]           = useState<{ msg: string; ok: boolean; errors: string[] } | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
+  const loadPreview = async () => {
+    setPreview(null);
+    setSelected(new Set());
+    setPreview(await api.diskOrganizePreview(root, true));
+  };
+
   const doPreview = async () => {
-    setBusy(true); setPreview(null); setLog(null);
-    try { setPreview(await api.diskOrganizePreview(root, true)); }
-    catch (e: any) { setLog(String(e)); }
+    setBusy(true); setLog(null);
+    try { await loadPreview(); }
+    catch (e: any) { setLog({ msg: String(e), ok: false, errors: [] }); }
     finally { setBusy(false); }
   };
 
   const doApply = async () => {
     if (!preview) return;
-    setBusy(true); setLog(null);
     const items = preview.items.filter(it => selected.has(it.src));
-    try { setLog(await api.diskOrganizeApply(items)); }
-    catch (e: any) { setLog(String(e)); }
-    finally { setBusy(false); }
+    if (!items.length) return;
+    const total = items.reduce((a, it) => a + (it.size || 0), 0);
+    if (!window.confirm(t("diskOrganizeConfirm").replace("{n}", String(items.length)).replace("{size}", fmtBytes(total)))) return;
+    setBusy(true); setLog(null);
+    try {
+      // Backend returns { moved, failed, errors[] }, never render the object itself.
+      const r = await api.diskOrganizeApply(items);
+      const moved = Number(r?.moved ?? 0);
+      const failed = Number(r?.failed ?? 0);
+      const errors: string[] = Array.isArray(r?.errors) ? r.errors.map(String) : [];
+      setLog({
+        msg: t("diskOrganizeResult").replace("{moved}", String(moved)).replace("{failed}", String(failed)),
+        ok: failed === 0,
+        errors,
+      });
+      // Moved files no longer exist at their old paths: rebuild the preview.
+      try { await loadPreview(); } catch { /* the result message above stays visible */ }
+    } catch (e: any) {
+      setLog({ msg: String(e), ok: false, errors: [] });
+    } finally { setBusy(false); }
   };
 
   const toggleAll = () => {
@@ -642,8 +664,13 @@ function OrganizeTab() {
       </div>
 
       {log && (
-        <div style={{ marginBottom: 10, padding: "8px 12px", borderRadius: 6, background: "rgba(80,200,120,0.08)", border: "1px solid var(--green)", color: "var(--green)", fontSize: 13 }}>
-          {log}
+        <div role={log.ok ? "status" : "alert"} style={{ marginBottom: 10, padding: "8px 12px", borderRadius: 6, background: log.ok ? "rgba(80,200,120,0.08)" : "rgba(255,97,125,.08)", border: `1px solid ${log.ok ? "var(--green)" : "var(--red)"}`, color: log.ok ? "var(--green)" : "var(--red)", fontSize: 13 }}>
+          {log.msg}
+          {log.errors.length > 0 && (
+            <ul className="mono" style={{ margin: "6px 0 0", paddingLeft: 18, fontSize: 11, maxHeight: 160, overflowY: "auto" }}>
+              {log.errors.map((e, i) => <li key={i}>{e}</li>)}
+            </ul>
+          )}
         </div>
       )}
 

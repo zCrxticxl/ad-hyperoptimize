@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { check as checkUpdate } from "@tauri-apps/plugin-updater";
 import { api } from "./api";
-import { LangProvider, useLang, LANG_NAMES, Lang, plural } from "./i18n";
+import { LangProvider, useLang, LANG_NAMES, Lang, plural, TKey } from "./i18n";
 import Onboarding from "./components/Onboarding";
 import { ToolErrorBoundary } from "./components/ui";
 import Dashboard from "./pages/Dashboard";
@@ -50,7 +50,7 @@ import Changelog, { CURRENT_VERSION } from "./pages/Changelog";
  */
 export type NavItem = { id: string; icon: string; label: string; desc?: string; basic?: boolean; keywords?: string };
 export type NavGroup = { id: string; group: string; icon: string; desc: string; accent: string; items: NavItem[] };
-type NavBuilder = (t: (key: any) => string) => NavGroup[];
+type NavBuilder = (t: (key: TKey) => string) => NavGroup[];
 
 export const buildNav: NavBuilder = (t) => [
   { id: "home", group: t("navSecDashboard"), icon: "🏠", desc: t("secDescDashboard"), accent: "blue", items: [
@@ -110,13 +110,19 @@ export const buildNav: NavBuilder = (t) => [
 
 export type Mode = "beginner" | "expert";
 
-/** Tools that change system state, only these get the "revertible" trust pill
- * (a read-only page must not claim it), which now also links to the undo hub. */
-const MUTATING_TOOLS = new Set([
-  "optimize", "autoopt", "cleanup", "uninstaller", "regclean", "gputweaks", "nvcontrol",
-  "bootopt", "privacy", "services", "startup", "schedtasks", "healthcheck", "updates",
-  "perftweaks", "powerplan", "gameboost", "debloater", "drivers", "restorepoints",
-  "profiles", "gameprofiles", "ctxmenu", "softinstaller", "diskanalyzer",
+/** Tools whose changes go through a journal/backup and can be undone, only these
+ * get the "revertible" trust pill (a read-only page must not claim it), which
+ * also links to the undo hub. */
+const REVERTIBLE_TOOLS = new Set([
+  "optimize", "autoopt", "regclean", "gputweaks", "nvcontrol",
+  "bootopt", "privacy", "services", "startup", "schedtasks", "healthcheck",
+  "perftweaks", "powerplan", "gameboost", "restorepoints",
+  "profiles", "gameprofiles", "ctxmenu",
+]);
+/** Tools whose actions delete, uninstall, move or install things and can't be
+ * undone from inside the app; they get a warning pill linking to restore points. */
+const IRREVERSIBLE_TOOLS = new Set([
+  "cleanup", "uninstaller", "diskanalyzer", "debloater", "softinstaller", "drivers", "updates",
 ]);
 
 const MODE_KEY = "ui.mode";
@@ -140,12 +146,12 @@ function renderTool(page: string, mode: Mode, admin: boolean | null, go: (id: st
     case "startup": return <Startup admin={!!admin} focusId={target} />;
     case "schedtasks": return <ScheduledTasks admin={!!admin} focusId={target} />;
     case "optimize": return <Optimize mode={mode} admin={!!admin} focusId={target} onSwitchExpert={() => setMode("expert")} />;
-    case "profiles": return <Profiles />;
+    case "profiles": return <Profiles admin={!!admin} />;
     case "gameprofiles": return <GameProfiles />;
-    case "cleanup": return <Cleanup />;
+    case "cleanup": return <Cleanup admin={!!admin} />;
     case "regclean": return <RegClean admin={!!admin} />;
     case "gputweaks": return <GpuTweaks admin={!!admin} focusId={target} />;
-    case "nvcontrol": return <NvidiaControlPanel />;
+    case "nvcontrol": return <NvidiaControlPanel admin={!!admin} />;
     case "diskanalyzer": return <DiskAnalyzer />;
     case "bootopt": return <BootOptimizer admin={!!admin} />;
     case "privacy": return <PrivacyCenter admin={!!admin} focusId={target} />;
@@ -158,14 +164,14 @@ function renderTool(page: string, mode: Mode, admin: boolean | null, go: (id: st
     case "uninstaller": return <AppUninstaller admin={!!admin} />;
     case "ctxmenu": return <CtxMenuCleaner admin={!!admin} />;
     case "debloater": return <Debloater admin={!!admin} focusId={target} />;
-    case "drivers": return <DriverManager />;
+    case "drivers": return <DriverManager admin={!!admin} />;
     case "gameboost": return <GameBooster admin={!!admin} />;
-    case "security": return <Security mode={mode} />;
+    case "security": return <Security mode={mode} admin={!!admin} go={go} />;
     case "benchmark": return <Benchmark />;
     case "reports": return <Reports />;
     case "autoopt": return <AutoOptimizer admin={!!admin} />;
     case "restorepoints": return <RestorePointManager admin={!!admin} />;
-    case "softinstaller": return <SoftwareInstaller />;
+    case "softinstaller": return <SoftwareInstaller admin={!!admin} />;
     case "pcconfig": return <PcConfigurator />;
     case "changelog": return <Changelog />;
     case "settings": return <Settings mode={mode} setMode={setMode} onOpenChangelog={() => go("changelog")} />;
@@ -459,9 +465,14 @@ function AppInner() {
                   <h1>{activeSection.group}</h1>
                   <p>{activeSection.desc}</p>
                 </div>
-                {MUTATING_TOOLS.has(route.tool) && (
+                {REVERTIBLE_TOOLS.has(route.tool) && (
                   <button className="safe-pill" style={{ border: 0, cursor: "pointer" }} onClick={() => openTool("reports")} title={t("safeRevertible")}>
                     <span className="status-dot is-ready" /><span aria-hidden="true">🛟</span> {t("safeRevertible")}
+                  </button>
+                )}
+                {IRREVERSIBLE_TOOLS.has(route.tool) && (
+                  <button className="safe-pill is-warn" style={{ border: 0, cursor: "pointer" }} onClick={() => openTool("restorepoints")} title={t("safeIrreversible")}>
+                    <span className="status-dot is-warn" /><span aria-hidden="true">⚠</span> {t("safeIrreversible")}
                   </button>
                 )}
               </div>

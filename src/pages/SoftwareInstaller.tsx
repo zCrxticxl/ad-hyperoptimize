@@ -36,7 +36,7 @@ const STATUS_ICON: Record<InstallStatus, string> = {
   error:      "✕",
 };
 
-export default function SoftwareInstaller() {
+export default function SoftwareInstaller({ admin }: { admin: boolean }) {
   const { t } = useLang();
   const [apps, setApps]       = useState<App[]>([]);
   const [states, setStates]   = useState<Record<string, AppState>>({});
@@ -128,7 +128,8 @@ export default function SoftwareInstaller() {
   const clearAll = () => setSelected(new Set());
 
   const install = async () => {
-    if (!selected.size || installing) return;
+    // Silent machine-wide winget installs need an elevated process.
+    if (!selected.size || installing || !admin) return;
     setInstalling(true);
     setLog("");
     // reset status for selected
@@ -185,7 +186,8 @@ export default function SoftwareInstaller() {
         <div style={{ flex: 1 }} />
         <button
           className="btn"
-          disabled={!selected.size || installing}
+          disabled={!selected.size || installing || !admin}
+          title={!admin ? t("adminRequired") : undefined}
           onClick={install}
           style={{ minWidth: 160 }}
         >

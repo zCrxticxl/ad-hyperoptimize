@@ -35,7 +35,7 @@ export default function Latency() {
         {probe && !probe.error && (
           <div className="mt">
             <span className="stat-big" style={{ color: RATING_COLOR[probe.rating] }}>
-              {probe.rating.toUpperCase()}
+              {String(probe.rating ?? t("unknown")).toUpperCase()}
             </span>
             <table className="tbl mt">
               <tbody>

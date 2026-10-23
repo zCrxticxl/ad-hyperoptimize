@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { api, fmtBytes, fmtAge } from "../api";
-import { Card, Spinner, RawJson } from "../components/ui";
+import { Card, Spinner, RawJson, ActionBtn } from "../components/ui";
 import { useLang } from "../i18n";
 import type { Mode } from "../App";
 
@@ -136,7 +136,7 @@ export default function Hardware({ mode }: { mode: Mode }) {
       <div className="grid grid-2 mt">
         <Card title={t("hwBootTimeAnalysis")}>
           {!boot ? (
-            <button className="btn ghost small" onClick={() => api.bootAnalysis().then(setBoot)}>{t("hwAnalyzeBootHistory")}</button>
+            <ActionBtn className="btn ghost small" label={t("hwAnalyzeBootHistory")} onRun={async () => setBoot(await api.bootAnalysis())} />
           ) : (
             <table className="tbl">
               <thead><tr><th scope="col">{t("hwBoot")}</th><th scope="col">{t("hwDuration")}</th></tr></thead>
@@ -151,8 +151,8 @@ export default function Hardware({ mode }: { mode: Mode }) {
         </Card>
         <Card title={t("hwNetworkDiagnostics")}>
           <div className="row">
-            <button className="btn ghost small" onClick={() => api.networkDiag().then(setNet)}>{t("hwLatencyPacketLoss")}</button>
-            <button className="btn ghost small" onClick={() => api.dnsBenchmark().then(setDns)}>{t("hwDnsBenchmark")}</button>
+            <ActionBtn className="btn ghost small" label={t("hwLatencyPacketLoss")} onRun={async () => setNet(await api.networkDiag())} />
+            <ActionBtn className="btn ghost small" label={t("hwDnsBenchmark")} onRun={async () => setDns(await api.dnsBenchmark())} />
           </div>
           {net && !net.error && (
             <div className="mt">{t("hwAvg")} <b>{net.avgMs} ms</b> · {t("hwMin")} {net.minMs} · {t("hwMax")} {net.maxMs} · {t("hwLoss")} <b>{net.lossPct}%</b></div>

@@ -14,7 +14,7 @@ function delta(before?: number, after?: number) {
   );
 }
 
-export default function Profiles() {
+export default function Profiles({ admin }: { admin: boolean }) {
   const { t } = useLang();
   const [profiles, setProfiles] = useState<any[] | null>(null);
   const [result, setResult] = useState<any | null>(null);
@@ -31,7 +31,7 @@ export default function Profiles() {
   }, []);
 
   const run = async (id: string, withBench: boolean) => {
-    if (busy) return;
+    if (busy || !admin) return;
     setBusy(true);
     setResult({ running: true, withBench });
     try {
@@ -46,7 +46,7 @@ export default function Profiles() {
   };
 
   const revert = async (id: string) => {
-    if (busy) return;
+    if (busy || !admin) return;
     setBusy(true);
     setResult({ running: true, withBench: false });
     try {
@@ -68,6 +68,7 @@ export default function Profiles() {
       <div className="page-sub">{t("profilesSub")}</div>
 
       {!profiles && <Spinner />}
+      {!admin && <div style={{ color: "var(--yellow)", marginBottom: 10, fontSize: 13 }}>{t("adminRestart")}</div>}
 
       <div className="grid grid-3">
         {(profiles ?? []).map((p) => (
@@ -84,10 +85,10 @@ export default function Profiles() {
             <div className="row mt">
               {confirm === p.id ? (
                 <>
-                  <button className="btn small danger" onClick={() => run(p.id, true)}>
+                  <button className="btn small danger" disabled={busy || !admin} onClick={() => run(p.id, true)}>
                     {t("profilesWithBench")}
                   </button>
-                  <button className="btn small" onClick={() => run(p.id, false)}>
+                  <button className="btn small" disabled={busy || !admin} onClick={() => run(p.id, false)}>
                     {t("profilesJustApply")}
                   </button>
                   <button className="btn small ghost" onClick={() => setConfirm(null)}>✕</button>
@@ -95,7 +96,7 @@ export default function Profiles() {
               ) : (
                 <button
                   className="btn small"
-                  disabled={busy}
+                  disabled={busy || !admin}
                   onClick={() => setConfirm(p.id)}
                 >
                   {t("profilesApply")}
@@ -104,7 +105,7 @@ export default function Profiles() {
               {p.ownedCount > 0 && (
                 <button
                   className="btn small ghost"
-                  disabled={busy}
+                  disabled={busy || !admin}
                   onClick={() => revert(p.id)}
                 >
                   {t("profRevertBtn")}
@@ -126,11 +127,24 @@ export default function Profiles() {
 
       {result && !result.running && !result.error && (
         <Card title={t("profilesResult")} style={{ marginTop: 14 }}>
-          {result.restorePoint && <div className="muted">🛟 {result.restorePoint}</div>}
+          {result.restorePoint && (
+            <div className={result.restorePointFailed ? "" : "muted"} style={result.restorePointFailed ? { color: "var(--red)", fontWeight: 600 } : undefined}>
+              🛟 {result.restorePointFailed ? `${t("profRestorePointFailed")}: ` : ""}{result.restorePoint}
+            </div>
+          )}
+          {result.warning && <div style={{ color: "var(--yellow)", marginTop: 6 }}>⚠ {result.warning}</div>}
           <div className="mt">
             {result.applied && <span style={{ color: "var(--green)" }}>✔ {result.applied.length} {t("profilesApplied")} </span>}
             {result.skipped?.length > 0 && <span className="muted">· {result.skipped.length} {t("profilesAlreadyActive")} </span>}
             {result.reverted && <span style={{ color: "var(--green)" }}>✔ {result.reverted.length} {t("profilesReverted")} </span>}
+            {result.hwSkipped?.length > 0 && (
+              <div className="muted mt">
+                {t("profHwSkipped")}:
+                {result.hwSkipped.map((s: any, i: number) => (
+                  <div key={i}>○ {s.id}: {s.reason}</div>
+                ))}
+              </div>
+            )}
             {result.failed?.length > 0 && (
               <div style={{ color: "var(--red)" }} className="mt">
                 {result.failed.map((f: any, i: number) => (

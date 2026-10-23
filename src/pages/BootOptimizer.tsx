@@ -10,6 +10,8 @@ type BootEvent = {
 type BcdTweak = {
   id: string; name: string; description: string;
   impact: string; risk: "Low" | "Medium" | "High"; applied: boolean;
+  /** Only listed while still applied: undo only, never apply. */
+  retired?: boolean;
 };
 type ScanData = {
   bootEvents: BootEvent[]; lastBootMs: number;
@@ -181,7 +183,8 @@ function TweakRow({ tweak, admin, busy, onApply, onRevert }: {
 }) {
   const { t } = useLang();
   const [open, setOpen] = useState(false);
-  const needsAdmin = tweak.risk !== "Low";
+  // Every boot tweak runs bcdedit, which always needs admin.
+  const needsAdmin = true;
   return (
     <div className="tweak">
       <div className="tweak-head">
@@ -190,13 +193,14 @@ function TweakRow({ tweak, admin, busy, onApply, onRevert }: {
         <Badge cls={tweak.applied ? "st-applied" : "st-unknown"}>
           {tweak.applied ? t("active") : t("inactive")}
         </Badge>
+        {tweak.retired && <Badge cls="st-unknown">{t("bootRetired")}</Badge>}
         <button className="btn small ghost" onClick={() => setOpen(o => !o)}>{open ? "▲" : "▼"}</button>
         {tweak.applied ? (
           <button className="btn small ghost" disabled={busy || (!admin && needsAdmin)} onClick={onRevert}
             title={!admin && needsAdmin ? t("bootAdminNeeded") : ""}>
             {busy ? <Spinner /> : t("bootUndo")}
           </button>
-        ) : (
+        ) : tweak.retired ? null : (
           <button className="btn small" disabled={busy || (!admin && needsAdmin)} onClick={onApply}
             title={!admin && needsAdmin ? t("bootAdminNeeded") : ""}>
             {busy ? <Spinner /> : t("bootApply")}
@@ -241,13 +245,18 @@ export default function BootOptimizer({ admin }: { admin: boolean }) {
     return               { label: t("ratingSlow"), color: "var(--red)" };
   }, [data, t]);
 
+  const nameOf = (id: string) => data?.tweaks.find(tw => tw.id === id)?.name ?? id;
   const doApply = async (id: string) => {
+    if (!admin || busy) return;
+    if (!window.confirm(t("bootConfirmApply").replace("{name}", nameOf(id)))) return;
     setBusy(id); push(`Applying ${id}…`);
     try { await api.bootTweakApply(id); push(`✔ ${id} applied`); }
     catch (e: any) { push(`✘ ${id}: ${e}`); setErr(String(e)); }
     finally { setBusy(null); refresh(); }
   };
   const doRevert = async (id: string) => {
+    if (!admin || busy) return;
+    if (!window.confirm(t("bootConfirmRevert").replace("{name}", nameOf(id)))) return;
     setBusy(id); push(`Reverting ${id}…`);
     try { await api.bootTweakRevert(id); push(`↩ ${id} reverted`); }
     catch (e: any) { push(`✘ ${id}: ${e}`); setErr(String(e)); }

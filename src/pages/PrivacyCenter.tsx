@@ -49,6 +49,8 @@ export default function PrivacyCenter({ admin, focusId }: { admin: boolean; focu
 
   const push = (m: string) =>
     setLog(l => [`[${new Date().toLocaleTimeString()}] ${m}`, ...l.slice(0, 49)]);
+  const fmt = (key: Parameters<typeof t>[0], name: string, warning = "") =>
+    t(key).replace("{name}", name).replace("{warning}", warning);
 
   const refresh = () => {
     setLoading(true);
@@ -72,31 +74,39 @@ export default function PrivacyCenter({ admin, focusId }: { admin: boolean; focu
     [tweaks, filter]);
 
   const doApply = async (tw: PTweak, refreshAfter = true) => {
+    if (!admin || busy) return;
     setBusy(tw.id);
-    push(`Applying ${tw.name}…`);
+    push(fmt("privLogApplying", tw.name));
     try {
       const res = await api.privacyApply(tw.id);
-      if (res?.ok === false) push(`✘ ${tw.name}: not applied, ${res.warning}`);
-      else if (res?.warning) push(`⚠ ${tw.name}: applied with warning, ${res.warning}`);
+      if (res?.ok === false) push(`✘ ${fmt("privLogNotApplied", tw.name, String(res.warning ?? ""))}`);
+      else if (res?.warning) push(`⚠ ${fmt("privLogAppliedWarn", tw.name, String(res.warning))}`);
       else push(`✔ ${tw.name} ${t("active")}`);
     } catch (e: any) { push(`✘ ${tw.name}: ${e}`); setErr(String(e)); }
     finally { setBusy(null); if (refreshAfter) refresh(); }
   };
 
   const doRevert = async (tw: PTweak) => {
+    if (!admin || busy) return;
     setBusy(tw.id);
-    push(`Reverting ${tw.name}…`);
+    push(fmt("privLogReverting", tw.name));
     try {
       const res = await api.privacyRevert(tw.id);
-      if (res?.ok === false) push(`✘ ${tw.name}: not reverted, ${res.warning}`);
-      else if (res?.warning) push(`⚠ ${tw.name}: reverted with warning, ${res.warning}`);
-      else push(`↩ ${tw.name} reverted`);
+      if (res?.ok === false) push(`✘ ${fmt("privLogNotReverted", tw.name, String(res.warning ?? ""))}`);
+      else if (res?.warning) push(`⚠ ${fmt("privLogRevertedWarn", tw.name, String(res.warning))}`);
+      else push(`↩ ${fmt("privLogReverted", tw.name)}`);
     } catch (e: any) { push(`✘ ${tw.name}: ${e}`); setErr(String(e)); }
     finally { setBusy(null); refresh(); }
   };
 
   const applyAll = async () => {
+    if (!admin || busy) return;
     const pending = tweaks.filter(t => !t.applied);
+    if (!pending.length) return;
+    const risky = pending.filter(tw => tw.risk !== "Low");
+    let msg = t("privApplyAllConfirm").replace("{n}", String(pending.length));
+    if (risky.length) msg += `\n\n${t("privApplyAllRiskList")}\n${risky.map(tw => `• ${tw.name} (${tw.risk})`).join("\n")}`;
+    if (!window.confirm(msg)) return;
     setBusy("all");
     let succeeded = 0;
     const failed: string[] = [];
@@ -109,13 +119,14 @@ export default function PrivacyCenter({ admin, focusId }: { admin: boolean; focu
         failed.push(`${tw.name}: ${String(error)}`);
       }
     }
-    push(`${succeeded} applied, ${failed.length} failed`);
+    push(t("privLogSummary").replace("{ok}", String(succeeded)).replace("{failed}", String(failed.length)));
     if (failed.length) setErr(failed.join("; "));
     setBusy(null);
     refresh();
   };
 
   const totalApplied = tweaks.filter(t => t.applied).length;
+  // Share of the catalog that is applied, not a measured privacy score.
   const pct = tweaks.length > 0 ? Math.round(totalApplied / tweaks.length * 100) : 0;
 
   return (
@@ -125,6 +136,7 @@ export default function PrivacyCenter({ admin, focusId }: { admin: boolean; focu
 
       {loading && <><Spinner /> <span className="muted">{t("privLoading")}</span></>}
       {err && <div style={{ color: "var(--red)", marginBottom: 10 }}>{err}</div>}
+      {!admin && <div style={{ color: "var(--yellow)", marginBottom: 10, fontSize: 13 }}>{t("adminRestart")}</div>}
 
       {!loading && tweaks.length > 0 && (
         <>
@@ -135,7 +147,7 @@ export default function PrivacyCenter({ admin, focusId }: { admin: boolean; focu
                 <div style={{
                   fontSize: 36, fontWeight: 900,
                   color: pct >= 80 ? "var(--green)" : pct >= 50 ? "var(--yellow)" : "var(--red)"
-                }}>{pct}%</div>
+                }}>{totalApplied}/{tweaks.length}</div>
                 <div className="muted" style={{ fontSize: 11 }}>{t("privScore")}</div>
               </div>
               <div style={{ flex: 1 }}>
@@ -151,8 +163,8 @@ export default function PrivacyCenter({ admin, focusId }: { admin: boolean; focu
                 </div>
               </div>
               <div style={{ display: "flex", gap: 8 }}>
-                <button className="btn" disabled={!!busy || totalApplied === tweaks.length} onClick={applyAll}>
-                  {t("applyAll")}
+                <button className="btn" disabled={!!busy || !admin || totalApplied === tweaks.length} onClick={applyAll}>
+                  {busy === "all" ? <Spinner /> : t("applyAll")}
                 </button>
                 <button className="btn ghost small" onClick={refresh} disabled={loading || !!busy}>{t("refresh")}</button>
               </div>
@@ -201,11 +213,11 @@ export default function PrivacyCenter({ admin, focusId }: { admin: boolean; focu
                       {isOpen ? "▲" : "▼"}
                     </button>
                     {tw.applied && tw.canRevert ? (
-                      <button className="btn small ghost" disabled={isBusy} onClick={() => doRevert(tw)}>
+                      <button className="btn small ghost" disabled={!!busy || !admin} onClick={() => doRevert(tw)}>
                         {isBusy ? <Spinner /> : t("revert")}
                       </button>
                     ) : !tw.applied ? (
-                      <button className="btn small" disabled={isBusy} onClick={() => doApply(tw)}>
+                      <button className="btn small" disabled={!!busy || !admin} onClick={() => doApply(tw)}>
                         {isBusy ? <Spinner /> : t("privActivate")}
                       </button>
                     ) : null}
@@ -220,6 +232,18 @@ export default function PrivacyCenter({ admin, focusId }: { admin: boolean; focu
             })}
           </Card>
         </>
+      )}
+
+      {log.length > 0 && (
+        <div className="mt">
+          <Card title={t("log")}>
+            <div className="mono muted" style={{ fontSize: 11, lineHeight: 1.8, maxHeight: 160, overflowY: "auto" }}>
+              {log.map((l, i) => (
+                <div key={i} style={{ color: l.includes("✔") ? "var(--green)" : l.includes("✘") ? "var(--red)" : undefined }}>{l}</div>
+              ))}
+            </div>
+          </Card>
+        </div>
       )}
     </>
   );

@@ -3,6 +3,7 @@ import { api } from "../api";
 import { Card, Badge, Spinner, ActionBtn } from "../components/ui";
 import { RiskBadge, RiskNotice } from "../components/HwWarnings";
 import { useHwProfile } from "../hooks/useHwProfile";
+import { useFeatureFocus } from "../hooks/useFeatureFocus";
 import { useLang } from "../i18n";
 import { localizeTweak } from "../localize";
 import type { Mode } from "../App";
@@ -19,6 +20,10 @@ export default function Optimize({ mode, admin, focusId, onSwitchExpert }: { mod
   const profile = useHwProfile();
   const focusHandled = useRef(false);
   const [focusHidden, setFocusHidden] = useState(false);
+  const [focusReady, setFocusReady] = useState(false);
+  // Scroll + highlight is the shared hook; this page only decides whether the
+  // target is visible and expands it first.
+  useFeatureFocus(focusId, focusReady);
 
   const refresh = () =>
     api
@@ -42,12 +47,7 @@ export default function Optimize({ mode, admin, focusId, onSwitchExpert }: { mod
       return;
     }
     setOpen(focusId);
-    requestAnimationFrame(() => {
-      const el = document.querySelector(`[data-tweak-id="${focusId}"]`);
-      el?.scrollIntoView({ behavior: "smooth", block: "center" });
-      el?.classList.add("tweak-focus");
-      setTimeout(() => el?.classList.remove("tweak-focus"), 2200);
-    });
+    setFocusReady(true);
   }, [focusId, tweaks]);
 
   const interp = (tpl: string, params: Record<string, string>) => {
@@ -102,6 +102,7 @@ export default function Optimize({ mode, admin, focusId, onSwitchExpert }: { mod
     status === "partial" ? t("optStatusPartial")
     : status === "not_applied" ? t("optStatusNotApplied")
     : status === "applied" ? t("optStatusApplied")
+    : status === "unsupported" ? t("optStatusUnsupported")
     : t("optStatusUnknown");
 
   return (
@@ -153,12 +154,14 @@ export default function Optimize({ mode, admin, focusId, onSwitchExpert }: { mod
                 ? { idle: t("optApply"), confirmLabel: t("optConfirmApply"), cls: "btn small", title: undefined as string | undefined }
                 : null;
             return (
-            <div className="tweak" key={tw.id} data-tweak-id={tw.id}>
+            <div className="tweak" key={tw.id} data-tweak-id={tw.id} data-focus-id={tw.id}>
               <div className="tweak-head">
                 <span className="tweak-name">{tw.name}</span>
                 <Badge cls={`risk-${tw.risk}`}>{tw.risk === "Low" ? t("riskLow") : tw.risk === "Medium" ? t("riskMedium") : t("riskHigh")}</Badge>
                 <RiskBadge id={tw.id} />
-                <Badge cls={`st-${tw.status}`}>{statusLabel(tw.status)}</Badge>
+                <span title={tw.status === "unsupported" ? t("optStatusUnsupportedHint") : undefined}>
+                  <Badge cls={`st-${tw.status}`}>{statusLabel(tw.status)}</Badge>
+                </span>
                 {tw.requiresAdmin && <Badge cls="st-unknown">{t("optAdmin")}</Badge>}
                 <button className="btn small ghost" aria-expanded={open === tw.id} onClick={() => setOpen(open === tw.id ? null : tw.id)}>
                   {open === tw.id ? t("optHide") : t("optDetails")}

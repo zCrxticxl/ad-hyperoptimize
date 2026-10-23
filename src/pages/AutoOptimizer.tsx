@@ -76,7 +76,7 @@ export default function AutoOptimizer({ admin }: { admin: boolean }) {
     } finally { setBusy(false); }
   };
 
-  // Score ring
+  // Progress ring: share of recommendations applied (not a quality score)
   const score = data ? Math.round(((data.total - data.pending) / Math.max(data.total, 1)) * 100) : 0;
   const color = score >= 80 ? "var(--green)" : score >= 50 ? "var(--orange)" : "var(--red)";
 
@@ -106,8 +106,9 @@ export default function AutoOptimizer({ admin }: { admin: boolean }) {
                     strokeDasharray={`${score} ${100 - score}`} strokeLinecap="round" />
                 </svg>
                 <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
-                  <div style={{ fontSize: 22, fontWeight: 700, color }}>{score}</div>
-                  <div style={{ fontSize: 10, color: "var(--muted)" }}>/ 100</div>
+                  {/* Share of the catalog that is applied, not a quality score. */}
+                  <div style={{ fontSize: 22, fontWeight: 700, color }}>{data.total - data.pending}</div>
+                  <div style={{ fontSize: 10, color: "var(--muted)" }}>{t("autoOf")} {data.total}</div>
                 </div>
               </div>
               <div style={{ flex: 1 }}>

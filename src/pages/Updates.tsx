@@ -150,6 +150,9 @@ export default function Updates({ admin }: { admin: boolean }) {
   const [drvBusy, setDrvBusy]     = useState(false);
   const [drvResult, setDrvResult] = useState<any | null>(null);
   const [confirmDrv, setConfirmDrv] = useState(false);
+  const [drvInstalling, setDrvInstalling] = useState(false);
+  const [rpBusy, setRpBusy]       = useState(false);
+  const [rpMsg, setRpMsg]         = useState<{ ok: boolean; text: string } | null>(null);
   const [gpu, setGpu]             = useState<any | null>(null);
 
   const pushLog = (msg: string) => {
@@ -197,8 +200,9 @@ export default function Updates({ admin }: { admin: boolean }) {
   };
 
   const scanDrivers = async () => {
-    setDrvBusy(true); setDrivers(null); setDrvResult(null);
+    setDrvBusy(true); setDrivers(null); setDrvResult(null); setRpMsg(null);
     try { setDrivers(await api.scanDriverUpdates()); }
+    catch (e: any) { setDrivers({ error: String(e) }); }
     finally { setDrvBusy(false); }
   };
 
@@ -345,7 +349,12 @@ export default function Updates({ admin }: { admin: boolean }) {
             <button className="btn ghost" onClick={scanDrivers}>{t("updatesCheckDrivers")}</button>
           )}
           {drvBusy && <><Spinner /> <span className="muted">{t("updatesDriverScanning")}</span></>}
-          {drivers?.error && <div style={{ color: "var(--yellow)" }}>{String(drivers.error)}</div>}
+          {drivers?.error && (
+            <div style={{ color: "var(--yellow)" }}>
+              {String(drivers.error)}{" "}
+              <button className="btn small ghost" onClick={scanDrivers} disabled={drvBusy}>↻</button>
+            </div>
+          )}
           {drivers?.count === 0 && <div className="muted">{t("updatesNoDrivers")}</div>}
           {drivers?.count > 0 && (
             <>
@@ -372,19 +381,22 @@ export default function Updates({ admin }: { admin: boolean }) {
                     <span style={{ color: "var(--yellow)", fontSize: 13 }}>
                       {t("updatesDriverConfirm")} {drivers.count} {t("updatesDriverQuestion")}
                     </span>
-                    <button className="btn ghost" onClick={async () => {
+                    <button className="btn ghost" disabled={rpBusy || drvInstalling} onClick={async () => {
+                      setRpBusy(true); setRpMsg(null);
                       try {
                         await api.createRestorePoint("Before driver updates");
-                        setDrvResult({ error: t("updatesRestorePointDone") });
+                        setRpMsg({ ok: true, text: t("updatesRestorePointDone") });
                       }
-                      catch (e: any) { setDrvResult({ error: `${t("updatesRestorePoint")}: ${String(e)}` }); }
-                    }}>{t("updatesRestorePoint")}</button>
-                    <button className="btn" style={{ background: "var(--red)" }} onClick={async () => {
+                      catch (e: any) { setRpMsg({ ok: false, text: `${t("updatesRestorePoint")}: ${String(e)}` }); }
+                      finally { setRpBusy(false); }
+                    }}>{rpBusy ? <Spinner /> : t("updatesRestorePoint")}</button>
+                    <button className="btn" style={{ background: "var(--red)" }} disabled={drvInstalling || rpBusy || !admin} onClick={async () => {
+                      setDrvInstalling(true); setDrvResult(null);
                       try { setDrvResult(await api.installDriverUpdates()); }
                       catch (e: any) { setDrvResult({ error: String(e) }); }
-                      setConfirmDrv(false);
-                    }}>{t("install")}</button>
-                    <button className="btn ghost" onClick={() => setConfirmDrv(false)}>{t("cancel")}</button>
+                      finally { setDrvInstalling(false); setConfirmDrv(false); }
+                    }}>{drvInstalling ? <Spinner /> : t("install")}</button>
+                    <button className="btn ghost" disabled={drvInstalling} onClick={() => setConfirmDrv(false)}>{t("cancel")}</button>
                   </>
                 )}
                 {!admin && <span className="muted" style={{ fontSize: 12 }}>{t("updatesAdminNeeded")}</span>}
@@ -402,6 +414,7 @@ export default function Updates({ admin }: { admin: boolean }) {
               )}
             </div>
           )}
+          {rpMsg && <div style={{ color: rpMsg.ok ? "var(--green)" : "var(--red)", marginTop: 8 }}>{rpMsg.text}</div>}
           {drvResult?.error && <div style={{ color: "var(--red)", marginTop: 8 }}>{drvResult.error}</div>}
         </Card>
       </div>

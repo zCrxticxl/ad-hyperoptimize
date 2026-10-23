@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
-import { Card, Spinner } from "../components/ui";
+import { Card, Spinner, ErrorBanner } from "../components/ui";
 import { HwWarnings, RiskBadge, RiskNotice } from "../components/HwWarnings";
 import { useHwProfile } from "../hooks/useHwProfile";
 import { useLang } from "../i18n";
@@ -32,9 +32,12 @@ function TimerCard({ admin }: { admin: boolean }) {
   const profile = useHwProfile();
   const minRisk = profile?.tweakRisks?.["timer_resolution_min"];
   const minNeedsAck = !!minRisk && !riskAck;
+  const [err, setErr] = useState("");
 
   const load = useCallback(async () => {
-    setData(await api.timerGet());
+    setErr("");
+    try { setData(await api.timerGet()); }
+    catch (e: any) { setErr(String(e)); }
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -63,7 +66,8 @@ function TimerCard({ admin }: { admin: boolean }) {
         {t("perfTimerDesc")}
       </div>
       <div style={{ marginBottom: 10 }}><RiskBadge id="timer_resolution_min" /></div>
-      {!data ? <Spinner /> : data.error ? (
+      <ErrorBanner msg={err} onRetry={load} />
+      {!data ? (err ? null : <Spinner />) : data.error ? (
         <div className="muted">{data.error}</div>
       ) : (
         <>
@@ -124,10 +128,18 @@ function MsiCard({ admin }: { admin: boolean }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [log, setLog] = useState("");
 
-  const load = useCallback(async () => setData(await api.msiList()), []);
+  const [err, setErr] = useState("");
+  const load = useCallback(async () => {
+    setErr("");
+    try { setData(await api.msiList()); }
+    catch (e: any) { setErr(String(e)); }
+  }, []);
   useEffect(() => { load(); }, [load]);
 
   const toggle = async (dev: any) => {
+    // A wrong MSI setting can stop a device from starting: always confirm.
+    const msg = (dev.msiEnabled ? t("perfMsiConfirmDisable") : t("perfMsiConfirmEnable")).replace("{name}", String(dev.name ?? ""));
+    if (!window.confirm(msg)) return;
     setBusy(dev.regPath);
     try { setLog(await api.msiSet(dev.regPath, !dev.msiEnabled)); await load(); }
     catch (e: any) { setLog(String(e)); }
@@ -145,7 +157,8 @@ function MsiCard({ admin }: { admin: boolean }) {
       </div>
       {hasNic && <div className="muted" style={{ fontSize: 11, marginBottom: 2 }}>[NIC] {t("perfMsiHintNic")}</div>}
       {hasGpu && <div className="muted" style={{ fontSize: 11, marginBottom: 10 }}>[GPU] {t("perfMsiHintGpu")}</div>}
-      {!data ? <Spinner /> : (
+      <ErrorBanner msg={err} onRetry={load} />
+      {!data ? (err ? null : <Spinner />) : (
         <>
           {devices.length === 0 && <div className="muted">{t("perfMsiNoDevices")}</div>}
           {devices.map((d: any, i: number) => (
@@ -159,7 +172,7 @@ function MsiCard({ admin }: { admin: boolean }) {
               <button
                 className={`btn small ${d.msiEnabled ? "ghost" : ""}`}
                 onClick={() => toggle(d)}
-                disabled={busy === d.regPath || !admin}
+                disabled={busy !== null || !admin}
               >
                 {busy === d.regPath ? "…" : d.msiEnabled ? t("perfDisable") : t("perfMsiEnable")}
               </button>
@@ -190,7 +203,12 @@ function NetCard({ admin }: { admin: boolean }) {
     { key: "lsoV2",      label: t("perfNetLsoV2"),      hint: t("perfNetLsoV2Hint"),      keyword: "*LsoV2IPv4",              offVal: 0, onVal: 1 },
   ];
 
-  const load = useCallback(async () => setData(await api.netAdapters()), []);
+  const [err, setErr] = useState("");
+  const load = useCallback(async () => {
+    setErr("");
+    try { setData(await api.netAdapters()); }
+    catch (e: any) { setErr(String(e)); }
+  }, []);
   useEffect(() => { load(); }, [load]);
 
   const tweak = async (adapter: string, keyword: string, value: number) => {
@@ -210,15 +228,19 @@ function NetCard({ admin }: { admin: boolean }) {
 
   const adapters: any[] = data?.adapters ?? [];
 
+  // No value means the adapter does not expose this property: that is
+  // "unsupported", not "off", and must not offer an Enable button.
+  const isUnsupported = (val: string | null | undefined) => val == null || val === "";
   const isDisabled = (val: string | null | undefined) =>
-    val == null || val === "" || val === "0" || val?.toLowerCase().includes("disab");
+    !isUnsupported(val) && (val === "0" || !!val?.toLowerCase().includes("disab"));
 
   return (
     <Card title={t("perfNetTitle")}>
       <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
         {t("perfNetDesc")}
       </div>
-      {!data ? <Spinner /> : (
+      <ErrorBanner msg={err} onRetry={load} />
+      {!data ? (err ? null : <Spinner />) : (
         <>
           {adapters.length === 0 && <div className="muted">{t("perfNetNoAdapters")}</div>}
           {adapters.map((a: any, ai: number) => (
@@ -233,6 +255,7 @@ function NetCard({ admin }: { admin: boolean }) {
               </div>
               {NET_PROPS.map((p) => {
                 const raw = a[p.key];
+                const unsupported = isUnsupported(raw);
                 const off = isDisabled(raw);
                 return (
                   <div key={p.key} className="row" style={{ padding: "5px 0", borderBottom: "1px solid var(--border)", alignItems: "flex-start", gap: 8 }}>
@@ -240,19 +263,23 @@ function NetCard({ admin }: { admin: boolean }) {
                       <div style={{ fontSize: 13 }}>{p.label}</div>
                       <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>{p.hint}</div>
                     </div>
-                    <span className="muted" style={{ fontSize: 11, minWidth: 70, textAlign: "right", flexShrink: 0 }}>{raw ?? "-"}</span>
-                    <span style={{ color: off ? "var(--green)" : "var(--muted)", fontWeight: 700, fontSize: 11, minWidth: 24 }}>
-                      {off ? "●" : "○"}
-                    </span>
-                    <RiskBadge id="net_offload_disable" />
-                    <button
-                      className="btn small ghost"
-                      style={{ minWidth: 70 }}
-                      disabled={busy || !admin}
-                      onClick={() => tweak(a.name, p.keyword, off ? p.onVal : p.offVal)}
-                    >
-                      {off ? t("perfEnable") : t("perfDisable")}
-                    </button>
+                    <span className="muted" style={{ fontSize: 11, minWidth: 70, textAlign: "right", flexShrink: 0 }}>{unsupported ? t("perfUnsupported") : raw}</span>
+                    {!unsupported && (
+                      <>
+                        <span style={{ color: off ? "var(--green)" : "var(--muted)", fontWeight: 700, fontSize: 11, minWidth: 24 }}>
+                          {off ? "●" : "○"}
+                        </span>
+                        <RiskBadge id="net_offload_disable" />
+                        <button
+                          className="btn small ghost"
+                          style={{ minWidth: 70 }}
+                          disabled={busy || !admin}
+                          onClick={() => tweak(a.name, p.keyword, off ? p.onVal : p.offVal)}
+                        >
+                          {off ? t("perfEnable") : t("perfDisable")}
+                        </button>
+                      </>
+                    )}
                   </div>
                 );
               })}
@@ -280,7 +307,12 @@ function RamCard({ admin }: { admin: boolean }) {
   const [busy, setBusy] = useState(false);
   const [log, setLog] = useState("");
 
-  const load = useCallback(async () => setData(await api.ramInfo()), []);
+  const [err, setErr] = useState("");
+  const load = useCallback(async () => {
+    setErr("");
+    try { setData(await api.ramInfo()); }
+    catch (e: any) { setErr(String(e)); }
+  }, []);
   useEffect(() => { load(); }, [load]);
 
   const flush = async () => {
@@ -298,7 +330,8 @@ function RamCard({ admin }: { admin: boolean }) {
       <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
         {t("perfRamDesc")}
       </div>
-      {!data ? <Spinner /> : data.error ? (
+      <ErrorBanner msg={err} onRetry={load} />
+      {!data ? (err ? null : <Spinner />) : data.error ? (
         <div className="muted">{data.error}</div>
       ) : (
         <>
@@ -350,10 +383,14 @@ function PagefileCard({ admin }: { admin: boolean }) {
   const profile = useHwProfile();
   const pfRisk = profile?.tweakRisks?.["pagefile_disable"];
 
+  const [err, setErr] = useState("");
   const load = useCallback(async () => {
-    const d = await api.pagefileInfo();
-    setData(d);
-    if (d?.files?.length > 0) setCustomPath(d.files[0].path);
+    setErr("");
+    try {
+      const d = await api.pagefileInfo();
+      setData(d);
+      if (d?.files?.length > 0) setCustomPath(d.files[0].path);
+    } catch (e: any) { setErr(String(e)); }
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -371,7 +408,8 @@ function PagefileCard({ admin }: { admin: boolean }) {
       <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
         {t("perfPagefileDesc")}
       </div>
-      {!data ? <Spinner /> : data.error ? (
+      <ErrorBanner msg={err} onRetry={load} />
+      {!data ? (err ? null : <Spinner />) : data.error ? (
         <div className="muted">{data.error}</div>
       ) : (
         <>
@@ -408,6 +446,8 @@ function PagefileCard({ admin }: { admin: boolean }) {
               onClick={() => {
                 if (pfRisk && !window.confirm(`${pfRisk.title}\n\n${pfRisk.message}\n\n${t("perfPagefileContinueAnyway")}`)) return;
                 if (!pfRisk && data.ramGb < 28 && !window.confirm(`${t("perfPagefileLowRamWarnPrefix")} ${data.ramGb} GB ${t("perfPagefileLowRamWarnSuffix")}`)) return;
+                // Always confirm, also with plenty of RAM and no hardware verdict.
+                if (!pfRisk && !(data.ramGb < 28) && !window.confirm(t("perfPagefileDisableConfirm"))) return;
                 act(api.pagefileDisable);
               }}
               disabled={busy || !admin}
@@ -451,8 +491,16 @@ function PagefileCard({ admin }: { admin: boolean }) {
                 <div style={{ alignSelf: "flex-end", display: "flex", gap: 8, alignItems: "center" }}>
                   <button
                     className="btn small"
-                    onClick={() => act(() => api.pagefileSetCustom(customPath, parseInt(customInit), parseInt(customMax)))}
-                    disabled={busy}
+                    onClick={() => {
+                      const init = /^\d+$/.test(customInit.trim()) ? Number(customInit) : NaN;
+                      const max = /^\d+$/.test(customMax.trim()) ? Number(customMax) : NaN;
+                      if (!Number.isSafeInteger(init) || !Number.isSafeInteger(max) || init <= 0 || max <= 0 || init > max) {
+                        setLog(t("perfPagefileInvalidSize"));
+                        return;
+                      }
+                      act(() => api.pagefileSetCustom(customPath, init, max));
+                    }}
+                    disabled={busy || !admin}
                   >
                     {t("perfPagefileApply")}
                   </button>

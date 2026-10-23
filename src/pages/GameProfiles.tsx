@@ -2,13 +2,14 @@ import { useEffect, useMemo, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "../api";
 import { useLang } from "../i18n";
+import { ErrorBanner } from "../components/ui";
 
 export default function GameProfiles() {
   const { t } = useLang();
   const PRESET_LABELS: Record<string, { label: string; color: string; icon: string }> = {
-    performance: { label: t("gameprofPresetPerformance"), color: "#f59e0b", icon: "⚡" },
-    balanced:    { label: t("gameprofPresetBalanced"),     color: "#3b82f6", icon: "⚖️" },
-    quality:     { label: t("gameprofPresetQuality"),      color: "#8b5cf6", icon: "✨" },
+    performance: { label: t("gameprofPresetPerformance"), color: "var(--yellow)", icon: "⚡" },
+    balanced:    { label: t("gameprofPresetBalanced"),     color: "var(--accent)", icon: "⚖️" },
+    quality:     { label: t("gameprofPresetQuality"),      color: "var(--accent2)", icon: "✨" },
   };
 
   const PLAN_LABELS: Record<string, string> = {
@@ -25,25 +26,40 @@ export default function GameProfiles() {
   const [busy, setBusy]             = useState(false);
   const [toast, setToast]           = useState<string | null>(null);
   const [activeEvt, setActiveEvt]   = useState<any>(null);
+  const [loadErr, setLoadErr]       = useState("");
+  const [lastResult, setLastResult] = useState<{ ok: boolean; text: string } | null>(null);
 
   const showToast = (msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(null), 3500);
   };
 
+  const loadStatus = () =>
+    api.gameSwitcherStatus().then(setStatus).catch((e: any) => setLoadErr(String(e)));
+  const loadAll = () => {
+    setLoadErr("");
+    api.gameList().then((g) => setGames(Array.isArray(g) ? g : [])).catch((e: any) => setLoadErr(String(e)));
+    loadStatus();
+  };
+
   useEffect(() => {
-    api.gameList().then(setGames);
-    api.gameSwitcherStatus().then(setStatus);
+    loadAll();
 
     const unSub1 = listen("game-detected", (e: any) => {
       setActiveEvt(e.payload);
       setStatus((s: any) => ({ ...s, activeGame: e.payload.id }));
-      showToast(`🎮 ${e.payload.name} ${t("gameprofToastDetected")}, ${e.payload.preset} ${t("gameprofToastProfileApplied")}`);
+      if (e.payload?.error) {
+        showToast(`${t("gameprofToastError")}: ${e.payload.name ?? ""} ${e.payload.error}`);
+      } else {
+        showToast(`🎮 ${e.payload.name} ${t("gameprofToastDetected")}, ${e.payload.preset} ${t("gameprofToastProfileApplied")}${e.payload?.note ? ` (${e.payload.note})` : ""}`);
+      }
     });
     const unSub2 = listen("game-exited", (e: any) => {
       setActiveEvt(null);
       setStatus((s: any) => ({ ...s, activeGame: null }));
-      showToast(`🔁 ${t("gameprofToastGameClosed")}`);
+      showToast(e.payload?.error
+        ? `${t("gameprofToastError")}: ${e.payload.error}`
+        : `🔁 ${t("gameprofToastGameClosed")}${e.payload?.note ? ` (${e.payload.note})` : ""}`);
     });
     return () => { unSub1.then(f => f()); unSub2.then(f => f()); };
   }, [t]);
@@ -78,22 +94,38 @@ export default function GameProfiles() {
   };
 
   const applyPreset = async (game: any, p: string) => {
+    if (busy) return;
     setBusy(true);
+    setLastResult(null);
     try {
       const res = await api.gameApplyPreset(game.id, p);
-      if (res.ok) showToast(`⚡ ${t("gameprofToastApplied")} ${p} ${t("gameprofToastPresetFor")} ${game.name}, ${t("gameprofToastPowerPlan")}: ${PLAN_LABELS[res.powerPlan] ?? res.powerPlan}`);
-      else showToast(`${t("gameprofToastError")}: ${res.error}`);
-    } catch (e: any) { showToast(`${t("gameprofToastError")}: ${String(e)}`); }
-    finally { setBusy(false); }
+      // Show exactly what the backend reported, then re-read the live state.
+      if (res?.ok) {
+        const extra = [res.warning, res.note, res.error].filter(Boolean).join("; ");
+        const text = `⚡ ${t("gameprofToastApplied")} ${p} ${t("gameprofToastPresetFor")} ${res.game ?? game.name}, ${t("gameprofToastPowerPlan")}: ${PLAN_LABELS[res.powerPlan] ?? res.powerPlan}${extra ? ` (${extra})` : ""}`;
+        setLastResult({ ok: !res.warning && !res.error, text });
+        showToast(text);
+      } else {
+        const text = `${t("gameprofToastError")}: ${res?.error ?? res?.warning ?? JSON.stringify(res)}`;
+        setLastResult({ ok: false, text });
+        showToast(text);
+      }
+    } catch (e: any) {
+      const text = `${t("gameprofToastError")}: ${String(e)}`;
+      setLastResult({ ok: false, text });
+      showToast(text);
+    }
+    finally { await loadStatus(); setBusy(false); }
   };
 
   const revert = async () => {
     setBusy(true);
     try {
-      await api.gameRevert();
-      showToast(`🔁 ${t("gameprofToastReverted")}`);
+      const res = await api.gameRevert();
+      if (res?.error) showToast(`${t("gameprofToastError")}: ${res.error}`);
+      else showToast(`🔁 ${t("gameprofToastReverted")}${res?.note ? ` (${res.note})` : ""}`);
     } catch (e: any) { showToast(`${t("gameprofToastError")}: ${String(e)}`); }
-    finally { setBusy(false); }
+    finally { await loadStatus(); setBusy(false); }
   };
 
   const currentPreset = (game: any) =>
@@ -104,9 +136,9 @@ export default function GameProfiles() {
       {toast && (
         <div style={{
           position:"fixed", top:16, right:16, zIndex:9999,
-          background:"#1e293b", border:"1px solid #334155",
-          borderRadius:8, padding:"10px 16px", color:"#f1f5f9",
-          fontSize:13, boxShadow:"0 8px 24px #0008", maxWidth:360,
+          background:"var(--card2)", border:"1px solid var(--border)",
+          borderRadius:8, padding:"10px 16px", color:"var(--text)",
+          fontSize:13, boxShadow:"0 8px 24px rgba(0,0,0,.5)", maxWidth:360,
         }}>{toast}</div>
       )}
 
@@ -114,15 +146,16 @@ export default function GameProfiles() {
       <p className="sub">
         {t("gameprofSub")}
       </p>
+      <ErrorBanner msg={loadErr} onRetry={loadAll} />
 
       {/* ── Status bar ─────────────────────────────────────────────────── */}
       <div style={{
         display:"flex", gap:12, alignItems:"center", flexWrap:"wrap",
-        background:"#0f172a", border:"1px solid #1e293b",
+        background:"var(--card)", border:"1px solid var(--border)",
         borderRadius:10, padding:"14px 18px", marginBottom:24,
       }}>
         <div style={{flex:1}}>
-          <div style={{fontSize:12, color:"#64748b", marginBottom:4}}>{t("gameprofAutoSwitcher")}</div>
+          <div style={{fontSize:12, color:"var(--muted)", marginBottom:4}}>{t("gameprofAutoSwitcher")}</div>
           <div style={{display:"flex", alignItems:"center", gap:10}}>
             <button
               className={`btn small ${status?.enabled ? "accent" : "ghost"}`}
@@ -131,7 +164,7 @@ export default function GameProfiles() {
               {status?.enabled ? t("gameprofEnabled") : t("gameprofDisabled")}
             </button>
             {status?.activeGame && (
-              <span style={{fontSize:12, color:"#22c55e"}}>
+              <span style={{fontSize:12, color:"var(--green)"}}>
                 🎮 {t("gameprofActiveLabel")}: {games.find(g => g.id === status.activeGame)?.name ?? status.activeGame}
               </span>
             )}
@@ -139,7 +172,7 @@ export default function GameProfiles() {
         </div>
 
         <div>
-          <div style={{fontSize:12, color:"#64748b", marginBottom:4}}>{t("gameprofDefaultPreset")}</div>
+          <div style={{fontSize:12, color:"var(--muted)", marginBottom:4}}>{t("gameprofDefaultPreset")}</div>
           <div style={{display:"flex", gap:6}}>
             {(["performance","balanced","quality"] as const).map(p => (
               <button
@@ -177,7 +210,7 @@ export default function GameProfiles() {
             filtered.some((g:any) => g.genre === genre)
           ).map(genre => (
             <div key={genre}>
-              <div style={{fontSize:10, color:"#475569", textTransform:"uppercase", letterSpacing:1, padding:"4px 8px"}}>
+              <div style={{fontSize:10, color:"var(--muted)", textTransform:"uppercase", letterSpacing:1, padding:"4px 8px"}}>
                 {genre}
               </div>
               {filtered.filter((g:any) => g.genre === genre).map((game:any) => (
@@ -187,19 +220,19 @@ export default function GameProfiles() {
                   style={{
                     width:"100%", textAlign:"left", background:"none",
                     border: selectedGame?.id === game.id
-                      ? "1px solid #3b82f6"
+                      ? "1px solid var(--accent)"
                       : "1px solid transparent",
                     borderRadius:8, padding:"8px 12px", cursor:"pointer",
-                    color: selectedGame?.id === game.id ? "#f1f5f9" : "#94a3b8",
+                    color: selectedGame?.id === game.id ? "var(--text)" : "var(--muted)",
                     display:"flex", alignItems:"center", justifyContent:"space-between",
                   }}
                 >
                   <span style={{fontSize:13}}>{game.name}</span>
                   {status?.activeGame === game.id && (
-                    <span style={{fontSize:10, color:"#22c55e"}}>● {t("gameprofActive")}</span>
+                    <span style={{fontSize:10, color:"var(--green)"}}>● {t("gameprofActive")}</span>
                   )}
                   {game.competitive && (
-                    <span style={{fontSize:10, color:"#f59e0b"}}>⚡</span>
+                    <span style={{fontSize:10, color:"var(--yellow)"}}>⚡</span>
                   )}
                 </button>
               ))}
@@ -213,17 +246,17 @@ export default function GameProfiles() {
 
             {/* Header */}
             <div style={{
-              background:"#0f172a", border:"1px solid #1e293b",
+              background:"var(--card)", border:"1px solid var(--border)",
               borderRadius:10, padding:"16px 20px",
             }}>
               <div style={{display:"flex", alignItems:"flex-start", justifyContent:"space-between", flexWrap:"wrap", gap:12}}>
                 <div>
                   <h2 style={{margin:0, fontSize:20}}>{selectedGame.name}</h2>
-                  <div style={{fontSize:12, color:"#64748b", marginTop:4}}>
+                  <div style={{fontSize:12, color:"var(--muted)", marginTop:4}}>
                     {selectedGame.genre}
                     {selectedGame.competitive && ` · ${t("gameprofCompetitive")}`}
                     {" · "}
-                    <span style={{color:"#475569"}}>
+                    <span style={{color:"var(--muted)"}}>
                       {t("gameprofProcesses")}: {selectedGame.processes.join(", ")}
                     </span>
                   </div>
@@ -249,14 +282,20 @@ export default function GameProfiles() {
                 </div>
               </div>
 
+              {lastResult && (
+                <div role={lastResult.ok ? "status" : "alert"} style={{ marginTop: 10, fontSize: 13, color: lastResult.ok ? "var(--green)" : "var(--red)" }}>
+                  {lastResult.text}
+                </div>
+              )}
+
               {/* Preset description */}
               <div style={{
                 marginTop:12, padding:"10px 14px",
-                background:"#1e293b", borderRadius:8,
-                fontSize:13, color:"#94a3b8", borderLeft:`3px solid ${PRESET_LABELS[preset].color}`,
+                background:"var(--card2)", borderRadius:8,
+                fontSize:13, color:"var(--muted)", borderLeft:`3px solid ${PRESET_LABELS[preset].color}`,
               }}>
                 {currentPreset(selectedGame).description}
-                <span style={{marginLeft:12, fontSize:12, color:"#475569"}}>
+                <span style={{marginLeft:12, fontSize:12, color:"var(--muted)"}}>
                   {t("gameprofPowerLabel")}: {PLAN_LABELS[currentPreset(selectedGame).power_plan] ?? currentPreset(selectedGame).power_plan}
                 </span>
               </div>
@@ -264,11 +303,11 @@ export default function GameProfiles() {
 
             {/* Settings table */}
             <div style={{
-              background:"#0f172a", border:"1px solid #1e293b",
+              background:"var(--card)", border:"1px solid var(--border)",
               borderRadius:10, padding:"16px 20px",
             }}>
               <div style={{
-                fontSize:11, color:"#475569", textTransform:"uppercase",
+                fontSize:11, color:"var(--muted)", textTransform:"uppercase",
                 letterSpacing:1, marginBottom:12,
               }}>
                 {t("gameprofRecommendedSettings")}, {PRESET_LABELS[preset].label}
@@ -281,24 +320,24 @@ export default function GameProfiles() {
                 return cats.map((cat:string) => (
                   <div key={cat} style={{marginBottom:16}}>
                     <div style={{
-                      fontSize:11, color:"#3b82f6", textTransform:"uppercase",
+                      fontSize:11, color:"var(--accent)", textTransform:"uppercase",
                       letterSpacing:1, marginBottom:6, fontWeight:600,
                     }}>{cat}</div>
                     <div style={{
                       borderRadius:8, overflow:"hidden",
-                      border:"1px solid #1e293b",
+                      border:"1px solid var(--border)",
                     }}>
                       {settings.filter((s:any) => s.cat === cat).map((s:any, i:number) => (
                         <div key={i} style={{
                           display:"flex", justifyContent:"space-between", alignItems:"center",
                           padding:"7px 12px", gap:16,
-                          background: i % 2 === 0 ? "#0f172a" : "#111827",
+                          background: i % 2 === 0 ? "var(--card)" : "var(--card2)",
                           borderBottom: i < settings.filter((s:any) => s.cat === cat).length - 1
-                            ? "1px solid #1e293b" : "none",
+                            ? "1px solid var(--border)" : "none",
                         }}>
-                          <span style={{fontSize:13, color:"#94a3b8", flex:1}}>{s.name}</span>
+                          <span style={{fontSize:13, color:"var(--muted)", flex:1}}>{s.name}</span>
                           <span style={{
-                            fontSize:13, color:"#f1f5f9", fontWeight:500,
+                            fontSize:13, color:"var(--text)", fontWeight:500,
                             textAlign:"right", maxWidth:280,
                           }}>{s.value}</span>
                         </div>
@@ -312,21 +351,21 @@ export default function GameProfiles() {
             {/* Tips */}
             {selectedGame.tips?.length > 0 && (
               <div style={{
-                background:"#0f172a", border:"1px solid #1e293b",
+                background:"var(--card)", border:"1px solid var(--border)",
                 borderRadius:10, padding:"16px 20px",
               }}>
                 <div style={{
-                  fontSize:11, color:"#475569", textTransform:"uppercase",
+                  fontSize:11, color:"var(--muted)", textTransform:"uppercase",
                   letterSpacing:1, marginBottom:12,
                 }}>{t("gameprofProTips")}</div>
                 {selectedGame.tips.map((tip: string, i: number) => (
                   <div key={i} style={{
                     display:"flex", gap:10, alignItems:"flex-start",
                     padding:"6px 0",
-                    borderBottom: i < selectedGame.tips.length - 1 ? "1px solid #1e293b" : "none",
+                    borderBottom: i < selectedGame.tips.length - 1 ? "1px solid var(--border)" : "none",
                   }}>
-                    <span style={{color:"#f59e0b", fontSize:12, marginTop:1}}>→</span>
-                    <span style={{fontSize:13, color:"#94a3b8"}}>{tip}</span>
+                    <span style={{color:"var(--yellow)", fontSize:12, marginTop:1}}>→</span>
+                    <span style={{fontSize:13, color:"var(--muted)"}}>{tip}</span>
                   </div>
                 ))}
               </div>
@@ -335,11 +374,11 @@ export default function GameProfiles() {
         ) : (
           <div style={{
             display:"flex", flexDirection:"column", alignItems:"center",
-            justifyContent:"center", color:"#334155", gap:12, height:"100%",
+            justifyContent:"center", color:"var(--muted)", gap:12, height:"100%",
           }}>
             <div style={{fontSize:48}}>🎮</div>
             <div style={{fontSize:14}}>{t("gameprofSelectGame")}</div>
-            <div style={{fontSize:12, color:"#1e293b"}}>
+            <div style={{fontSize:12, color:"var(--muted)"}}>
               {games.length} {t("gameprofGamesInDb")}
             </div>
           </div>

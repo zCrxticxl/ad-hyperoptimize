@@ -2,10 +2,10 @@ import React, { useEffect, useState } from "react";
 import { api } from "../api";
 import { Spinner } from "../components/ui";
 import { HwWarnings } from "../components/HwWarnings";
-import { useLang } from "../i18n";
+import { useLang, TKey } from "../i18n";
 import { useFeatureFocus } from "../hooks/useFeatureFocus";
 
-const BLOAT_PACKAGES: { name: string; displayKey: string; cat: string }[] = [
+const BLOAT_PACKAGES: { name: string; displayKey: TKey; cat: string }[] = [
   { name: "Microsoft.BingNews",                     displayKey: "debloatPkgBingNews",        cat: "Microsoft" },
   { name: "Microsoft.BingWeather",                  displayKey: "debloatPkgBingWeather",     cat: "Microsoft" },
   { name: "Microsoft.BingFinance",                  displayKey: "debloatPkgBingFinance",     cat: "Microsoft" },
@@ -15,6 +15,7 @@ const BLOAT_PACKAGES: { name: string; displayKey: string; cat: string }[] = [
   { name: "Microsoft.People",                       displayKey: "debloatPkgPeople",          cat: "Microsoft" },
   { name: "Microsoft.SkypeApp",                     displayKey: "debloatPkgSkype",           cat: "Microsoft" },
   { name: "Microsoft.Teams",                        displayKey: "debloatPkgTeams",           cat: "Microsoft" },
+  { name: "MSTeams",                                displayKey: "debloatPkgNewTeams",        cat: "Microsoft" },
   { name: "Microsoft.ZuneMusic",                    displayKey: "debloatPkgGrooveMusic",     cat: "Microsoft" },
   { name: "Microsoft.ZuneVideo",                    displayKey: "debloatPkgMoviesTv",        cat: "Microsoft" },
   { name: "Microsoft.GetHelp",                      displayKey: "debloatPkgGetHelp",         cat: "Microsoft" },
@@ -36,12 +37,12 @@ const RECOMMENDED_BLOAT = [
   "Microsoft.BingNews","Microsoft.BingWeather","Microsoft.BingFinance",
   "Microsoft.BingSports","Microsoft.MicrosoftSolitaireCollection",
   "Microsoft.MixedReality.Portal","Microsoft.People","Microsoft.SkypeApp",
-  "Microsoft.Microsoft3DViewer","Microsoft.Getstarted","Microsoft.GetHelp",
+  "Microsoft.Microsoft3DViewer","Microsoft.Getstarted",
   "king.com.CandyCrushSaga","king.com.CandyCrushFriends","BytedancePte.Ltd.TikTok",
 ];
 
 type Tweak = { id: string; name: string; desc: string; cat: string; applied: boolean };
-type OptionalApp = { Name: string; PackageFullName: string | null; provisioned: boolean };
+type OptionalApp = { Name: string; PackageFullName: string | null; provisioned: boolean; recommended?: boolean };
 
 function ProgressBar({ done, total }: { done: number; total: number }) {
   const pct = total ? Math.round((done / total) * 100) : 0;
@@ -120,16 +121,17 @@ export default function Debloater({ admin, focusId }: { admin: boolean; focusId?
     if (!requireAdmin()) return;
     setApplyingAll(true);
     let applied = 0, failed = 0;
+    const errors: string[] = [];
     for (const id of ids) {
-      const t = tweaks.find(tw => tw.id === id && !tw.applied);
-      if (!t) continue;
-      try { await api.debloaterTweakApply(t.id); applied++; }
-      catch { failed++; }
+      const tw = tweaks.find(tw => tw.id === id && !tw.applied);
+      if (!tw) continue;
+      try { await api.debloaterTweakApply(tw.id); applied++; }
+      catch (e) { failed++; errors.push(`${tw.name}: ${String(e)}`); }
     }
     setApplyingAll(false);
     refresh();
     if (failed > 0) {
-      setLog({ msg: `${applied} ${t("debloatTweaksWord")} ${t("debloatSectionApplied")}, ${failed} ${t("debloatSkipped")}`, ok: false });
+      setLog({ msg: `${applied} ${t("debloatTweaksWord")} ${t("debloatSectionApplied")}, ${failed} ${t("debloatSkipped")}: ${errors.join("; ")}`, ok: false });
     } else {
       setLog({ msg: t("debloatSectionApplied"), ok: true });
     }
@@ -137,16 +139,18 @@ export default function Debloater({ admin, focusId }: { admin: boolean; focusId?
 
   const applyAll = async () => {
     if (!requireAdmin()) return;
+    if (!window.confirm(t("debloatApplyAllConfirm").replace("{n}", String(unapplied.length)))) return;
     setApplyingAll(true); setLog(null);
     let n = 0, failed = 0;
-    for (const t of unapplied) {
-      try { await api.debloaterTweakApply(t.id); n++; }
-      catch { failed++; }
+    const errors: string[] = [];
+    for (const tw of unapplied) {
+      try { await api.debloaterTweakApply(tw.id); n++; }
+      catch (e) { failed++; errors.push(`${tw.name}: ${String(e)}`); }
     }
     setApplyingAll(false);
     refresh();
     if (failed > 0) {
-      setLog({ msg: `${t("debloatAppliedN")} ${n} ${n !== 1 ? t("debloatTweaksWord") : t("debloatTweakWord")}, ${failed} ${t("debloatSkipped")}. ${t("debloatRestartRecommended")}`, ok: false });
+      setLog({ msg: `${t("debloatAppliedN")} ${n} ${n !== 1 ? t("debloatTweaksWord") : t("debloatTweakWord")}, ${failed} ${t("debloatSkipped")}: ${errors.join("; ")}. ${t("debloatRestartRecommended")}`, ok: false });
     } else {
       setLog({ msg: `${t("debloatAppliedN")} ${n} ${n !== 1 ? t("debloatTweaksWord") : t("debloatTweakWord")}. ${t("debloatRestartRecommended")}`, ok: true });
     }
@@ -156,6 +160,7 @@ export default function Debloater({ admin, focusId }: { admin: boolean; focusId?
     if (!requireAdmin()) return;
     setRemovingBloat(true); setBloatLog(""); setConfirmRemove(false);
     let removed = 0, failed = 0;
+    const errors: string[] = [];
     for (const name of selBloat) {
       const app = uwpApps.find(a => a.Name === name);
       if (!app) continue;
@@ -163,15 +168,20 @@ export default function Debloater({ admin, focusId }: { admin: boolean; focusId?
         if (app.PackageFullName) await api.debloaterRemoveUwp(app.PackageFullName);
         if (app.provisioned) await api.debloaterRemoveProvisioned(name);
         removed++;
-      } catch { failed++; }
+      } catch (e) { failed++; errors.push(`${name}: ${String(e)}`); }
     }
     setRemovingBloat(false);
     setSelBloat(new Set());
     refreshUwp();
-    setBloatLog(`${t("debloatRemovedN")} ${removed} ${removed !== 1 ? t("debloatAppsWord") : t("debloatAppWord")}${failed ? `, ${failed} ${t("debloatSkipped")}` : ""}.`);
+    setBloatLog(`${t("debloatRemovedN")} ${removed} ${removed !== 1 ? t("debloatAppsWord") : t("debloatAppWord")}${failed ? `, ${failed} ${t("debloatSkipped")}: ${errors.join("; ")}` : ""}.`);
   };
 
   const availableBloat = BLOAT_PACKAGES.filter(b => uwpApps.some(a => a.Name === b.name));
+  // The backend's per-app verdict wins; the static list is only a fallback.
+  const isRecommended = (name: string) => {
+    const flag = uwpApps.find(a => a.Name === name)?.recommended;
+    return typeof flag === "boolean" ? flag : RECOMMENDED_BLOAT.includes(name);
+  };
   const CAT_ORDER = ["Telemetry", "Ads & Clutter", "Privacy", "Gaming"];
   const byCategory = tweaks.reduce<Record<string, Tweak[]>>((acc, t) => { (acc[t.cat] ??= []).push(t); return acc; }, {});
   const sortedCategories = CAT_ORDER.filter(c => byCategory[c]).concat(Object.keys(byCategory).filter(c => !CAT_ORDER.includes(c)));
@@ -237,12 +247,14 @@ export default function Debloater({ admin, focusId }: { admin: boolean; focusId?
               <div style={{ flex: 1, borderBottom: "1px solid var(--border)" }} />
               {allDone
                 ? <span style={{ fontSize: 11, color: "var(--green)" }}>✓ {t("debloatAllAppliedShort")}</span>
-                : <button className="btn small ghost" style={{ fontSize: 11 }} onClick={() => applySection(catUnapplied)} disabled={applyingAll}>{t("debloatApplySection")} →</button>}
+                : <button className="btn small ghost" style={{ fontSize: 11 }} onClick={() => applySection(catUnapplied)} disabled={applyingAll || !admin}>{t("debloatApplySection")} →</button>}
             </div>
             {items.map(tw => (
               <div key={tw.id} data-focus-id={tw.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 0", borderBottom: "1px solid var(--border)", opacity: busy[tw.id] ? 0.7 : 1 }}>
                 <button
                   onClick={() => toggle(tw)}
+                  disabled={!admin || applyingAll || !!busy[tw.id]}
+                  aria-label={tw.name}
                   style={{ width: 22, height: 22, borderRadius: 5, flexShrink: 0, border: `2px solid ${tw.applied ? "var(--green)" : "var(--border)"}`, background: tw.applied ? "var(--green)" : "transparent", color: "#fff", fontSize: 12, display: "flex", alignItems: "center", justifyContent: "center", cursor: admin ? "pointer" : "not-allowed" }}
                 >
                   {busy[tw.id] ? <Spinner /> : tw.applied ? "✓" : ""}
@@ -284,7 +296,7 @@ export default function Debloater({ admin, focusId }: { admin: boolean; focusId?
                   return (
                     <label key={b.name} style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 10px", borderRadius: 6, cursor: "pointer", border: `1px solid ${checked ? "var(--accent)" : "var(--border)"}`, background: checked ? "rgba(0,140,255,0.07)" : "var(--bg2)", fontSize: 12, fontWeight: 500, userSelect: "none" }}>
                       <input type="checkbox" checked={checked} onChange={() => setSelBloat(prev => { const n = new Set(prev); n.has(b.name) ? n.delete(b.name) : n.add(b.name); return n; })} style={{ pointerEvents: "none" }} />
-                      {t(b.displayKey as any)}
+                      {t(b.displayKey)}
                     </label>
                   );
                 })}
@@ -307,11 +319,11 @@ export default function Debloater({ admin, focusId }: { admin: boolean; focusId?
               <button className="btn small ghost" onClick={() => setConfirmRemove(false)} disabled={removingBloat}>{t("cancel")}</button>
             </>
           )}
-          <button className="btn small ghost" onClick={() => setSelBloat(new Set(availableBloat.filter(b => RECOMMENDED_BLOAT.includes(b.name)).map(b => b.name)))}>{t("debloatReset")}</button>
+          <button className="btn small ghost" onClick={() => setSelBloat(new Set(availableBloat.filter(b => isRecommended(b.name)).map(b => b.name)))}>{t("debloatReset")}</button>
           <button className="btn small ghost" onClick={() => setSelBloat(new Set(availableBloat.map(b => b.name)))}>{t("debloatAll")}</button>
           <button className="btn small ghost" onClick={() => setSelBloat(new Set())}>{t("debloatNone")}</button>
         </div>
-        {bloatLog && <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>{bloatLog}</div>}
+        {bloatLog && <div className={bloatLog.includes(t("debloatSkipped")) ? "" : "muted"} style={{ fontSize: 12, marginTop: 8, color: bloatLog.includes(t("debloatSkipped")) ? "var(--red)" : undefined }}>{bloatLog}</div>}
       </div>
 
       <div className="muted" style={{ fontSize: 11, marginTop: 20 }}>

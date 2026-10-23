@@ -14,8 +14,10 @@ export default function Benchmark() {
 
   const [results, setResults] = useState<Record<string, any>>({});
   const [history, setHistory] = useState<any[]>([]);
+  // One benchmark at a time: parallel runs would measure each other.
+  const [running, setRunning] = useState<string | null>(null);
 
-  const loadHistory = () => api.benchHistory().then(setHistory);
+  const loadHistory = () => api.benchHistory().then(setHistory).catch(() => setHistory([]));
   useEffect(() => { loadHistory(); }, []);
 
   const fmt = (r: any) => {
@@ -43,10 +45,14 @@ export default function Benchmark() {
           <div className="row">
             <ActionBtn
               label={t("benchRunButton")}
+              disabled={running !== null}
               onRun={async () => {
-                const r = await api.runBenchmark(k.id);
-                setResults((x) => ({ ...x, [k.id]: r }));
-                loadHistory();
+                setRunning(k.id);
+                try {
+                  const r = await api.runBenchmark(k.id);
+                  setResults((x) => ({ ...x, [k.id]: r }));
+                  loadHistory();
+                } finally { setRunning(null); }
               }}
             />
             <span>{fmt(results[k.id]) ?? <span className="muted">{t("benchNotRunYet")}</span>}</span>
