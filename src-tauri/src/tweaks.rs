@@ -1468,6 +1468,18 @@ pub fn list_with_status() -> Value {
     json!(out)
 }
 
+/// Journal-less reset of a retired tweak's policy value: removing a value
+/// under `SOFTWARE\Policies` returns it to "not configured", which is the
+/// Windows default by definition. Only for retired tweaks (they can no longer
+/// be re-applied to get a journal Undo); everything else keeps refusing.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn retired_policy_reset_allowed(tweak_id: &str, path: &str) -> bool {
+    crate::optregistry::is_retired(tweak_id)
+        && path
+            .to_ascii_lowercase()
+            .starts_with("software\\policies\\")
+}
+
 /// False when a journal-less revert would have to run a hardcoded guess:
 /// Cmd actions with a pre-apply capture only have an exact undo in the
 /// journal (the catalog `revert` is a default, not the user's prior state).
@@ -1995,13 +2007,16 @@ pub fn revert(tweak_id: &str) -> Result<Value, String> {
         let res: Result<(), String> = match a {
             #[cfg(windows)]
             Action::RegSet {
-                root, path, name, ..
+                root,
+                path,
+                name,
+                value,
             } => {
                 // Blind deletion would destroy values set by the user, Group
                 // Policy or other tools. Restore from the newest .reg backup
                 // when one exists; refuse when there is no backup and the
                 // value is present. Only a genuinely absent value is a no-op.
-                match safety::latest_backup_for(root, path) {
+                let restored = match safety::latest_backup_for(root, path) {
                     Some(backup) => crate::ps::exec("reg.exe", &["import", &backup]).map(|_| ()),
                     None => match reg_read(root, path, name) {
                         Ok(Some(_)) => Err(format!(
@@ -2011,6 +2026,20 @@ pub fn revert(tweak_id: &str) -> Result<Value, String> {
                         )),
                         other => other.map(|_| ()),
                     },
+                };
+                // A retired tweak cannot be re-applied for a journal Undo, so
+                // a policy value it wrote would otherwise stay forever. For
+                // policies "not configured" (value absent) is the Windows
+                // default, not a guess; the key is exported first.
+                let still_tweak_value = matches!(
+                    reg_read(root, path, name),
+                    Ok(Some(ref cur)) if vals_eq(cur, value)
+                );
+                if retired_policy_reset_allowed(tweak_id, path) && still_tweak_value {
+                    safety::backup_registry_key(root, path)
+                        .and_then(|_| reg_delete(root, path, name))
+                } else {
+                    restored
                 }
             }
             #[cfg(not(windows))]
@@ -2105,6 +2134,26 @@ pub fn history() -> Value {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn journal_less_policy_reset_only_for_retired_tweaks() {
+        let cortana = "SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Search";
+        assert!(super::retired_policy_reset_allowed("cortana_off", cortana));
+        // Not retired: still refuses to delete without a record.
+        assert!(!super::retired_policy_reset_allowed(
+            "edge_prelaunch_off",
+            "SOFTWARE\\Policies\\Microsoft\\Edge"
+        ));
+        // Retired, but not a policy value: no Windows default by definition.
+        assert!(!super::retired_policy_reset_allowed(
+            "priority_separation",
+            "SYSTEM\\CurrentControlSet\\Control\\PriorityControl"
+        ));
+        assert!(!super::retired_policy_reset_allowed(
+            "cortana_off",
+            "SOFTWARE\\PoliciesX\\Foo"
+        ));
+    }
+
     use super::*;
 
     #[test]
