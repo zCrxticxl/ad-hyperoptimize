@@ -1614,6 +1614,15 @@ const de = {
   optHideAdvanced: "Erweitert ausblenden",
   optSearch: "Optimierungen durchsuchen…",
   optConfigured: "Bereits richtig eingestellt",
+  hcDiag_retiredActive: "Ohne Nutzen, noch aktiv",
+  hcDiag_retired: "Ausgemustert",
+  retTitle: "Einstellungen ohne Nutzen",
+  retHint: "Diese Einstellungen bringen nachweislich nichts (Mythen, Windows-Standardwerte, ungenutzte Dienste) oder können schaden. Sie werden nicht mehr angeboten. Zurücksetzen stellt die vorher gespeicherten Originalwerte wieder her; danach verschwinden sie aus der App.",
+  retResetAll: "Alle zurücksetzen",
+  retResetting: "Wird zurückgesetzt und geprüft…",
+  retConfirm: "{n} Einstellungen ohne Nutzen auf ihre Originalwerte zurücksetzen?",
+  retShowItems: "Einzelne Einstellungen anzeigen",
+  retAdminHint: "Einige brauchen Administratorrechte und werden sonst übersprungen.",
 };
 
 // ── English ───────────────────────────────────────────────────────────────────
@@ -3201,6 +3210,15 @@ const en: typeof de = {
   optHideAdvanced: "Hide advanced",
   optSearch: "Search optimizations…",
   optConfigured: "Already correctly configured",
+  hcDiag_retiredActive: "No benefit, still active",
+  hcDiag_retired: "Retired",
+  retTitle: "Settings with no benefit",
+  retHint: "These settings demonstrably do nothing (myths, Windows defaults, idle services) or can harm. They are no longer offered. Reset restores the original values saved before they were applied; afterwards they disappear from the app.",
+  retResetAll: "Reset all",
+  retResetting: "Resetting and verifying…",
+  retConfirm: "Reset {n} settings with no benefit to their original values?",
+  retShowItems: "Show individual settings",
+  retAdminHint: "Some need administrator rights and are skipped otherwise.",
 };
 
 export type UiText = typeof en;

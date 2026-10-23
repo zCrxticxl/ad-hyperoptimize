@@ -2,6 +2,7 @@ import React from "react";
 import { fmtAge } from "../api";
 import { Badge, Card, ErrorBanner, Spinner } from "../components/ui";
 import { OptCard } from "../components/OptCard";
+import { RetiredCard } from "../components/RetiredCard";
 import { useHealthScan } from "../hooks/useHealthScan";
 import { useLang, TKey } from "../i18n";
 import { NEEDS_REVIEW, planName } from "../lib/health";
@@ -27,7 +28,7 @@ export default function SystemCheck({ mode, go }: { mode: Mode; go: (id: string,
   const tiles: [TKey, number, string][] = [
     ["hcCntConfigured", scan.summary.configured, "green"],
     ["hcCntRecommended", scan.summary.recommended, "violet"],
-    ["hcCntReview", scan.summary.review, scan.summary.review ? "red" : "green"],
+    ["hcCntReview", scan.summary.review + scan.summary.retiredActive, scan.summary.review + scan.summary.retiredActive ? "red" : "green"],
     ["hcCntNotApplicable", scan.summary.notApplicable, "blue"],
     ["hcCntFailed", scan.summary.failed, scan.summary.failed ? "red" : "green"],
     ["hcCntAttention", scan.summary.attention, scan.summary.attention ? "red" : "green"],
@@ -106,6 +107,8 @@ export default function SystemCheck({ mode, go }: { mode: Mode; go: (id: string,
           : recs.map((i) => <OptCard key={i.id} item={i} admin={scan.admin} />)}
       </Card>
 
+      <RetiredCard scan={scan} admin={scan.admin} />
+
       {review.length > 0 && (
         <Card title={t("hcReviewTitle")} style={{ marginTop: 14 }}>
           <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>{t("hcReviewHint")}</div>
@@ -119,7 +122,7 @@ export default function SystemCheck({ mode, go }: { mode: Mode; go: (id: string,
         <table className="tbl">
           <thead><tr><th>{t("hcColName")}</th><th>{t("hcColEvidence")}</th><th>{t("hcColDiagnosis")}</th><th>{t("hcColState")}</th></tr></thead>
           <tbody>
-            {scan.items.map((i) => (
+            {scan.items.filter((i) => i.diagnosis !== "retired").map((i) => (
               <tr key={i.id} title={i.reason}>
                 <td>{i.name}</td>
                 <td>{t(`hcEv_${i.evidence}` as TKey)}</td>

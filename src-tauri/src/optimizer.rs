@@ -143,6 +143,10 @@ pub enum Diagnosis {
     Redundant,
     /// State cannot be read.
     Unknown,
+    /// Retired tweak (no measurable benefit) that is still active: reset it.
+    RetiredActive,
+    /// Retired tweak that is not active: not shown.
+    Retired,
 }
 
 impl Diagnosis {
@@ -160,6 +164,8 @@ impl Diagnosis {
             Self::Failed => "failed",
             Self::Redundant => "redundant",
             Self::Unknown => "unknown",
+            Self::RetiredActive => "retiredActive",
+            Self::Retired => "retired",
         }
     }
 }
@@ -211,6 +217,22 @@ pub fn diagnose(i: &Input) -> (Diagnosis, String) {
             Failed,
             "A previous attempt did not finish. Check the undo history.".into(),
         );
+    }
+    if optregistry::is_retired(m.id) {
+        let at_default =
+            applied && !i.journal.open && optregistry::MATCHES_WINDOWS_DEFAULT.contains(&m.id);
+        let active = (applied && !at_default) || i.status == "partial" || i.journal.open;
+        return if active {
+            (
+                RetiredActive,
+                format!(
+                    "Retired: no measurable benefit. {} Reset restores the original values.",
+                    m.when
+                ),
+            )
+        } else {
+            (Retired, "Retired: no measurable benefit.".into())
+        };
     }
     if i.status == "unsupported" {
         return (
@@ -344,6 +366,31 @@ pub fn classify_after_apply(reboot: Reboot, readback: (&str, &str)) -> (Outcome,
         (status, _) => (
             Outcome::Failed,
             format!("The change could not be confirmed: Windows reports \"{status}\". Use Undo to restore the previous values."),
+        ),
+    }
+}
+
+/// Classifies a finished reset of a retired tweak by reading the state back.
+pub fn classify_after_reset(readback: (&str, &str)) -> (Outcome, String) {
+    match readback {
+        ("not_applied", "live") => (
+            Outcome::Verified,
+            "Reset; the original value was confirmed in Windows.".into(),
+        ),
+        // The undo succeeded, so the restored original equals this setting
+        // (it was the Windows default all along).
+        ("applied", _) => (
+            Outcome::Already,
+            "The original value is identical to this setting (Windows default); nothing to change."
+                .into(),
+        ),
+        ("partial", _) => (
+            Outcome::Failed,
+            "Only partly reset. Check the undo history.".into(),
+        ),
+        _ => (
+            Outcome::Unverified,
+            "Reset ran; Windows offers no way to read this setting back.".into(),
         ),
     }
 }
@@ -629,6 +676,7 @@ pub fn scan() -> Value {
             "recommended": count(Diagnosis::Recommended),
             "available": count(Diagnosis::Available),
             "review": count(Diagnosis::Review) + count(Diagnosis::Drifted),
+            "retiredActive": count(Diagnosis::RetiredActive),
             "failed": count(Diagnosis::Failed),
             "notApplicable": count(Diagnosis::NotApplicable) + count(Diagnosis::Unsupported),
             "attention": checks.iter().filter(|c| c["severity"] == "warning").count(),
@@ -644,6 +692,70 @@ pub fn scan() -> Value {
     }
     #[cfg(not(windows))]
     json!({ "error": "The health check is only available on Windows." })
+}
+
+/// Resets every retired tweak that is still active (journaled undo with the
+/// captured originals, else the engine's verified force-revert), then reads
+/// each one back.
+pub fn reset_retired() -> Value {
+    #[cfg(windows)]
+    {
+        let system = match detect() {
+            Ok(s) => s,
+            Err(e) => return json!({ "error": format!("System detection failed: {e}") }),
+        };
+        let admin = crate::ps::is_admin();
+        let journal = crate::safety::load_journal().unwrap_or_default();
+        let items = evaluate(&system, &journal);
+        let mut results = Vec::new();
+        for it in items
+            .iter()
+            .filter(|i| i.diagnosis == Diagnosis::RetiredActive)
+        {
+            let id = it.meta.id;
+            let name = it.tweak["name"].clone();
+            if it.tweak["requiresAdmin"].as_bool().unwrap_or(false) && !admin {
+                results.push(
+                    json!({ "id": id, "name": name, "outcome": Outcome::Skipped.as_str(),
+                    "detail": "Needs administrator rights." }),
+                );
+                continue;
+            }
+            let (outcome, detail) = match crate::tweaks::revert(id) {
+                Err(e) => (Outcome::Failed, e),
+                Ok(_) => match crate::tweaks::status_of(id) {
+                    Some(readback) => classify_after_reset(readback),
+                    None => (
+                        Outcome::Unverified,
+                        "The setting could not be read back.".into(),
+                    ),
+                },
+            };
+            results.push(
+                json!({ "id": id, "name": name, "outcome": outcome.as_str(), "detail": detail }),
+            );
+        }
+        let count = |o: Outcome| {
+            results
+                .iter()
+                .filter(|r| r["outcome"] == o.as_str())
+                .count()
+        };
+        json!({
+            "restorePoint": null,
+            "results": results,
+            "summary": {
+                "verified": count(Outcome::Verified),
+                "needsRestart": 0,
+                "already": 0,
+                "skipped": count(Outcome::Skipped),
+                "failed": count(Outcome::Failed),
+                "unverified": count(Outcome::Unverified),
+            },
+        })
+    }
+    #[cfg(not(windows))]
+    json!({ "error": "Only available on Windows." })
 }
 
 /// Applies the approved ids (one-click path): each id is re-checked against a
@@ -780,7 +892,10 @@ mod tests {
             let d = diag(m.id, "not_applied", JournalState::default(), &f);
             if !optregistry::offerable(m.evidence) {
                 assert!(
-                    matches!(d, Diagnosis::NotRecommended | Diagnosis::NotApplicable),
+                    matches!(
+                        d,
+                        Diagnosis::NotRecommended | Diagnosis::NotApplicable | Diagnosis::Retired
+                    ),
                     "{} -> {d:?}",
                     m.id
                 );
@@ -807,10 +922,10 @@ mod tests {
         );
         assert_eq!(
             diag("core_parking_off", "applied", none, &f),
-            Diagnosis::Review
+            Diagnosis::RetiredActive
         );
         assert_eq!(
-            diag("nagle_off", "applied", none, &f),
+            diag("transparency_off", "applied", none, &f),
             Diagnosis::AppliedNoBenefit
         );
         assert_eq!(
@@ -818,7 +933,7 @@ mod tests {
             Diagnosis::Available
         );
         assert_eq!(
-            diag("svc_fax_off", "unsupported", none, &f),
+            diag("edge_prelaunch_off", "unsupported", none, &f),
             Diagnosis::Unsupported
         );
         assert_eq!(
@@ -836,6 +951,71 @@ mod tests {
         assert_eq!(
             diag("power_high_performance", "applied", none, &laptop),
             Diagnosis::Review
+        );
+    }
+
+    #[test]
+    fn retired_tweaks_are_hidden_or_offered_for_reset() {
+        let f = desktop();
+        let none = JournalState::default();
+        let open = JournalState {
+            open: true,
+            incomplete: false,
+        };
+        assert_eq!(
+            diag("nagle_off", "applied", none, &f),
+            Diagnosis::RetiredActive
+        );
+        assert_eq!(
+            diag("sysmain_off", "partial", none, &f),
+            Diagnosis::RetiredActive
+        );
+        assert_eq!(
+            diag("qos_bandwidth_free", "not_applied", open, &f),
+            Diagnosis::RetiredActive
+        );
+        assert_eq!(
+            diag("qos_bandwidth_free", "not_applied", none, &f),
+            Diagnosis::Retired
+        );
+        assert_eq!(
+            diag("svc_fax_off", "unsupported", none, &f),
+            Diagnosis::Retired
+        );
+        // Target equals the Windows default and no entry is open: nothing to reset.
+        assert_eq!(
+            diag("remote_registry_off", "applied", none, &f),
+            Diagnosis::Retired
+        );
+        assert_eq!(
+            diag("remote_registry_off", "applied", open, &f),
+            Diagnosis::RetiredActive
+        );
+        assert_eq!(
+            diag("xbox_services_off", "partial", none, &f),
+            Diagnosis::RetiredActive
+        );
+        // Not retired: privacy keeps its normal verdicts.
+        assert_eq!(
+            diag("telemetry_minimal", "applied", none, &f),
+            Diagnosis::AppliedNoBenefit
+        );
+    }
+
+    #[test]
+    fn reset_is_only_verified_when_windows_confirms() {
+        assert_eq!(
+            classify_after_reset(("not_applied", "live")).0,
+            Outcome::Verified
+        );
+        assert_eq!(
+            classify_after_reset(("applied", "live")).0,
+            Outcome::Already
+        );
+        assert_eq!(classify_after_reset(("partial", "live")).0, Outcome::Failed);
+        assert_eq!(
+            classify_after_reset(("unknown", "none")).0,
+            Outcome::Unverified
         );
     }
 

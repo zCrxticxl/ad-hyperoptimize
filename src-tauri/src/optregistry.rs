@@ -109,6 +109,53 @@ pub struct OptMeta {
     pub redundant_with: &'static [&'static str],
 }
 
+/// Tweaks retired from the app: they change nothing measurable (myths,
+/// Windows defaults, idle services, outdated settings) or can harm. They can
+/// no longer be applied; the UI lists one only while it is still active so it
+/// can be reset, after which it disappears. Privacy and look-and-feel tweaks
+/// are not here: they have a real, if non-performance, effect.
+pub static RETIRED: &[&str] = &[
+    "mmcss_gaming",
+    "mmcss_games_task",
+    "priority_separation",
+    "power_throttling_off",
+    "fse_optimizations_off",
+    "sysmain_off",
+    "wsearch_manual",
+    "ntfs_8dot3_off",
+    "core_parking_off",
+    "xbox_services_off",
+    "nagle_off",
+    "tcp_timed_wait_low",
+    "irp_stack_high",
+    "qos_bandwidth_free",
+    "disable_paging_executive",
+    "ntfs_last_access_off",
+    "background_apps_off",
+    "cortana_off",
+    "remote_registry_off",
+    "svc_geolocation_off",
+    "svc_fax_off",
+    "svc_wmp_network_off",
+    "svc_maps_off",
+    "svc_link_tracking_off",
+    "svc_wisvc_off",
+    "svc_diag_tracking_off",
+];
+
+pub fn is_retired(id: &str) -> bool {
+    RETIRED.contains(&id)
+}
+
+/// Retired tweaks whose target is the Windows default anyway: "applied"
+/// without an open journal entry just means Windows is at its default, so
+/// there is nothing to reset.
+pub static MATCHES_WINDOWS_DEFAULT: &[&str] = &[
+    "remote_registry_off",
+    "svc_geolocation_off",
+    "xbox_services_off",
+];
+
 use Evidence::*;
 use Group::*;
 use Purpose::*;
@@ -467,6 +514,24 @@ mod tests {
                     m.id
                 );
             }
+        }
+    }
+
+    #[test]
+    fn retired_tweaks_are_never_offered_and_exist() {
+        for id in RETIRED {
+            let m = meta(id).unwrap_or_else(|| panic!("retired id {id} has no registry entry"));
+            assert!(!offerable(m.evidence), "{id} is retired but offerable");
+            assert!(!m.one_click && !m.recommend, "{id}");
+        }
+        // Privacy and comfort tweaks stay available.
+        for id in [
+            "telemetry_minimal",
+            "transparency_off",
+            "startup_delay_off",
+            "visual_fx_performance",
+        ] {
+            assert!(!is_retired(id), "{id}");
         }
     }
 

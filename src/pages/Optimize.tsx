@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { api } from "../api";
 import { ActionBtn, Card, ErrorBanner, Spinner } from "../components/ui";
 import { OptCard } from "../components/OptCard";
+import { RetiredCard } from "../components/RetiredCard";
 import { useHealthScan } from "../hooks/useHealthScan";
 import { useFeatureFocus } from "../hooks/useFeatureFocus";
 import { useLang, TKey } from "../i18n";
@@ -25,7 +26,8 @@ export default function Optimize({ mode, admin, focusId }: { mode: Mode; admin: 
   const isReview = (i: HealthItem) => NEEDS_REVIEW.includes(i.diagnosis);
   const inGroup = (group: string) => (i: HealthItem) =>
     i.group === group && ["available", "configured"].includes(i.diagnosis);
-  const shown = new Set<string>();
+  // Retired tweaks are never listed: active ones live in the reset card.
+  const shown = new Set<string>(items.filter((i) => i.diagnosis === "retired" || i.diagnosis === "retiredActive").map((i) => i.id));
   const take = (pred: (i: HealthItem) => boolean) => {
     const out = items.filter((i) => !shown.has(i.id) && pred(i));
     out.forEach((i) => shown.add(i.id));
@@ -77,6 +79,8 @@ export default function Optimize({ mode, admin, focusId }: { mode: Mode; admin: 
 
       {error && <ErrorBanner msg={error} onRetry={rescan} />}
       {!scan && !error && <div className="mt"><Spinner /> <span className="muted">{t("hcScanning")}</span></div>}
+
+      {scan && <RetiredCard scan={scan} admin={admin} />}
 
       {scan && sections.every(([, list]) => list.length === 0) && (
         <Card style={{ marginTop: 14 }}><div className="empty-state"><span>✓</span><b>{t("hcNoRecs")}</b></div></Card>

@@ -23,7 +23,9 @@ export type Diagnosis =
   | "drifted"
   | "failed"
   | "redundant"
-  | "unknown";
+  | "unknown"
+  | "retiredActive"
+  | "retired";
 
 export type Group = "gaming" | "system" | "advanced" | "privacyClutter";
 export type Reboot = "notNeeded" | "signOut" | "explorerRestart" | "restart";
@@ -81,6 +83,7 @@ export type HealthScan = {
     failed: number;
     notApplicable: number;
     attention: number;
+    retiredActive: number;
   };
   checks: HealthCheckFinding[];
   items: HealthItem[];

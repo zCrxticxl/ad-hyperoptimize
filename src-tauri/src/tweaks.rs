@@ -1460,6 +1460,7 @@ pub fn list_with_status() -> Value {
                 "performancePotential": may_help_performance(t.id),
                 "requiresAdmin": t.requires_admin, "reversible": t.reversible,
                 "status": status, "statusSource": status_source,
+                "retired": crate::optregistry::is_retired(t.id),
                 "undoable": undoable, "canUndo": can_undo,
             })
         })
@@ -1667,6 +1668,12 @@ pub fn apply(tweak_id: &str) -> Result<Value, String> {
         .into_iter()
         .find(|t| t.id == tweak_id)
         .ok_or_else(|| format!("unknown tweak '{tweak_id}'"))?;
+    if crate::optregistry::is_retired(t.id) {
+        return Err(format!(
+            "'{}' was retired because it has no measurable benefit. Only undo is still available.",
+            t.name
+        ));
+    }
     if t.requires_admin && !crate::ps::is_admin() {
         return Err("This tweak needs administrator rights. Restart the app as admin.".into());
     }

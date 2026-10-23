@@ -16,35 +16,29 @@ const PROFILES: &[Profile] = &[
     Profile {
         id: "esports",
         name: "Esports / Competitive",
-        desc: "Maximum responsiveness: High Performance power, Game DVR off, MMCSS scheduler, foreground boost, 1:1 mouse, no power throttling. Reboot recommended after.",
+        desc: "Game DVR background capture off, Game Mode on, 1:1 mouse movement, and the High performance plan on desktops. Retired scheduler myths are no longer part of it.",
         tweaks: &[
             "power_high_performance",
             "game_dvr_off",
             "game_mode_on",
-            "mmcss_gaming",
-            "mmcss_games_task",
-            "priority_separation",
             "mouse_accel_off",
-            "power_throttling_off",
         ],
     },
     Profile {
         id: "streaming",
         name: "Streaming / OBS",
-        desc: "Game AND encoder both need CPU: no aggressive foreground boost, DVR off (conflicts with OBS capture), MMCSS, no throttling of background encoder.",
+        desc: "Game DVR off (OBS records instead), Game Mode on, High performance plan on desktops, fewer Windows tips.",
         tweaks: &[
             "power_high_performance",
             "game_dvr_off",
             "game_mode_on",
-            "mmcss_gaming",
-            "power_throttling_off",
             "content_suggestions_off",
         ],
     },
     Profile {
         id: "workstation",
         name: "Workstation / Productivity",
-        desc: "Fast boot, snappy UI, less telemetry/ads and background noise, without gaming scheduler changes.",
+        desc: "Startup apps and menus open sooner, less telemetry and ads, High performance plan on desktops.",
         tweaks: &[
             "power_high_performance",
             "startup_delay_off",
@@ -52,35 +46,18 @@ const PROFILES: &[Profile] = &[
             "telemetry_minimal",
             "advertising_id_off",
             "content_suggestions_off",
-            "power_throttling_off",
         ],
     },
 ];
-// Deliberately NOT in any default profile (audit): fse_optimizations_off
-// (fullscreen optimizations are required for modern flip-model presentation
-// and Auto HDR; disabling them regresses many current titles) and
-// background_apps_off (breaks notifications/sync of Store apps such as
-// Mail, Teams, Phone Link). Both remain available individually.
+// Retired tweaks (optregistry::RETIRED) are never part of a profile; neither
+// are fse_optimizations_off nor background_apps_off.
 
-/// Tweaks whose benefit depends on the hardware: they are applied by a
-/// profile only when hwprofile has no risk verdict for this machine.
-const HW_GATED: &[&str] = &[
-    "priority_separation",
-    "mmcss_games_task",
-    "power_throttling_off",
-];
-
-/// Why `id` should be skipped on this hardware, from hwprofile's
-/// `tweakRisks` map (None = no verdict, or not a gated tweak).
-fn hw_skip_reason(id: &str, tweak_risks: &Value) -> Option<String> {
-    if !HW_GATED.contains(&id) {
-        return None;
-    }
-    let r = tweak_risks.get(id)?;
-    Some(format!(
-        "skipped on this hardware: {}",
-        r["title"].as_str().unwrap_or("hardware risk verdict")
-    ))
+/// Why `id` does not apply to this system per the optimization registry's
+/// rules (laptop, missing High performance plan, ...), or None.
+fn eligibility_skip_reason(id: &str, facts: &crate::optregistry::Facts) -> Option<String> {
+    let meta = crate::optregistry::meta(id)?;
+    crate::optregistry::ineligible_reason(meta, facts)
+        .map(|r| format!("skipped on this system: {r}"))
 }
 
 fn tweak_status_map() -> std::collections::HashMap<String, (String, String, bool)> {
@@ -153,13 +130,13 @@ pub fn apply(profile_id: &str, with_bench: bool) -> Result<Value, String> {
             Err(e) => (format!("Restore Point FEHLGESCHLAGEN: {e}"), true),
         };
 
-    // Hardware verdicts are only needed (and only computed) when the profile
-    // contains a hardware-gated tweak.
-    let tweak_risks = if p.tweaks.iter().any(|t| HW_GATED.contains(t)) {
-        crate::hwprofile::hw_profile()["tweakRisks"].clone()
-    } else {
-        Value::Null
-    };
+    // Same applicability rules as the health check.
+    #[cfg(windows)]
+    let facts = crate::optimizer::detect()
+        .map(|s| s.facts())
+        .unwrap_or_default();
+    #[cfg(not(windows))]
+    let facts = crate::optregistry::Facts::default();
 
     let before = if with_bench {
         Some(bench_suite())
@@ -173,7 +150,7 @@ pub fn apply(profile_id: &str, with_bench: bool) -> Result<Value, String> {
     let mut failed = Vec::new();
     let mut hw_skipped = Vec::new();
     for id in p.tweaks {
-        if let Some(reason) = hw_skip_reason(id, &tweak_risks) {
+        if let Some(reason) = eligibility_skip_reason(id, &facts) {
             hw_skipped.push(json!({ "id": id, "reason": reason }));
             continue;
         }
@@ -280,8 +257,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn removed_tweaks_are_not_in_default_profiles() {
+    fn profiles_contain_no_retired_or_removed_tweaks() {
         for p in PROFILES {
+            for id in p.tweaks {
+                assert!(
+                    !crate::optregistry::is_retired(id),
+                    "{} contains retired {id}",
+                    p.id
+                );
+                assert!(
+                    crate::optregistry::meta(id).is_some(),
+                    "{} contains unknown {id}",
+                    p.id
+                );
+            }
             for bad in ["fse_optimizations_off", "background_apps_off"] {
                 assert!(!p.tweaks.contains(&bad), "{} contains {bad}", p.id);
             }
@@ -289,15 +278,19 @@ mod tests {
     }
 
     #[test]
-    fn hw_gate_only_skips_gated_tweaks_with_a_verdict() {
-        let risks = json!({
-            "priority_separation": { "severity": "warning", "title": "Low core count" },
-            "hags_on": { "severity": "warning", "title": "Old GPU" },
-        });
-        assert!(hw_skip_reason("priority_separation", &risks).is_some());
-        assert!(hw_skip_reason("mmcss_games_task", &risks).is_none());
-        // Not gated: profiles never consult the verdict for it.
-        assert!(hw_skip_reason("hags_on", &risks).is_none());
-        assert!(hw_skip_reason("power_throttling_off", &Value::Null).is_none());
+    fn profile_items_follow_registry_eligibility() {
+        let laptop = crate::optregistry::Facts {
+            build: 26200,
+            has_battery: true,
+            high_perf_plan_available: true,
+            ..Default::default()
+        };
+        assert!(eligibility_skip_reason("power_high_performance", &laptop).is_some());
+        assert!(eligibility_skip_reason("game_mode_on", &laptop).is_none());
+        let desktop = crate::optregistry::Facts {
+            has_battery: false,
+            ..laptop
+        };
+        assert!(eligibility_skip_reason("power_high_performance", &desktop).is_none());
     }
 }

@@ -43,7 +43,7 @@ export function OptCard({ item, admin, focused }: { item: HealthItem; admin: boo
     !applied &&
     !harmfulish &&
     item.status !== "unsupported" &&
-    !["notApplicable", "drifted", "failed", "redundant", "configured"].includes(item.diagnosis);
+    !["notApplicable", "drifted", "failed", "redundant", "configured", "retired", "retiredActive"].includes(item.diagnosis);
   const adminBlocked = item.requiresAdmin && !admin;
 
   const run = async (kind: "apply" | "undo") => {

@@ -293,7 +293,7 @@ function AppInner() {
     };
     const call = async (fn: () => Promise<any>, h: (v: any) => void) => { try { h(await fn()); } catch {} };
     await Promise.all([
-      call(api.listTweaks, (v) => add("optimize", v, ["name"], ["description", "rationale"], ["id"])),
+      call(api.listTweaks, (v) => add("optimize", (Array.isArray(v) ? v : []).filter((x: any) => !x?.retired), ["name"], ["description", "rationale"], ["id"])),
       call(api.gpuScan, (v) => add("gputweaks", v?.tweaks, ["name"], ["description"], ["id"])),
       call(api.privacyScan, (v) => add("privacy", v?.tweaks, ["name"], ["description"], ["id"])),
       call(api.debloaterTweaksList, (v) => add("debloater", v?.tweaks, ["name"], ["desc", "description"], ["id"])),

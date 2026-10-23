@@ -215,6 +215,13 @@ async fn cmd_health_scan() -> Value {
 }
 
 #[tauri::command(async)]
+async fn cmd_reset_retired() -> Value {
+    tauri::async_runtime::spawn_blocking(optimizer::reset_retired)
+        .await
+        .unwrap_or_default()
+}
+
+#[tauri::command(async)]
 async fn cmd_optimize_apply(ids: Vec<String>, restore_point: bool) -> Value {
     tauri::async_runtime::spawn_blocking(move || optimizer::apply(ids, restore_point))
         .await
@@ -1763,6 +1770,7 @@ pub fn run() {
             cmd_autoopt_scan,
             cmd_health_scan,
             cmd_optimize_apply,
+            cmd_reset_retired,
             cmd_autoopt_score,
             cmd_autoopt_apply,
             // game profiles / auto-switcher
