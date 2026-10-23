@@ -1,6 +1,6 @@
 # Design: unelevated UI with an elevated broker
 
-Status: **proposal, not implemented.** HANDOFF.md requires this document before any code changes. Implementation starts once the owner decides the open questions at the end.
+Status: **decided, not implemented.** The owner answered the open questions (section 8). Implementation starts after the Windows validation of the current branch.
 
 ## 1. Current state
 
@@ -160,3 +160,14 @@ Each phase on its own branch, with the full gate (fmt, check, test, clippy) on W
 3. **Journal:** read via the broker only (recommended), or readable by users?
 4. **Dropping unused commands (class X):** may they go, e.g. the old `autoopt` handlers?
 5. **Order:** first the security switch (phases 1–5), or the Windows validation of the current branch first? Recommended: Windows validation first, because phases 3–5 touch every privileged path and need a tested baseline.
+
+## 8. Decisions (owner, 2026-10-23)
+
+| Question | Decision |
+|---|---|
+| 1. Service or on-demand helper | No preference; the recommendation applies: **option B**, on-demand helper `--broker`. |
+| 2. UAC | **Once per session.** |
+| 3. Journal | **Readable without admin rights.** Users get read access to the journal and history in the state folder; writing stays admin-only. The UI shows the undo history without starting the broker. |
+| 4. Unused commands | **Remove them when unused** (class X; first candidates: the `autoopt` handlers without a page). Each removal is checked against `src/api.ts` and the pages. |
+| 5. Order | **Windows validation first**, then phases 1–5. |
+
