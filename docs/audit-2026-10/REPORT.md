@@ -497,3 +497,32 @@ with more rights than the session that recorded it.
 SYSTEM task pointing at `%ProgramData%\ADHyperOptimize	imerres.ps1`. Once the
 weak folder is moved aside, that task finds no script. Re-apply the timer
 tweak to register the new, file-less task.
+
+---
+
+## L. System Health Check & verified optimization engine (follow-up)
+
+The details are in [optimization-engine.md](optimization-engine.md). That document has the per-tweak table for all 55 catalog tweaks (previous status, evidence, changes, new classification, verification on the developer PC) and the test coverage.
+
+### What was added
+- **Evidence registry** for every tweak, in `optregistry.rs`.
+- **Real system detection** and a diagnosis for each tweak, in `optimizer.rs`.
+- **System Health Check page** under Dashboard.
+- **Optimize My PC:** preview, approval, apply, and a read-back verification of every change.
+- **New Optimize view.** By default it shows only what fits this PC; Advanced keeps everything else, classified.
+
+### Detection fixes found on the real system
+- A missing Game Mode value was read as "off".
+- Hibernation state was invisible to unelevated `Test-Path`.
+- Power plan, hibernation, TCP auto-tuning and RSS now report their live state instead of only what the history recorded.
+- The visual-effects tweak only changed a dialog option; it now also writes the setting that applies the effects.
+
+### Tests
+- 126 automated tests pass.
+- The opt-in read-only system scan passes, including the health check.
+- The CI gate is green.
+
+### Not done
+- No optimization was applied to a live system.
+- The apply and undo buttons need a test run on a Windows VM.
+- Performance impact was not measured.
