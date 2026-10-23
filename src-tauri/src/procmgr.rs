@@ -222,9 +222,34 @@ pub fn perm_remove(exe: String) -> Result<Value, String> {
         let ifeo = RegKey::predef(HKEY_LOCAL_MACHINE)
             .open_subkey_with_flags(IFEO, winreg::enums::KEY_ALL_ACCESS)
             .map_err(|e| e.to_string())?;
-        ifeo.delete_subkey_all(format!("{exe}\\PerfOptions"))
-            .map_err(|e| e.to_string())?;
-        let _ = ifeo.delete_subkey(&exe); // remove now-empty parent; ignore if it has other values
+        // Only the value this app sets is removed. IFEO\<exe> can hold
+        // MitigationOptions/Debugger/GlobalFlag and PerfOptions can hold
+        // IoPriority/PagePriority from other tools; RegDeleteKey would drop
+        // a key's values silently, so keys are deleted only when verifiably
+        // empty (no values, no subkeys).
+        let perf_path = format!("{exe}\\PerfOptions");
+        match ifeo.open_subkey_with_flags(&perf_path, winreg::enums::KEY_ALL_ACCESS) {
+            Ok(perf) => match perf.delete_value("CpuPriorityClass") {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e.to_string()),
+            },
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(json!({ "exe": exe, "removed": false }));
+            }
+            Err(e) => return Err(e.to_string()),
+        }
+        let is_empty = |path: &str| {
+            ifeo.open_subkey_with_flags(path, KEY_READ)
+                .and_then(|k| k.query_info())
+                .is_ok_and(|i| i.values == 0 && i.sub_keys == 0)
+        };
+        if is_empty(&perf_path) {
+            let _ = ifeo.delete_subkey(&perf_path);
+            if is_empty(&exe) {
+                let _ = ifeo.delete_subkey(&exe);
+            }
+        }
         Ok(json!({ "exe": exe, "removed": true }))
     }
     #[cfg(not(windows))]

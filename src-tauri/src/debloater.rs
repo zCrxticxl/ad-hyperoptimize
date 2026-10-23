@@ -15,6 +15,8 @@ const OPTIONAL_APPS: &[&str] = &[
     "Microsoft.People",
     "Microsoft.SkypeApp",
     "Microsoft.Teams",
+    // New Teams (Teams 2.x / work or school) ships under a different name.
+    "MSTeams",
     "Microsoft.ZuneMusic",
     "Microsoft.ZuneVideo",
     "Microsoft.GetHelp",
@@ -31,6 +33,22 @@ const OPTIONAL_APPS: &[&str] = &[
     "Disney.37853D22215E2",
     "AmazonVideo.PrimeVideo",
 ];
+
+/// Catalog entries that are removable on request but must never be
+/// recommended or preselected: the Xbox components are needed by Game Pass /
+/// Xbox sign-in and Game Bar capture, ZuneMusic is the Windows 11 Media
+/// Player, and GetHelp is the inbox troubleshooter host.
+const NOT_RECOMMENDED: &[&str] = &[
+    "Microsoft.XboxIdentityProvider",
+    "Microsoft.XboxGamingOverlay",
+    "Microsoft.XboxGameOverlay",
+    "Microsoft.ZuneMusic",
+    "Microsoft.GetHelp",
+];
+
+fn is_recommended(name: &str) -> bool {
+    OPTIONAL_APPS.contains(&name) && !NOT_RECOMMENDED.contains(&name)
+}
 
 pub fn list_uwp() -> Value {
     let allowed = OPTIONAL_APPS
@@ -53,7 +71,18 @@ $rows = foreach ($name in $allowed) {{
 @{{ apps=@($rows) }} | ConvertTo-Json -Compress -Depth 3
 "#
     );
-    ps::run_json(&script).unwrap_or_else(|e| json!({ "apps": [], "error": e }))
+    let mut v = ps::run_json(&script).unwrap_or_else(|e| json!({ "apps": [], "error": e }));
+    // ConvertTo-Json collapses a one-element array to an object.
+    if let Some(o @ Value::Object(_)) = v.get("apps").cloned() {
+        v["apps"] = json!([o]);
+    }
+    if let Some(apps) = v.get_mut("apps").and_then(Value::as_array_mut) {
+        for app in apps {
+            let rec = app["Name"].as_str().is_some_and(is_recommended);
+            app["recommended"] = json!(rec);
+        }
+    }
+    v
 }
 
 pub fn remove_uwp(package_full_name: String) -> Result<String, String> {
@@ -68,12 +97,15 @@ try {{
     Remove-AppxPackage -Package $pkg.PackageFullName -AllUsers -ErrorAction Stop 2>&1
     "Removed"
 }} catch {{
+    $allUsersError = $_.Exception.Message
     try {{
         Remove-AppxPackage -Package $pkg.PackageFullName -ErrorAction Stop 2>&1
-        "Removed (current user)"
     }} catch {{
         throw $_
     }}
+    # The package is still installed for other users: this is a partial
+    # removal and must not be reported as success.
+    throw ("PARTIAL: removed for the current user only; removal for all users failed: " + $allUsersError)
 }}
 "#
     );
@@ -410,7 +442,7 @@ fn restore_script(state: &serde_json::Value) -> String {
     // Every interpolated field is single-quote-escaped: the state file lives
     // in user-writable %APPDATA%, so a tampered file must never be able to
     // break out of the quoted PS strings (this script runs elevated).
-    let q = |s: &str| s.replace('\'', "''");
+    let q = crate::ps::escape_single;
     let mut lines = Vec::new();
     if let Some(arr) = state.as_array() {
         for it in arr {
@@ -472,14 +504,37 @@ pub fn apply_tweak(id: String) -> Result<String, String> {
         .ok_or_else(|| format!("Unknown tweak: {id}"))?;
     // Capture before applying, the undo restores exactly this.
     let state = capture_state(t)?;
-    ps::run(t.apply)?;
-    let dir = state_path(id.as_str()).parent().unwrap().to_path_buf();
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    std::fs::write(
-        state_path(id.as_str()),
-        serde_json::to_string(&state).unwrap_or_default(),
-    )
-    .map_err(|e| format!("saving tweak state failed: {e}"))?;
+    // Write-ahead: persist the captured state BEFORE applying, so a partial
+    // apply (or a crash mid-apply) is still undoable via revert_tweak. An
+    // existing state file is kept: it holds the original pre-apply values,
+    // a re-apply must not overwrite it with already-applied ones.
+    let path = state_path(id.as_str());
+    let wrote_state = if path.exists() {
+        false
+    } else {
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+        }
+        std::fs::write(&path, serde_json::to_string(&state).unwrap_or_default())
+            .map_err(|e| format!("saving tweak state failed: {e}"))?;
+        true
+    };
+    if let Err(e) = ps::run(t.apply) {
+        if !wrote_state {
+            return Err(e);
+        }
+        // Undo whatever part of the apply landed; only drop the state file
+        // once that restore succeeded, otherwise keep it for a manual undo.
+        let script = restore_script(&state);
+        let restored = script.trim().is_empty() || ps::run(&script).is_ok();
+        if restored {
+            let _ = std::fs::remove_file(&path);
+            return Err(format!("{e} (changes rolled back)"));
+        }
+        return Err(format!(
+            "{e} (rollback failed; captured state kept, use Revert to undo)"
+        ));
+    }
     Ok(format!("Applied: {}", t.name))
 }
 
@@ -517,5 +572,26 @@ pub fn revert_tweak(id: String) -> Result<String, String> {
         // No captured state (apply happened outside this app or the state was
         // lost), fall back to the documented-default undo.
         None => ps::run(t.undo).map(|_| format!("Reverted: {}", t.name)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sensitive_packages_are_never_recommended() {
+        for n in NOT_RECOMMENDED {
+            assert!(OPTIONAL_APPS.contains(n), "{n} missing from catalog");
+            assert!(!is_recommended(n), "{n}");
+        }
+        assert!(is_recommended("Microsoft.BingNews"));
+        assert!(!is_recommended("Microsoft.WindowsStore"));
+    }
+
+    #[test]
+    fn both_teams_generations_are_listed() {
+        assert!(OPTIONAL_APPS.contains(&"Microsoft.Teams"));
+        assert!(OPTIONAL_APPS.contains(&"MSTeams"));
     }
 }

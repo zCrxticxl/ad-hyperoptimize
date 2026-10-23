@@ -68,7 +68,7 @@ Game {
                 s("Video",    "V-Sync",                  "Disabled"),
                 s("Video",    "Motion Blur",             "Disabled"),
                 s("Reflex",   "NVIDIA Reflex",           "On + Boost"),
-                s("Launch",   "Steam Launch Options",    "-novid -console -high +fps_max 0"),
+                s("Launch",   "Steam Launch Options",    "-console +fps_max 0"),
             ],
         },
         balanced: Preset {
@@ -101,7 +101,7 @@ Game {
     tips: &[
         "Disable GeForce / Radeon overlay, adds measurable latency",
         "cl_interp_ratio 1  |  rate 786432  for 128-tick",
-        "Disable Windows Game Mode, it adds scheduler latency",
+        "Keep Windows Game Mode on (the default); it prioritises the foreground game",
         "Set Windows power plan to Ultimate Performance before launching",
     ],
 },
@@ -424,7 +424,7 @@ Game {
 
 Game {
     id: "r6siege", name: "Rainbow Six Siege",
-    processes: &["rainbowsix.exe"],
+    processes: &["rainbowsix.exe", "rainbowsix_be.exe", "rainbowsix_vulkan.exe"],
     genre: "FPS Tactical", competitive: true,
     presets: Presets {
         performance: Preset {
@@ -898,7 +898,9 @@ Game {
 
 Game {
     id: "minecraft", name: "Minecraft (Java)",
-    processes: &["javaw.exe", "minecraft.exe"],
+    // javaw.exe is NOT matched: it is the generic Java runtime used by many
+    // unrelated apps (IDEs, tools), so it would trigger false game detection.
+    processes: &["minecraft.exe"],
     genre: "Sandbox", competitive: false,
     presets: Presets {
         performance: Preset {
@@ -1152,4 +1154,57 @@ pub fn find_by_process(exe: &str) -> Option<&'static Game> {
 
 pub fn get_all() -> &'static [Game] {
     GAMES
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn process_names_are_lowercase_exe() {
+        for g in GAMES {
+            for p in g.processes {
+                assert!(p.ends_with(".exe"), "{}: {p}", g.id);
+                assert_eq!(*p, p.to_lowercase(), "{}: {p}", g.id);
+            }
+        }
+    }
+
+    #[test]
+    fn siege_variants_detected() {
+        for exe in [
+            "RainbowSix.exe",
+            "RainbowSix_BE.exe",
+            "RainbowSix_Vulkan.exe",
+        ] {
+            assert_eq!(find_by_process(exe).map(|g| g.id), Some("r6siege"));
+        }
+    }
+
+    #[test]
+    fn generic_java_runtime_is_not_a_game() {
+        assert!(find_by_process("javaw.exe").is_none());
+    }
+
+    #[test]
+    fn no_advice_contradicts_the_app() {
+        for g in GAMES {
+            for t in g.tips {
+                assert!(
+                    !t.to_lowercase().contains("disable windows game mode"),
+                    "{}",
+                    g.id
+                );
+            }
+            for p in [
+                &g.presets.performance,
+                &g.presets.balanced,
+                &g.presets.quality,
+            ] {
+                for st in p.settings {
+                    assert!(!st.value.contains("-novid"), "{}", g.id);
+                }
+            }
+        }
+    }
 }

@@ -26,7 +26,6 @@ fn lock(state: &SharedState) -> MutexGuard<'_, SwitcherState> {
 // ── Power-plan GUIDs ─────────────────────────────────────────────────────────
 pub(crate) const PLAN_BALANCED: &str = "381b4222-f694-41f0-9685-ff5bb260df2e";
 pub(crate) const PLAN_HIGH_PERFORMANCE: &str = "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c";
-const PLAN_ULTIMATE: &str = "e9a42b02-d5df-448d-aa00-03f14749eb61";
 
 // ── Shared state ─────────────────────────────────────────────────────────────
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -75,21 +74,13 @@ pub fn start(state: SharedState, app: tauri::AppHandle) {
             match (detected, current_game) {
                 // New game launched
                 (Some(game), None) => {
-                    let prev = get_active_plan_guid();
                     {
                         let mut s = lock(&state);
                         s.active_game = Some(game.id.to_string());
-                        s.prev_plan_guid = prev.clone();
                     }
-                    apply_power_plan_for_preset(game, &preset);
-                    let _ = app.emit(
-                        "game-detected",
-                        json!({
-                            "id": game.id, "name": game.name,
-                            "preset": preset,
-                            "powerPlan": plan_label_for_preset(game, &preset),
-                        }),
-                    );
+                    let result = record_prev_plan(Some(&state))
+                        .and_then(|_| apply_power_plan_for_preset(game, &preset));
+                    emit_detected(&app, game, &preset, result);
                 }
 
                 // Active game no longer running, revert
@@ -98,8 +89,8 @@ pub fn start(state: SharedState, app: tauri::AppHandle) {
                         let mut s = lock(&state);
                         s.active_game = None;
                     }
-                    revert_power_plan(&state);
-                    let _ = app.emit("game-exited", json!({ "id": id }));
+                    let r = revert_power_plan(&state);
+                    let _ = app.emit("game-exited", json!({ "id": id, "error": r.err() }));
                 }
 
                 // Different game detected (switched without closing first)
@@ -107,23 +98,37 @@ pub fn start(state: SharedState, app: tauri::AppHandle) {
                     {
                         let mut s = lock(&state);
                         s.active_game = Some(game.id.to_string());
-                        // keep prev_plan_guid from original game launch
+                        // keep the previous plan recorded at the original launch
                     }
-                    apply_power_plan_for_preset(game, &preset);
-                    let _ = app.emit(
-                        "game-detected",
-                        json!({
-                            "id": game.id, "name": game.name,
-                            "preset": preset,
-                            "powerPlan": plan_label_for_preset(game, &preset),
-                        }),
-                    );
+                    let result = apply_power_plan_for_preset(game, &preset);
+                    emit_detected(&app, game, &preset, result);
                 }
 
                 _ => {}
             }
         }
     });
+}
+
+fn emit_detected(
+    app: &tauri::AppHandle,
+    game: &Game,
+    preset: &str,
+    result: Result<String, String>,
+) {
+    let (plan, error) = match result {
+        Ok(label) => (label, None),
+        Err(e) => (plan_label_for_preset(game, preset).to_string(), Some(e)),
+    };
+    let _ = app.emit(
+        "game-detected",
+        json!({
+            "id": game.id, "name": game.name,
+            "preset": preset,
+            "powerPlan": plan,
+            "error": error,
+        }),
+    );
 }
 
 // ── Commands ─────────────────────────────────────────────────────────────────
@@ -155,24 +160,34 @@ pub fn cmd_game_switcher_configure(
     json!({ "ok": true })
 }
 
-/// Manually apply a preset for a specific game.
+/// Manually apply a preset for a specific game. The plan active before the
+/// first manual/automatic apply is recorded (and persisted) so revert restores
+/// the user's real plan rather than a guessed Balanced.
 pub fn cmd_game_apply_preset(game_id: String, preset: String) -> Value {
     match gamedb::get_all().iter().find(|g| g.id == game_id.as_str()) {
         None => json!({ "error": format!("Unknown game: {game_id}") }),
         Some(game) => {
-            apply_power_plan_for_preset(game, &preset);
-            let label = plan_label_for_preset(game, &preset);
-            json!({ "ok": true, "powerPlan": label, "game": game.name })
+            match record_prev_plan(None).and_then(|_| apply_power_plan_for_preset(game, &preset)) {
+                Ok(label) => json!({ "ok": true, "powerPlan": label, "game": game.name }),
+                Err(e) => json!({ "ok": false, "error": e, "game": game.name }),
+            }
         }
     }
 }
 
-/// Manually revert to balanced power plan.
+/// Manually revert to the power plan that was active before the preset was
+/// applied. With nothing recorded this is an honest no-op.
 pub fn cmd_game_revert(state: &SharedState) -> Value {
-    revert_power_plan(state);
+    let r = revert_power_plan(state);
     let mut s = lock(state);
     s.active_game = None;
-    json!({ "ok": true })
+    match r {
+        Ok(Some(guid)) => json!({ "ok": true, "restoredPlan": guid }),
+        Ok(None) => {
+            json!({ "ok": true, "note": "no previous power plan recorded; nothing to revert" })
+        }
+        Err(e) => json!({ "ok": false, "error": e }),
+    }
 }
 
 // ── Internal helpers ─────────────────────────────────────────────────────────
@@ -205,36 +220,122 @@ pub(crate) fn get_active_plan_guid() -> Option<String> {
         .map(|s| s.to_string())
 }
 
-fn set_power_plan(guid: &str) {
-    // Try primary GUID; if Ultimate isn't provisioned, fall back to High Performance
-    let ok = ps::exec("powercfg.exe", &["/setactive", guid]).is_ok();
-    if !ok && guid == PLAN_ULTIMATE {
-        let _ = ps::exec("powercfg.exe", &["/setactive", PLAN_HIGH_PERFORMANCE]);
+/// All scheme GUIDs listed by `powercfg /list` (header/names are localized,
+/// GUIDs are not).
+fn parse_listed_guids(out: &str) -> Vec<String> {
+    out.split(|c: char| c.is_whitespace() || c == '(' || c == ')' || c == '*')
+        .filter(|t| ps::is_guid(t))
+        .map(|t| t.to_ascii_lowercase())
+        .collect()
+}
+
+/// Pick an installed Ultimate Performance scheme. `registry` holds
+/// `guid|FriendlyName` lines from HKLM\...\Power\User\PowerSchemes. The
+/// FriendlyName of every Ultimate scheme (the hidden template e9a42b02… and
+/// each `-duplicatescheme` copy, which gets its own GUID) is the
+/// locale-independent resource reference `@…\powrprof.dll,-19,…`. Only a
+/// scheme that `powercfg /list` actually lists is installed/activatable.
+fn pick_ultimate(listed: &[String], registry: &str) -> Option<String> {
+    registry.lines().find_map(|line| {
+        let (guid, friendly) = line.trim().split_once('|')?;
+        let guid = guid.trim().to_ascii_lowercase();
+        let is_ultimate = friendly.to_ascii_lowercase().contains("powrprof.dll,-19,");
+        (ps::is_guid(&guid) && is_ultimate && listed.contains(&guid)).then_some(guid)
+    })
+}
+
+/// GUID of an installed Ultimate Performance scheme, or None when the user
+/// has never provisioned one (the template GUID itself is not activatable).
+pub(crate) fn resolve_ultimate_plan() -> Option<String> {
+    let listed = parse_listed_guids(&ps::exec("powercfg.exe", &["/list"]).ok()?);
+    let registry = ps::run(
+        "Get-ChildItem 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Power\\User\\PowerSchemes' -ErrorAction SilentlyContinue | ForEach-Object { $_.PSChildName + '|' + (Get-ItemProperty -LiteralPath $_.PSPath -ErrorAction SilentlyContinue).FriendlyName }",
+    )
+    .ok()?;
+    pick_ultimate(&listed, &registry)
+}
+
+fn set_power_plan(guid: &str) -> Result<(), String> {
+    ps::exec("powercfg.exe", &["/setactive", guid])
+        .map(|_| ())
+        .map_err(|e| format!("powercfg /setactive {guid} failed: {}", e.trim()))
+}
+
+/// Apply the preset's plan; returns the label of the plan actually applied.
+fn apply_power_plan_for_preset(game: &Game, preset: &str) -> Result<String, String> {
+    let (guid, label) = match plan_label_for_preset(game, preset) {
+        "ultimate" => match resolve_ultimate_plan() {
+            Some(g) => (g, "ultimate".to_string()),
+            None => (
+                PLAN_HIGH_PERFORMANCE.to_string(),
+                "high_performance (Ultimate Performance is not installed)".to_string(),
+            ),
+        },
+        "high_performance" => (PLAN_HIGH_PERFORMANCE.to_string(), "high_performance".into()),
+        _ => (PLAN_BALANCED.to_string(), "balanced".into()),
+    };
+    set_power_plan(&guid)?;
+    Ok(label)
+}
+
+// ── Previous-plan persistence ────────────────────────────────────────────────
+// The plan active before the first game apply is written to disk, so a crash
+// or restart while a game plan is active never strands the user on High
+// Performance: revert reads it back.
+
+fn prev_plan_path() -> std::path::PathBuf {
+    crate::safety::app_data_dir()
+        .join("gameprofile")
+        .join("prev-plan.txt")
+}
+
+fn load_prev_plan() -> Option<String> {
+    let raw = std::fs::read_to_string(prev_plan_path()).ok()?;
+    let g = raw.trim().to_string();
+    ps::is_guid(&g).then_some(g)
+}
+
+fn clear_prev_plan() {
+    let _ = std::fs::remove_file(prev_plan_path());
+}
+
+/// Record the currently active plan as the one to restore, unless one is
+/// already recorded (a second apply must not overwrite the user's original
+/// plan with an already-applied game plan).
+fn record_prev_plan(state: Option<&SharedState>) -> Result<(), String> {
+    let prev = match load_prev_plan() {
+        Some(g) => g,
+        None => {
+            let g = get_active_plan_guid().ok_or("could not read the active power plan")?;
+            let path = prev_plan_path();
+            if let Some(dir) = path.parent() {
+                std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+            }
+            std::fs::write(&path, &g).map_err(|e| format!("saving previous plan failed: {e}"))?;
+            g
+        }
+    };
+    if let Some(state) = state {
+        lock(state).prev_plan_guid = Some(prev);
     }
+    Ok(())
 }
 
-fn apply_power_plan_for_preset(game: &Game, preset: &str) {
-    let plan_key = match preset {
-        "balanced" => game.presets.balanced.power_plan,
-        "quality" => game.presets.quality.power_plan,
-        _ => game.presets.performance.power_plan,
+/// Restore the recorded previous plan. Ok(None) when nothing was recorded.
+/// The record is only cleared after the restore succeeded.
+fn revert_power_plan(state: &SharedState) -> Result<Option<String>, String> {
+    let recorded = lock(state)
+        .prev_plan_guid
+        .clone()
+        .filter(|g| ps::is_guid(g))
+        .or_else(load_prev_plan);
+    let Some(guid) = recorded else {
+        return Ok(None);
     };
-    let guid = match plan_key {
-        "ultimate" => PLAN_ULTIMATE,
-        "high_performance" => PLAN_HIGH_PERFORMANCE,
-        _ => PLAN_BALANCED,
-    };
-    set_power_plan(guid);
-}
-
-fn revert_power_plan(state: &SharedState) {
-    let guid = {
-        let s = lock(state);
-        s.prev_plan_guid
-            .clone()
-            .unwrap_or_else(|| PLAN_BALANCED.to_string())
-    };
-    set_power_plan(&guid);
+    set_power_plan(&guid)?;
+    lock(state).prev_plan_guid = None;
+    clear_prev_plan();
+    Ok(Some(guid))
 }
 
 fn plan_label_for_preset(game: &Game, preset: &str) -> &'static str {
@@ -242,5 +343,37 @@ fn plan_label_for_preset(game: &Game, preset: &str) -> &'static str {
         "balanced" => game.presets.balanced.power_plan,
         "quality" => game.presets.quality.power_plan,
         _ => game.presets.performance.power_plan,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const LIST_DE: &str = "Bestehende Energieschemen (* Aktiv)\n-----------------------------------\nGUID des Energieschemas: 381b4222-f694-41f0-9685-ff5bb260df2e  (Ausbalanciert)\nGUID des Energieschemas: 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c  (Höchstleistung) *\nGUID des Energieschemas: d1a87a2d-32c1-4791-aad7-5902b0d8a2d5  (Ultimative Leistung)\n";
+
+    const REGISTRY: &str = "381b4222-f694-41f0-9685-ff5bb260df2e|@C:\\WINDOWS\\system32\\powrprof.dll,-15,Balanced\n8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c|@C:\\WINDOWS\\system32\\powrprof.dll,-13,High performance\nd1a87a2d-32c1-4791-aad7-5902b0d8a2d5|@C:\\WINDOWS\\system32\\powrprof.dll,-19,Ultimate Performance\ne9a42b02-d5df-448d-aa00-03f14749eb61|@C:\\WINDOWS\\system32\\powrprof.dll,-19,Ultimate Performance\n";
+
+    #[test]
+    fn parses_guids_from_localized_list() {
+        let g = parse_listed_guids(LIST_DE);
+        assert_eq!(g.len(), 3);
+        assert!(g.contains(&PLAN_HIGH_PERFORMANCE.to_string()));
+    }
+
+    #[test]
+    fn picks_installed_ultimate_copy_not_template() {
+        let listed = parse_listed_guids(LIST_DE);
+        assert_eq!(
+            pick_ultimate(&listed, REGISTRY).as_deref(),
+            Some("d1a87a2d-32c1-4791-aad7-5902b0d8a2d5")
+        );
+    }
+
+    #[test]
+    fn no_ultimate_when_only_template_exists() {
+        let listed = vec![PLAN_BALANCED.to_string(), PLAN_HIGH_PERFORMANCE.to_string()];
+        assert_eq!(pick_ultimate(&listed, REGISTRY), None);
+        assert_eq!(pick_ultimate(&listed, "garbage|x\n|\n"), None);
     }
 }

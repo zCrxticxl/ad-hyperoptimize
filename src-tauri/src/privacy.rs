@@ -41,7 +41,7 @@ static TWEAKS: &[PrivacyTweak] = &[
         description: "Sets AllowTelemetry to 1 (Basic), lowest value for Home/Pro. Prevents sending Enhanced/Full diagnostic data.",
         risk:        "Low",
         apply:       r#"$p='HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection'; if(!(Test-Path $p)){New-Item -Path $p -Force|Out-Null}; Set-ItemProperty -Path $p -Name AllowTelemetry -Value 1 -Type DWord; Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\DataCollection' -Name AllowTelemetry -Value 1 -Type DWord -ErrorAction SilentlyContinue"#,
-        check:       r#"(Get-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection' -ErrorAction SilentlyContinue).AllowTelemetry -le 1"#,
+        check:       r#"$v = (Get-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection' -ErrorAction SilentlyContinue).AllowTelemetry; $null -ne $v -and $v -le 1"#,
     },
     PrivacyTweak {
         id:          "prv_diagtrack_off",
@@ -424,7 +424,10 @@ fn capture_changes(id: &str) -> Result<Vec<safety::ChangeItem>, String> {
             path: (*path).into(),
             name: (*name).into(),
             prev: crate::tweaks::reg_read(root, path, name)?,
-            new: safety::RegVal::Dword(0),
+            // Record the value apply actually writes (some items set 1, not
+            // 0). A value apply deletes (expected None) has no RegVal form;
+            // it keeps the Dword(0) placeholder, undo only uses `prev`.
+            new: safety::RegVal::Dword(expected_dword(id, name).unwrap_or(0)),
         });
     }
     Ok(items)
@@ -577,7 +580,25 @@ pub fn revert(id: String) -> Result<Value, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{registry_targets, service_target, TWEAKS};
+    use super::{expected_dword, registry_targets, service_target, TWEAKS};
+
+    #[test]
+    fn telemetry_check_requires_the_value_to_exist() {
+        let t = TWEAKS
+            .iter()
+            .find(|t| t.id == "prv_telemetry_basic")
+            .unwrap();
+        // `$null -le 1` is $true in PowerShell; a missing value must not
+        // count as applied.
+        assert!(t.check.contains("$null -ne $v"));
+    }
+
+    #[test]
+    fn journal_records_the_value_apply_writes() {
+        for (_, _, name) in registry_targets("prv_telemetry_basic") {
+            assert_eq!(expected_dword("prv_telemetry_basic", name), Some(1));
+        }
+    }
 
     #[test]
     fn every_privacy_tweak_has_an_exact_undo_target() {

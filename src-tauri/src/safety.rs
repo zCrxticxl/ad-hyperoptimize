@@ -280,7 +280,7 @@ pub fn create_restore_point(description: &str) -> Result<String, String> {
     let before_sequence = newest_restore_point()?.0;
     // PowerShell doubles '' inside single-quoted strings; stripping changed
     // the user's description text.
-    let desc = description.replace('\'', "''");
+    let desc = ps::escape_single(description);
     let result = ps::run(&format!(
         "Checkpoint-Computer -Description '{desc}' -RestorePointType MODIFY_SETTINGS -ErrorAction Stop; 'OK'"
     ));

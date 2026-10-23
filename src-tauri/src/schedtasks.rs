@@ -154,6 +154,17 @@ $tasks | ConvertTo-Json -Compress -Depth 2
     json!({ "tasks": tasks, "bloatCount": bloat_count })
 }
 
+/// Validate a task path or name that is embedded in single-quoted PS strings.
+/// Rejects quote/expansion characters (is_safe_ident), wildcards, and the
+/// typographic quotes U+2018..=U+201F, which PowerShell's tokenizer treats as
+/// real quote delimiters (a name containing U+2019 would otherwise close the
+/// surrounding '...' literal and inject script).
+pub(crate) fn is_valid_task_ident(s: &str) -> bool {
+    crate::ps::is_safe_ident(s)
+        && !s.contains(['*', '?', '[', ']'])
+        && !s.chars().any(|c| ('\u{2018}'..='\u{201F}').contains(&c))
+}
+
 pub fn toggle(path: String, name: String, enable: bool) -> Result<Value, String> {
     if !crate::ps::is_admin() {
         return Err("Scheduled Tasks ändern benötigt Adminrechte.".into());
@@ -162,11 +173,7 @@ pub fn toggle(path: String, name: String, enable: bool) -> Result<Value, String>
     // renderer, reject anything that could terminate the quotes.
     // Task paths/names never contain wildcards; blocking them here keeps
     // wildcard-expanding cmdlets (Test-Path, schtasks quoting) safe.
-    if !crate::ps::is_safe_ident(&path)
-        || !crate::ps::is_safe_ident(&name)
-        || path.contains(['*', '?', '[', ']'])
-        || name.contains(['*', '?', '[', ']'])
-    {
+    if !is_valid_task_ident(&path) || !is_valid_task_ident(&name) {
         return Err("Invalid task path or name".into());
     }
     let query = format!(
@@ -230,7 +237,35 @@ pub fn toggle(path: String, name: String, enable: bool) -> Result<Value, String>
 
 #[cfg(test)]
 mod tests {
-    use super::bloat_catalog;
+    use super::{bloat_catalog, is_valid_task_ident};
+
+    #[test]
+    fn task_ident_rejects_quotes_wildcards_and_smart_quotes() {
+        assert!(is_valid_task_ident("\\Microsoft\\Windows\\Maps\\"));
+        assert!(is_valid_task_ident("MapsUpdateTask"));
+        for bad in [
+            "a'b",
+            "a\"b",
+            "a$b",
+            "a`b",
+            "a*b",
+            "a?b",
+            "a[b",
+            "a]b",
+            "",
+            "a\u{2018}b",
+            "a\u{2019}; calc; \u{2018}b",
+            "a\u{201A}b",
+            "a\u{201B}b",
+            "a\u{201C}b",
+            "a\u{201D}b",
+            "a\u{201E}b",
+            "a\u{201F}b",
+        ] {
+            assert!(!is_valid_task_ident(bad), "{bad:?}");
+        }
+        assert!(is_valid_task_ident("a\u{2014}b"));
+    }
 
     #[test]
     fn update_and_license_tasks_are_not_bloat_candidates() {

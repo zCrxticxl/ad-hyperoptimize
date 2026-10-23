@@ -21,7 +21,6 @@ const PROFILES: &[Profile] = &[
             "power_high_performance",
             "game_dvr_off",
             "game_mode_on",
-            "fse_optimizations_off",
             "mmcss_gaming",
             "mmcss_games_task",
             "priority_separation",
@@ -32,14 +31,13 @@ const PROFILES: &[Profile] = &[
     Profile {
         id: "streaming",
         name: "Streaming / OBS",
-        desc: "Game AND encoder both need CPU: no aggressive foreground boost, DVR off (conflicts with OBS capture), MMCSS, no throttling of background encoder, fewer background apps.",
+        desc: "Game AND encoder both need CPU: no aggressive foreground boost, DVR off (conflicts with OBS capture), MMCSS, no throttling of background encoder.",
         tweaks: &[
             "power_high_performance",
             "game_dvr_off",
             "game_mode_on",
             "mmcss_gaming",
             "power_throttling_off",
-            "background_apps_off",
             "content_suggestions_off",
         ],
     },
@@ -54,11 +52,36 @@ const PROFILES: &[Profile] = &[
             "telemetry_minimal",
             "advertising_id_off",
             "content_suggestions_off",
-            "background_apps_off",
             "power_throttling_off",
         ],
     },
 ];
+// Deliberately NOT in any default profile (audit): fse_optimizations_off
+// (fullscreen optimizations are required for modern flip-model presentation
+// and Auto HDR; disabling them regresses many current titles) and
+// background_apps_off (breaks notifications/sync of Store apps such as
+// Mail, Teams, Phone Link). Both remain available individually.
+
+/// Tweaks whose benefit depends on the hardware: they are applied by a
+/// profile only when hwprofile has no risk verdict for this machine.
+const HW_GATED: &[&str] = &[
+    "priority_separation",
+    "mmcss_games_task",
+    "power_throttling_off",
+];
+
+/// Why `id` should be skipped on this hardware, from hwprofile's
+/// `tweakRisks` map (None = no verdict, or not a gated tweak).
+fn hw_skip_reason(id: &str, tweak_risks: &Value) -> Option<String> {
+    if !HW_GATED.contains(&id) {
+        return None;
+    }
+    let r = tweak_risks.get(id)?;
+    Some(format!(
+        "skipped on this hardware: {}",
+        r["title"].as_str().unwrap_or("hardware risk verdict")
+    ))
+}
 
 fn tweak_status_map() -> std::collections::HashMap<String, (String, String, bool)> {
     let mut m = std::collections::HashMap::new();
@@ -122,8 +145,21 @@ pub fn apply(profile_id: &str, with_bench: bool) -> Result<Value, String> {
         .find(|p| p.id == profile_id)
         .ok_or_else(|| format!("unbekanntes Profil '{profile_id}'"))?;
 
-    let restore_msg = safety::create_restore_point(&format!("AD HyperOptimize Profil: {}", p.name))
-        .unwrap_or_else(|e| format!("Restore Point übersprungen: {e}"));
+    // A failed restore point does not abort (every tweak is still journaled
+    // and individually undoable), but it is flagged prominently.
+    let (restore_msg, restore_failed) =
+        match safety::create_restore_point(&format!("AD HyperOptimize Profil: {}", p.name)) {
+            Ok(m) => (m, false),
+            Err(e) => (format!("Restore Point FEHLGESCHLAGEN: {e}"), true),
+        };
+
+    // Hardware verdicts are only needed (and only computed) when the profile
+    // contains a hardware-gated tweak.
+    let tweak_risks = if p.tweaks.iter().any(|t| HW_GATED.contains(t)) {
+        crate::hwprofile::hw_profile()["tweakRisks"].clone()
+    } else {
+        Value::Null
+    };
 
     let before = if with_bench {
         Some(bench_suite())
@@ -135,7 +171,12 @@ pub fn apply(profile_id: &str, with_bench: bool) -> Result<Value, String> {
     let mut applied = Vec::new();
     let mut skipped = Vec::new();
     let mut failed = Vec::new();
+    let mut hw_skipped = Vec::new();
     for id in p.tweaks {
+        if let Some(reason) = hw_skip_reason(id, &tweak_risks) {
+            hw_skipped.push(json!({ "id": id, "reason": reason }));
+            continue;
+        }
         match status.get(*id).map(|s| s.1.as_str()) {
             Some("applied") => skipped.push(json!(id)),
             _ => match tweaks::apply(id) {
@@ -173,11 +214,37 @@ pub fn apply(profile_id: &str, with_bench: bool) -> Result<Value, String> {
         None
     };
 
+    // Every attempted tweak failed: that is an error, not a result.
+    if applied.is_empty() && !failed.is_empty() {
+        return Err(format!(
+            "Profil '{}' fehlgeschlagen: alle {} Tweaks sind fehlgeschlagen ({}). {}",
+            p.id,
+            failed.len(),
+            failed
+                .iter()
+                .map(|f| format!(
+                    "{}: {}",
+                    f["id"].as_str().unwrap_or("?"),
+                    f["error"].as_str().unwrap_or("?")
+                ))
+                .collect::<Vec<_>>()
+                .join("; "),
+            restore_msg
+        ));
+    }
+
     Ok(json!({
         "profile": p.id,
         "restorePoint": restore_msg,
+        "restorePointFailed": restore_failed,
+        "warning": if restore_failed {
+            Some("Kein Wiederherstellungspunkt erstellt: Änderungen sind nur über die Undo-Historie rückgängig zu machen.")
+        } else {
+            None
+        },
         "applied": applied,
         "skipped": skipped,
+        "hwSkipped": hw_skipped,
         "failed": failed,
         "benchBefore": before,
         "benchAfter": after,
@@ -206,4 +273,31 @@ pub fn revert(profile_id: &str) -> Result<Value, String> {
         }
     }
     Ok(json!({ "profile": p.id, "reverted": reverted, "skipped": [], "failed": failed }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn removed_tweaks_are_not_in_default_profiles() {
+        for p in PROFILES {
+            for bad in ["fse_optimizations_off", "background_apps_off"] {
+                assert!(!p.tweaks.contains(&bad), "{} contains {bad}", p.id);
+            }
+        }
+    }
+
+    #[test]
+    fn hw_gate_only_skips_gated_tweaks_with_a_verdict() {
+        let risks = json!({
+            "priority_separation": { "severity": "warning", "title": "Low core count" },
+            "hags_on": { "severity": "warning", "title": "Old GPU" },
+        });
+        assert!(hw_skip_reason("priority_separation", &risks).is_some());
+        assert!(hw_skip_reason("mmcss_games_task", &risks).is_none());
+        // Not gated: profiles never consult the verdict for it.
+        assert!(hw_skip_reason("hags_on", &risks).is_none());
+        assert!(hw_skip_reason("power_throttling_off", &Value::Null).is_none());
+    }
 }
