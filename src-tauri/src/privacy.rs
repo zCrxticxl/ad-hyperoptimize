@@ -207,12 +207,18 @@ static TWEAKS: &[PrivacyTweak] = &[
 
 // ── status check ─────────────────────────────────────────────────────────────
 
-fn check_statuses() -> Result<std::collections::HashMap<String, bool>, String> {
+/// Checks may be statement lists (`$v = ...; <expr>`), so they are wrapped in
+/// a subexpression `$( )`: plain `( )` only accepts a single expression and
+/// made the whole scan script fail to parse.
+fn status_script() -> String {
     let assignments: Vec<String> = TWEAKS
         .iter()
         .map(|t| {
             let var = t.id.replace('-', "_");
-            format!("${var} = try {{ [bool]({}) }} catch {{ $false }};", t.check)
+            format!(
+                "${var} = try {{ [bool]$({}) }} catch {{ $false }};",
+                t.check
+            )
         })
         .collect();
     let entries: Vec<String> = TWEAKS
@@ -222,12 +228,19 @@ fn check_statuses() -> Result<std::collections::HashMap<String, bool>, String> {
             format!("'{}' = ${};", t.id, var)
         })
         .collect();
-    let script = format!(
+    format!(
         "{} $r = @{{{}}}; $r | ConvertTo-Json -Compress",
         assignments.join(" "),
         entries.join(" ")
-    );
-    let raw = ps::run(&script)?;
+    )
+}
+
+fn check_one_script(t: &PrivacyTweak) -> String {
+    format!("$ErrorActionPreference = 'Stop'; [bool]$({})", t.check)
+}
+
+fn check_statuses() -> Result<std::collections::HashMap<String, bool>, String> {
+    let raw = ps::run(&status_script())?;
     let v: Value = serde_json::from_str(raw.trim())
         .map_err(|error| format!("Privacy scan could not be parsed: {error}"))?;
     Ok(TWEAKS
@@ -485,8 +498,7 @@ fn verify_applied(t: &PrivacyTweak) -> Result<(), String> {
 }
 
 fn check_one(t: &PrivacyTweak) -> Result<bool, String> {
-    let script = format!("$ErrorActionPreference = 'Stop'; [bool]({})", t.check);
-    let output = ps::run(&script)?;
+    let output = ps::run(&check_one_script(t))?;
     match output.trim().to_ascii_lowercase().as_str() {
         "true" => Ok(true),
         "false" => Ok(false),
@@ -581,6 +593,32 @@ pub fn revert(id: String) -> Result<Value, String> {
 #[cfg(test)]
 mod tests {
     use super::{expected_dword, registry_targets, service_target, TWEAKS};
+
+    /// Regression: a statement-list check inside `[bool]( )` made the whole
+    /// scan script unparsable, so the Privacy Center showed a parser error.
+    /// Only parses the generated scripts (nothing is executed).
+    #[cfg(windows)]
+    #[test]
+    fn generated_status_scripts_parse() {
+        let mut scripts = vec![super::status_script()];
+        scripts.extend(TWEAKS.iter().map(super::check_one_script));
+        for script in scripts {
+            let out = std::process::Command::new("powershell.exe")
+                .args([
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    "$t = $null; $e = $null; \
+                     [void][System.Management.Automation.Language.Parser]::ParseInput($env:ADHO_SCRIPT, [ref]$t, [ref]$e); \
+                     $e.Count",
+                ])
+                .env("ADHO_SCRIPT", &script)
+                .output()
+                .unwrap();
+            let errors = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            assert_eq!(errors, "0", "script does not parse: {script}");
+        }
+    }
 
     #[test]
     fn telemetry_check_requires_the_value_to_exist() {
