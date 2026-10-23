@@ -218,3 +218,54 @@ Tests:
 - `rebar_is_read_from_nvidia_smi`
 - `fse_state_is_decided_by_behavior_mode`
 - `reset_is_only_verified_when_windows_confirms`
+
+## Second cleanup pass: other catalogs (commits `8309a36` … `f1b2290`)
+
+The retire + reset pattern now also covers the Performance Tweaks, Privacy Center and Debloater catalogs.
+
+### What changed
+
+| Catalog | Item | Change | Reason |
+|---|---|---|---|
+| Performance Tweaks | Flush standby cache (`ram_flush_standby`) | Removed (command, elevated inline C#, button). The RAM card stays read-only and says why. | Standby memory is reclaimable cache; purging it frees nothing a game could not already get, and the next file reads come from disk. It changed no persistent setting, so there is nothing to reset. |
+| Privacy Center | `prv_ceip_off` | Retired | The SQM Customer Experience Improvement Program was replaced by Windows diagnostic data in Windows 10; the policy is inert. |
+| Privacy Center | `prv_maps_update_off` | Retired | Microsoft retired the Windows Maps app; there are no offline map updates left to stop. |
+| Debloater | `cortana_off` | Withdrawn | The Cortana app was retired. |
+| Debloater | `taskbar_widgets_off` | Withdrawn → Optimize `widgets_off` | `ShellFeedsTaskbarViewMode` only hid News and Interests on Windows 10; Windows 11 Widgets ignore it. |
+| Debloater | `gamedvr_off` | Withdrawn → Optimize `game_dvr_off` | Also forced `FSEBehaviorMode = 2` (the retired fullscreen tweak). `game_dvr_off` changes only recording. |
+| Debloater | `telemetry_off`, `diagtrack_stop`, `activity_history`, `feedback_off`, `error_reporting_off`, `advertising_id`, `app_suggestions` | Withdrawn → Privacy Center | Same registry values or services as the Privacy Center items, which are now the single source. |
+| Debloater | `location_off` | Kept, cross-referenced | Sets the Settings consent switch; the Privacy Center's `prv_location_off` disables the `lfsvc` service instead, a different mechanism. |
+| Hardware profile | Risk verdicts for `priority_separation`, `mmcss_games_task`, `power_throttling_off`, `disable_paging_executive`, `sysmain_off`, `core_parking_off` | Removed | Retired tweaks cannot be applied; a risk badge suggested otherwise. |
+
+Debloater items still offered: `bing_search`, `lock_screen_ads`, `location_off`, `clipboard_sync_off`, `xbox_gamebar`.
+
+### Rules
+
+- **Privacy Center (retired):** `apply` rejects them. The scan still checks them and returns active ones in a separate `retired` list, outside the catalog score. Reset uses the journal entry with the captured original; without one the page says so and offers no reset. No guessed default.
+- **Debloater (withdrawn):** `apply_tweak` rejects them. One is listed only while the Debloater holds its captured pre-apply state. Reset restores exactly that state. Without a captured state, `revert_tweak` refuses: the fallback `undo` would impose a guessed default and could undo a change that the Privacy Center or Optimize made to the same value.
+- **Reset all (health check):** `DEBLOATER_DUPLICATES` now also pairs `fse_optimizations_off` with the Debloater's `gamedvr_off`. That reset restores everything `gamedvr_off` captured, so Game DVR also returns to its value before that tweak.
+- **Reset verdict:** `classify_reset` lets the read-back decide. When the Debloater duplicate already restored the setting, the engine finds nothing to undo and returns an error; Windows still confirms the original, so the result is *verified*. An engine error with the setting still active stays *failed*. This also fixes the same case for Cortana from `bc83bdd`.
+
+### Tests
+
+| Rule | Test |
+|---|---|
+| Privacy retired items exist and keep an exact undo target | `privacy::retired_items_exist_and_keep_an_exact_undo_target` |
+| Privacy retired items listed only while active | `privacy::retired_items_are_listed_only_while_active` |
+| Privacy retired items cannot be applied | `privacy::retired_items_cannot_be_applied` |
+| Withdrawn Debloater ids exist and point to an offered single source | `debloater::withdrawn_tweaks_exist_and_point_to_a_live_single_source` |
+| The requested items are withdrawn; items without a twin stay | `debloater::requested_cleanup_is_withdrawn` |
+| Withdrawn items listed only with a captured state | `debloater::withdrawn_tweaks_are_listed_only_with_a_captured_state` |
+| Withdrawn items cannot be applied | `debloater::withdrawn_tweaks_cannot_be_applied` |
+| `gamedvr_off` keeps its FSE capture for an exact reset | `debloater::gamedvr_reset_restores_the_fse_values_it_changed` |
+| Duplicates pair retired tweaks with withdrawn Debloater ids | `optimizer::debloater_duplicates_pair_retired_tweaks_with_real_debloater_ids` |
+| Reset verdict comes from the read-back | `optimizer::reset_trusts_the_readback_not_the_engine_message` |
+| No risk verdict for retired ids; active verdicts kept | `hwprofile::retired_tweaks_get_no_risk_verdict`, `hwprofile::active_tweaks_keep_their_verdicts` |
+
+### Not tested
+
+Nothing in this pass ran on Windows. The cloud session only built the frontend and ran the platform-independent Rust tests (see HANDOFF.md). Needs Windows verification:
+- Privacy Center: with `prv_ceip_off` applied through the app, the item shows under "No longer offered", and Reset removes it.
+- Debloater: an item applied with an older version shows under "No longer offered", and Reset restores the captured state.
+- Reset all with `fse_optimizations_off` set only by the Debloater's `gamedvr_off` reports *verified*.
+

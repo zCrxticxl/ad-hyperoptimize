@@ -35,13 +35,24 @@ The branch is based on `main` @ `6ab9155` (v1.6.4). The commits are:
 | `5f15d49`, `bf51a00`, `a2bbb2a` | Optimization registry, health check engine, Health Check / Optimize My PC / Optimize UI, docs |
 | `84f9b85` | Retired 26 tweaks without benefit, plus *Reset all* with verification |
 | `bc83bdd` | Gaming setup checks (refresh rate, XMP/EXPO, windowed games/VRR, ReBAR); FSE detection and reset-verdict fixes |
+| `8309a36` | Performance Tweaks: placebo standby-cache flush removed |
+| `8e33bb3` | Privacy Center: `prv_ceip_off` and `prv_maps_update_off` retired (shown only while active, journaled reset) |
+| `6d8244f` | Debloater: obsolete and duplicate tweaks withdrawn (single source), `gamedvr_off` FSE twin in *Reset all*, reset verdict from the read-back |
+| `f1b2290` | Hardware profile: no risk verdicts for retired tweaks |
 
-The last full gate on Windows 11 25H2 passed:
+The last full gate on Windows 11 25H2 passed (up to `a82a380`):
 - `npm run build`
 - `cargo fmt --check`
 - `cargo check --locked`
 - `cargo test --locked`: 135 passed, 4 ignored
 - `cargo clippy --locked --all-targets -D warnings`
+
+The second cleanup pass (`8309a36` … `f1b2290`) was made in a cloud (Linux) session and is **not yet verified on Windows**:
+- `npm ci && npm run build`: passed.
+- `cargo fmt --check`: passed.
+- `cargo check` / `cargo test`: the crate does not compile on Linux as committed (already true at `a82a380`): `privacy.rs`, `perftweaks.rs` and `services.rs` call `tweaks::reg_read`, which is `#[cfg(windows)]`. With a local, uncommitted non-Windows stub for `reg_read`, `cargo check` passed and `cargo test` passed 140, 1 ignored (the platform-independent tests only).
+- `cargo clippy --all-targets -D warnings`: not meaningful on Linux (dozens of pre-existing dead-code errors from Windows-only callers). Needs the Windows run.
+- GitHub Actions `Quality` did not run: it triggers only on pull requests and pushes to `main`, and there is no PR for this branch. Run the gate on Windows, or open a PR (owner's decision).
 
 ## Key files
 
@@ -69,17 +80,23 @@ The last full gate on Windows 11 25H2 passed:
   - Prefer pushing and letting the GitHub Actions `Quality` workflow (`windows-latest`) run the full gate.
 - **Windows-only checks** cannot run in the cloud: the opt-in real-system tests (`real_health_scan`, `read_only_scans…`, `secure_dir_end_to_end`) and the app itself. Mark such work as "needs Windows verification" rather than claiming it passed.
 
+## Done
+
+- **Second cleanup pass on the other catalogs** (`8309a36` … `f1b2290`; details and tests in `optimization-engine.md`, section "Second cleanup pass"):
+  - `perftweaks.rs`: `ram_flush_standby` removed (one-shot, nothing to reset).
+  - `privacy.rs`: `prv_ceip_off`, `prv_maps_update_off` retired.
+  - `debloater.rs`: `cortana_off`, `taskbar_widgets_off`, `gamedvr_off` and the seven Privacy Center duplicates withdrawn; `location_off` kept and cross-referenced.
+  - `optimizer.rs`: `DEBLOATER_DUPLICATES` + `fse_optimizations_off` ↔ `gamedvr_off`; reset verdict from the read-back.
+  - `hwprofile.rs`: verdicts for retired ids removed.
+
 ## Open work, in suggested order
 
-1. **Second cleanup pass on the other catalogs**, using the same retire + reset pattern, or merge them into `tweaks.rs` as the single source:
-   - `perftweaks.rs`: `ram_flush_standby` (placebo).
-   - `privacy.rs`: `prv_ceip_off` and `prv_maps_update_off` (obsolete).
-   - `debloater.rs` tweaks:
-     - `cortana_off` and `taskbar_widgets_off` (Windows 11: obsolete or wrong mechanism)
-     - `gamedvr_off`, which mixes an FSE change into a DVR toggle
-     - its duplicates of telemetry / advertising ID / suggestions / location
-   - `hwprofile.rs` still emits risk verdicts for retired tweak ids; remove them.
-2. **Translations** of the new strings (`hc*`, `om*`, `opt*`, `ret*`, `gs*`, `navSystemCheck`, …) for es/fr/pt/pl/ru/tr/sv in `src/locales/*.ts`.
+1. **Windows verification of the second cleanup pass:** full gate (above), then the "Not tested" list of that section in `optimization-engine.md`. Remaining overlap that was left on purpose:
+   - Debloater `bing_search` vs Privacy Center `prv_bing_search_off` vs Optimize `start_websearch_off`: different value sets, not merged.
+   - Debloater `lock_screen_ads` vs Optimize `lockscreen_ads_off`, Debloater `xbox_gamebar` vs Optimize `game_dvr_off`/`gamebar_popups_off`: overlapping values, not merged.
+   - Privacy Center vs Optimize privacy tweaks (`telemetry_minimal`, `advertising_id_off`, `content_suggestions_off`, `activity_history_off`, `wer_off`, `delivery_opt_off`): still two catalogs. Merging needs a decision on which page owns privacy.
+   - Linux build: `tweaks::reg_read` is Windows-only but used unconditionally (see above).
+2. **Translations** of the new strings (`hc*`, `om*`, `opt*`, `ret*`, `gs*`, `wd*`, `perfRamFlushRemoved`, `navSystemCheck`, …; `perfRamDesc` was removed from the other locales because it still described the flush) for es/fr/pt/pl/ru/tr/sv in `src/locales/*.ts`.
 3. **Small UI items:**
    - `fmtAge` is English-only ("just now").
    - Monitor names show as "Generic PnP Monitor"; `WmiMonitorID` gives real names.
