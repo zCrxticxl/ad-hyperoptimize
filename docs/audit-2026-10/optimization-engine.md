@@ -161,3 +161,60 @@ Column meanings:
   - PresentMon or CapFrameX capture
   - at least 3 runs per state
   - average FPS, 1 % lows and frametime variance
+
+---
+
+## Retired tweaks (commit `84f9b85`, verdict fix in `bc83bdd`)
+
+### Which tweaks
+26 tweaks change nothing measurable or can harm:
+
+| Kind | Tweaks |
+|---|---|
+| Myths and Windows defaults | Nagle, QoS 20 %, IRPStackSize, TCPTimedWaitDelay, Win32PrioritySeparation 0x26, the MMCSS profile and Games task |
+| Outdated | DisablePagingExecutive, NTFS last access, background apps (Windows 10 only), Cortana |
+| Harmful on common hardware | core parking off, Xbox services off |
+| Idle services | Fax, WMP network sharing, Maps, link tracking, Insider, Diagnostics Hub, geolocation, Remote Registry |
+| Other | SysMain off, Windows Search to manual, 8.3 names off, power throttling off, fullscreen optimizations off |
+
+Privacy and look-and-feel tweaks are **not** retired, because they have a real (non-performance) effect.
+
+### How retirement works
+- **Can no longer be applied.** The tweak engine rejects them, the profiles no longer contain them, and search hides them.
+- **Shown only while still active.** They appear in the card "Settings with no benefit". *Reset all* restores each one from its captured original values: the journal undo, or else the engine's force-revert, which verifies the change.
+- **Every reset is read back.** The outcome is one of:
+  - verified
+  - already at the Windows default — only for Remote Registry, geolocation and Xbox services, whose target *is* the default
+  - skipped (needs admin rights)
+  - failed (honest: still active)
+  - unverifiable
+- **Duplicate in the Debloater:** "Cortana off" also exists there with its own state. A reset also restores the Debloater's captured state, never its guessed default.
+
+### Result on the developer PC
+The user's own *Reset all* reset 15 of 16 active retired tweaks. Two cases were left over:
+
+| Case | Cause | Fix |
+|---|---|---|
+| FSE showed as active | Detection error: a companion value is 0 by default. The state is now decided by `FSEBehaviorMode = 2`. | `bc83bdd` |
+| Cortana stayed active | It is re-applied by the Debloater's duplicate. | Reset now covers it (`bc83bdd`) |
+
+## Gaming setup checks (commit `bc83bdd`)
+
+| Check | Method | Developer PC |
+|---|---|---|
+| Refresh rate below maximum | `EnumDisplayDevices`/`EnumDisplaySettings` per active display: current Hz vs. highest Hz at the same resolution (≥ 10 Hz gap = warning) | OK: 240 Hz at 1920×1080 |
+| XMP/EXPO | `Win32_PhysicalMemory.ConfiguredClockSpeed` vs. speed encoded in the part number (`ram_rated_from_part`) | OK: 3600 MT/s = rated (CMK32GX4M2Z3600C18) |
+| Optimizations for windowed games | `HKCU\Software\Microsoft\DirectX\UserGpuPreferences\DirectXUserGlobalSettings` → `SwapEffectUpgradeEnable` (Windows 11 22H2+) | Info: Windows default (not set) |
+| VRR for all games | same value → `VRROptimizeEnable` | Info: off |
+| Resizable BAR (NVIDIA) | `%SystemRoot%\System32\nvidia-smi.exe -q -d MEMORY`: BAR1 total ≥ 90 % of VRAM | OK: BAR1 16384 MiB / VRAM 16376 MiB |
+
+The checks only read; they never change anything. Where Windows controls a setting, an allowlisted button opens the matching Settings page (`ms-settings:display-advanced`, `ms-settings:display-advancedgraphics`).
+
+Tests:
+- `ram_part_numbers_reveal_rated_speed`
+- `xmp_check_compares_configured_with_rated`
+- `refresh_check_flags_displays_below_maximum`
+- `directx_user_settings_are_parsed`
+- `rebar_is_read_from_nvidia_smi`
+- `fse_state_is_decided_by_behavior_mode`
+- `reset_is_only_verified_when_windows_confirms`
