@@ -21,7 +21,7 @@ function shortenTaskName(name: string): string {
 }
 
 function HostsCard({ count, hoDisabledCount }: { count: number; hoDisabledCount: number }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const [data, setData] = useState<{ active: string[]; hoDisabled: string[] } | null>(null);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -228,7 +228,7 @@ function HostsCard({ count, hoDisabledCount }: { count: number; hoDisabledCount:
 const DISABLED_DRIVERS_KEY = "security.disabledDrivers";
 
 export default function Security({ mode, admin, go }: { mode: Mode; admin: boolean; go: (id: string, target?: string) => void }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const [sec, setSec] = useState<any | null>(null);
   const [meta, setMeta] = useState<{ time: string; fromCache: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -342,7 +342,7 @@ export default function Security({ mode, admin, go }: { mode: Mode; admin: boole
         </button>
         {meta && (
           <span className="muted" style={{ fontSize: 12, alignSelf: "center" }}>
-            {t("dataAsOf").replace("{age}", fmtAge(meta.time))}{meta.fromCache ? ` (${t("fromCacheTag")})` : ""}
+            {t("dataAsOf").replace("{age}", fmtAge(meta.time, lang))}{meta.fromCache ? ` (${t("fromCacheTag")})` : ""}
           </span>
         )}
       </div>

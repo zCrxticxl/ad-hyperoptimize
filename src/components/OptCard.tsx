@@ -6,6 +6,7 @@ import { useLang, TKey } from "../i18n";
 import { localizeTweak } from "../localize";
 import { rescanHealth } from "../hooks/useHealthScan";
 import { HealthItem, OFFERABLE } from "../lib/health";
+import { engineText } from "../lib/engineText";
 
 const EVIDENCE_CLS: Record<string, string> = {
   provenBeneficial: "st-applied",
@@ -34,6 +35,7 @@ export function OptCard({ item, admin, focused }: { item: HealthItem; admin: boo
   const [open, setOpen] = useState(!!focused);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const tx = (s: string | null | undefined) => engineText(s, lang);
   const loc = localizeTweak({ id: item.id, name: item.name, description: item.description }, lang);
 
   const applied = item.status === "applied" || item.status === "partial";
@@ -99,16 +101,16 @@ export function OptCard({ item, admin, focused }: { item: HealthItem; admin: boo
           )}
         </span>
       </div>
-      <div className="tweak-desc">{item.benefit}</div>
-      {item.reason && item.reason !== item.when && <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>{item.reason}</div>}
+      <div className="tweak-desc">{tx(item.benefit)}</div>
+      {item.reason && item.reason !== item.when && <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>{tx(item.reason)}</div>}
       {msg && <div style={{ fontSize: 12, marginTop: 6, color: msg.ok ? "var(--green)" : "var(--red)" }}>{msg.text}</div>}
       {open && (
         <div className="tweak-detail" style={{ display: "grid", gridTemplateColumns: "max-content 1fr", gap: "4px 12px", fontSize: 12.5, marginTop: 8 }}>
           <span className="muted">{t("hcState")}</span>
           <span>{t(`hcSt_${item.status}` as TKey)} · <span className="muted">{t(`hcSrc_${item.statusSource}` as TKey)}</span></span>
           <span className="muted">{t("hcBenefit")}</span>
-          <span>{item.benefit}</span>
-          {item.when && <><span className="muted">{t("hcWhen")}</span><span>{item.when}</span></>}
+          <span>{tx(item.benefit)}</span>
+          {item.when && <><span className="muted">{t("hcWhen")}</span><span>{tx(item.when)}</span></>}
           <span className="muted">{t("hcRisk")}</span>
           <span>{item.risk === "Low" ? t("riskLow") : item.risk === "Medium" ? t("riskMedium") : t("riskHigh")}{adminBlocked ? ` · ${t("hcAdminNeeded")}` : ""}</span>
           <span className="muted">{t("hcRestore")}</span>
@@ -116,7 +118,7 @@ export function OptCard({ item, admin, focused }: { item: HealthItem; admin: boo
           <span className="muted">{t("hcColName")}</span>
           <span className="muted">{loc.description}</span>
           <span /><RiskNotice id={item.id} />
-          {!canApply && !applied && harmfulish && <><span className="muted">{t("hcNotOffered")}</span><span>{item.when}</span></>}
+          {!canApply && !applied && harmfulish && <><span className="muted">{t("hcNotOffered")}</span><span>{tx(item.when)}</span></>}
         </div>
       )}
     </div>

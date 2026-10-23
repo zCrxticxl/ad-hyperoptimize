@@ -6,6 +6,7 @@ import { rescanHealth } from "../hooks/useHealthScan";
 import { useLang, TKey } from "../i18n";
 import { localizeTweak } from "../localize";
 import type { ApplyResult, HealthScan } from "../lib/health";
+import { engineText } from "../lib/engineText";
 
 /** Retired tweaks (no measurable benefit) that are still active on this PC,
  * with one button that resets all of them to their original values and
@@ -48,7 +49,7 @@ export function RetiredCard({ scan, admin }: { scan: HealthScan; admin: boolean 
               </Badge>
               <div className="finding-copy">
                 <b>{localizeTweak({ id: r.id, name: String(r.name), description: "" }, lang).name}</b>
-                <span>{r.detail}</span>
+                <span>{engineText(r.detail, lang)}</span>
               </div>
             </div>
           ))}

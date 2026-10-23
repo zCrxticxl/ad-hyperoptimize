@@ -7,7 +7,7 @@ import type { Mode } from "../App";
 const asArr = (v: any) => (Array.isArray(v) ? v : v && !v.error ? [v] : []);
 
 export default function Hardware({ mode }: { mode: Mode }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const [scan, setScan] = useState<any | null>(null);
   const [meta, setMeta] = useState<{ time: string; fromCache: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -47,7 +47,7 @@ export default function Hardware({ mode }: { mode: Mode }) {
     <>
       <h1 className="page-title">{t("hwTitle")}</h1>
       <div className="page-sub">
-        {meta && <>{t("hwScanned")} {fmtAge(meta.time)}{meta.fromCache ? ` (${t("hwCached")})` : ""} · </>}
+        {meta && <>{t("hwScanned")} {fmtAge(meta.time, lang)}{meta.fromCache ? ` (${t("hwCached")})` : ""} · </>}
         <button className="text-action" onClick={() => load(true)}>
           {busy ? t("hwRescanning") : t("hwRescanNow")}
         </button>

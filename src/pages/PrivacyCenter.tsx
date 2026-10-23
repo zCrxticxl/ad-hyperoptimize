@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { Card, Spinner, Badge } from "../components/ui";
 import { useLang, TKey } from "../i18n";
+import { localizeCatalog } from "../localize";
 import { useFeatureFocus } from "../hooks/useFeatureFocus";
 
 type PTweak = {
@@ -25,7 +26,7 @@ const CAT_ICONS: Record<string, string> = {
 };
 
 export default function PrivacyCenter({ admin, focusId }: { admin: boolean; focusId?: string }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
 
   // Translate backend category names (backend always returns German keys)
   const CAT_LABEL: Record<string, string> = {
@@ -68,15 +69,16 @@ export default function PrivacyCenter({ admin, focusId }: { admin: boolean; focu
       .then((r: any) => {
         if (r.error) throw new Error(String(r.error));
         setErr("");
-        setTweaks(r.tweaks ?? []);
-        setRetired(r.retired ?? []);
+        const loc = (tw: PTweak): PTweak => ({ ...tw, ...localizeCatalog("privacy", tw.id, tw.name, tw.description, lang) });
+        setTweaks((r.tweaks ?? []).map(loc));
+        setRetired((r.retired ?? []).map(loc));
         setApplied(r.applied ?? 0);
       })
       .catch(e => setErr(String(e)))
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { refresh(); }, []);
+  useEffect(() => { refresh(); }, [lang]);
 
   const categories = useMemo(() => [...new Set(tweaks.map(t => t.category))], [tweaks]);
 

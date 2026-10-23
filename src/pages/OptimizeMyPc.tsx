@@ -6,6 +6,7 @@ import { rescanHealth, useHealthScan } from "../hooks/useHealthScan";
 import { useLang, TKey } from "../i18n";
 import { localizeTweak } from "../localize";
 import { ApplyOutcome, ApplyResult } from "../lib/health";
+import { engineText } from "../lib/engineText";
 
 const OUTCOME_ORDER: ApplyOutcome[] = ["verified", "needsRestart", "already", "skipped", "unverified", "failed"];
 const OUTCOME_CLS: Record<ApplyOutcome, string> = {
@@ -88,7 +89,7 @@ export default function OptimizeMyPc({ admin, go }: { admin: boolean; go: (id: s
                 {rows.map((r) => (
                   <div key={r.id} className="finding-row">
                     <Badge cls={OUTCOME_CLS[o]}>{o === "failed" ? "✗" : o === "verified" || o === "already" ? "✓" : "•"}</Badge>
-                    <div className="finding-copy"><b>{name(r.id, String(r.name))}</b><span>{r.detail}</span></div>
+                    <div className="finding-copy"><b>{name(r.id, String(r.name))}</b><span>{engineText(r.detail, lang)}</span></div>
                   </div>
                 ))}
               </div>
@@ -133,8 +134,8 @@ export default function OptimizeMyPc({ admin, go }: { admin: boolean; go: (id: s
                         <Badge cls={`risk-${i.risk}`}>{i.risk === "Low" ? t("riskLow") : i.risk === "Medium" ? t("riskMedium") : t("riskHigh")}</Badge>
                         {i.reboot !== "notNeeded" && <Badge cls="st-partial">{t(`hcReboot_${i.reboot}` as TKey)}</Badge>}
                       </div>
-                      <div className="tweak-desc">{i.benefit}</div>
-                      <div className="muted" style={{ fontSize: 12 }}>{i.when}</div>
+                      <div className="tweak-desc">{engineText(i.benefit, lang)}</div>
+                      <div className="muted" style={{ fontSize: 12 }}>{engineText(i.when, lang)}</div>
                     </div>
                   </label>
                 ))}
@@ -157,7 +158,7 @@ export default function OptimizeMyPc({ admin, go }: { admin: boolean; go: (id: s
               {blocked.map((i) => (
                 <div key={i.id} className="finding-row">
                   <Badge cls="st-unknown">–</Badge>
-                  <div className="finding-copy"><b>{name(i.id, i.name)}</b><span>{i.oneClickBlocked ?? ""}</span></div>
+                  <div className="finding-copy"><b>{name(i.id, i.name)}</b><span>{engineText(i.oneClickBlocked, lang)}</span></div>
                 </div>
               ))}
             </Card>

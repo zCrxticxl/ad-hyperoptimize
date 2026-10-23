@@ -3,6 +3,7 @@ import { api } from "../api";
 import { Spinner } from "../components/ui";
 import { HwWarnings } from "../components/HwWarnings";
 import { useLang, TKey } from "../i18n";
+import { localizeCatalog } from "../localize";
 import { useFeatureFocus } from "../hooks/useFeatureFocus";
 
 const BLOAT_PACKAGES: { name: string; displayKey: TKey; cat: string }[] = [
@@ -61,7 +62,7 @@ function ProgressBar({ done, total }: { done: number; total: number }) {
 }
 
 export default function Debloater({ admin, focusId }: { admin: boolean; focusId?: string }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const [tweaks, setTweaks]       = useState<Tweak[]>([]);
   const [withdrawn, setWithdrawn] = useState<Tweak[]>([]);
   const [loading, setLoading]     = useState(true);
@@ -98,7 +99,14 @@ export default function Debloater({ admin, focusId }: { admin: boolean; focusId?
   const refresh = () => {
     setLoading(true);
     api.debloaterTweaksList()
-      .then(d => { setTweaks(d?.tweaks ?? []); setWithdrawn(d?.withdrawn ?? []); })
+      .then(d => {
+        const loc = (tw: Tweak): Tweak => {
+          const l = localizeCatalog("debloater", tw.id, tw.name, tw.desc, lang);
+          return { ...tw, name: l.name, desc: l.description };
+        };
+        setTweaks((d?.tweaks ?? []).map(loc));
+        setWithdrawn((d?.withdrawn ?? []).map(loc));
+      })
       .catch((e: any) => setErr(String(e)))
       .finally(() => setLoading(false));
   };

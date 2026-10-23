@@ -7,7 +7,7 @@ import { useLang } from "../i18n";
 const ADMIN_CATS = new Set(["win_temp", "wu_cache", "crash_dumps"]);
 
 export default function Cleanup({ admin }: { admin: boolean }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const [cats, setCats] = useState<any[] | null>(null);
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [result, setResult] = useState<any | null>(null);
@@ -49,7 +49,7 @@ export default function Cleanup({ admin }: { admin: boolean }) {
       {!cats && <><Spinner /> <span className="muted">{t("cleanupScanning")}</span></>}
       {meta && cats && (
         <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
-          {t("dataAsOf").replace("{age}", fmtAge(meta.time))}{meta.fromCache ? ` (${t("fromCacheTag")})` : ""}
+          {t("dataAsOf").replace("{age}", fmtAge(meta.time, lang))}{meta.fromCache ? ` (${t("fromCacheTag")})` : ""}
         </div>
       )}
       {err && <div style={{ color: "var(--red)", marginBottom: 10 }}>{err}</div>}

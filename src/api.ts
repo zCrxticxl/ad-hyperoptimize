@@ -206,16 +206,16 @@ export function onMetrics(cb: (m: Metrics) => void): Promise<UnlistenFn> {
   return listen<Metrics>("metrics", (e) => cb(e.payload));
 }
 
-export const fmtAge = (iso: string) => {
-  if (!iso) return "never";
-  const t = new Date(iso).getTime();
-  if (isNaN(t)) return "never";
+/** "5 minutes ago" in the UI language (Intl, so every locale is covered). */
+export const fmtAge = (iso: string, lang = "en") => {
+  const t = iso ? new Date(iso).getTime() : NaN;
+  if (isNaN(t)) return "–";
+  const rtf = new Intl.RelativeTimeFormat(lang, { numeric: "auto" });
   const mins = Math.floor((Date.now() - t) / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins} min ago`;
+  if (mins < 60) return rtf.format(-mins, "minute");
   const h = Math.floor(mins / 60);
-  if (h < 24) return `${h} h ago`;
-  return `${Math.floor(h / 24)} d ago`;
+  if (h < 24) return rtf.format(-h, "hour");
+  return rtf.format(-Math.floor(h / 24), "day");
 };
 
 export const fmtBytes = (b: number) => {

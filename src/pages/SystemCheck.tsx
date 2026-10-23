@@ -7,9 +7,10 @@ import { useHealthScan } from "../hooks/useHealthScan";
 import { useLang, TKey } from "../i18n";
 import { NEEDS_REVIEW, planName } from "../lib/health";
 import type { Mode } from "../App";
+import { engineText } from "../lib/engineText";
 
 export default function SystemCheck({ mode, go }: { mode: Mode; go: (id: string, target?: string) => void }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const { scan, busy, error, rescan } = useHealthScan();
 
   if (!scan) {
@@ -43,7 +44,7 @@ export default function SystemCheck({ mode, go }: { mode: Mode; go: (id: string,
           <div className="page-sub">{t("hcSub")}</div>
         </div>
         <div className="row" style={{ gap: 10 }}>
-          <span className="muted" style={{ fontSize: 12 }}>{t("hcScanned")} {fmtAge(scan.time)}</span>
+          <span className="muted" style={{ fontSize: 12 }}>{t("hcScanned")} {fmtAge(scan.time, lang)}</span>
           <button className="btn ghost" onClick={rescan} disabled={busy}>{busy ? <><Spinner /> {t("hcScanning")}</> : `↻ ${t("hcScan")}`}</button>
           {recs.some((r) => r.oneClick) && <button className="btn" onClick={() => go("autoopt")}>⚡ {t("hcGoOptimize")}</button>}
         </div>
@@ -96,7 +97,7 @@ export default function SystemCheck({ mode, go }: { mode: Mode; go: (id: string,
             <Badge cls={g.status === "ok" ? "st-applied" : g.status === "warning" ? "risk-High" : g.status === "info" ? "st-partial" : "st-unknown"}>
               {g.status === "ok" ? "✓" : g.status === "warning" ? "!" : g.status === "info" ? "i" : "?"} {t(`gsStatus_${g.status}` as TKey)}
             </Badge>
-            <div className="finding-copy"><b>{g.title}</b><span>{g.detail}</span></div>
+            <div className="finding-copy"><b>{engineText(g.title, lang)}</b><span>{engineText(g.detail, lang)}</span></div>
             {g.settings && (
               <button className="row-action" onClick={() => api.openWindowsSettings(g.settings!).catch(() => {})}>
                 {t("gsOpenSettings")} →
@@ -111,7 +112,7 @@ export default function SystemCheck({ mode, go }: { mode: Mode; go: (id: string,
           {scan.checks.map((c) => (
             <div key={c.id} className="finding-row">
               <Badge cls={c.severity === "warning" ? "risk-High" : "st-unknown"}>{c.severity === "warning" ? "!" : "i"}</Badge>
-              <div className="finding-copy"><b>{c.title}</b><span>{c.detail}</span></div>
+              <div className="finding-copy"><b>{engineText(c.title, lang)}</b><span>{engineText(c.detail, lang)}</span></div>
               {c.tool && <button className="row-action" onClick={() => go(c.tool!)}>{t("hcOpenTool")} →</button>}
             </div>
           ))}
@@ -140,7 +141,7 @@ export default function SystemCheck({ mode, go }: { mode: Mode; go: (id: string,
           <thead><tr><th>{t("hcColName")}</th><th>{t("hcColEvidence")}</th><th>{t("hcColDiagnosis")}</th><th>{t("hcColState")}</th></tr></thead>
           <tbody>
             {scan.items.filter((i) => i.diagnosis !== "retired").map((i) => (
-              <tr key={i.id} title={i.reason}>
+              <tr key={i.id} title={engineText(i.reason, lang)}>
                 <td>{i.name}</td>
                 <td>{t(`hcEv_${i.evidence}` as TKey)}</td>
                 <td>{t(`hcDiag_${i.diagnosis}` as TKey)}</td>

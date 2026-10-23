@@ -10,7 +10,7 @@ import type { Mode } from "../App";
 const FINDING_PAGE: Record<string, string> = { heavy_startup: "startup" };
 
 export default function Dashboard({ mode, go }: { mode: Mode; go: (p: string, target?: string) => void }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const [analysis, setAnalysis] = useState<any | null>(null);
   const [meta, setMeta] = useState<{ time: string; fromCache: boolean } | null>(null);
   const [err, setErr] = useState("");
@@ -52,7 +52,7 @@ export default function Dashboard({ mode, go }: { mode: Mode; go: (p: string, ta
           <button className="btn ghost" onClick={() => run(true)} disabled={busy}>{busy ? <><Spinner /> {t("dashAnalyzing")}</> : <>↻ {t("dashReanalyze")}</>}</button>
           {actionable > 0 && <button className="btn ghost" onClick={() => go("optimize")}>{actionable} · {t("dashFixInOptimize")} →</button>}
         </div>
-        {meta && <div className="analysis-meta"><span className="status-dot is-ready" />{meta.fromCache ? `${t("dashCached")} · ` : ""}{t("dashAnalyzed")} {fmtAge(meta.time)}</div>}
+        {meta && <div className="analysis-meta"><span className="status-dot is-ready" />{meta.fromCache ? `${t("dashCached")} · ` : ""}{t("dashAnalyzed")} {fmtAge(meta.time, lang)}</div>}
         <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>{t("dashHealthScore")}: {t("dashScoreDef")}</div>
         {err && <div className="inline-error">{err}</div>}
       </div>
