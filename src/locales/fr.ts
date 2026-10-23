@@ -1096,7 +1096,6 @@ export const ui: Partial<UiText> = {
   hwSevInfo: "INFO",
   hwSevWarning: "AVERTISSEMENT",
   hwSevIssue: "PROBLÈME",
-  hwNoKnownIssue: "Aucun problème connu",
   hwRiskForHw: "RISQUE POUR VOTRE MATÉRIEL",
   hwCheckHw: "VÉRIFIEZ VOTRE MATÉRIEL",
   hwDetecting: "Détection du matériel…",

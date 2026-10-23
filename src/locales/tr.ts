@@ -1096,7 +1096,6 @@ export const ui: Partial<UiText> = {
   hwSevInfo: "BİLGİ",
   hwSevWarning: "UYARI",
   hwSevIssue: "SORUN",
-  hwNoKnownIssue: "Bilinen sorun yok",
   hwRiskForHw: "DONANIMINIZ İÇİN RİSKLİ",
   hwCheckHw: "DONANIMINIZI KONTROL EDİN",
   hwDetecting: "Donanım algılanıyor…",
