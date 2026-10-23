@@ -265,10 +265,24 @@ pub fn diagnose(i: &Input) -> (Diagnosis, String) {
             "This setting does not exist on this system.".into(),
         );
     }
+    // An equivalent or stronger setting (Ultimate plan instead of High
+    // performance) is the user's choice, not drift: undoing the old entry
+    // would switch the plan back to whatever was active before.
+    if i.equivalent_active && i.status == "not_applied" {
+        return (
+            Configured,
+            "An equivalent or stronger setting is already active.".into(),
+        );
+    }
     if i.journal.open && matches!(i.status, "not_applied" | "partial") {
+        let next = if ineligible.is_some() || !offerable {
+            "Undo closes the old entry and restores the values from before."
+        } else {
+            "Undo restores the values from before; apply it again afterwards if you still want it."
+        };
         return (
             Drifted,
-            "Applied by this app earlier, but Windows no longer has that value (changed by Windows, a driver, or another tool). Undo the old entry before applying again.".into(),
+            format!("Applied by this app earlier, but Windows no longer has that value (changed by Windows, a driver, or another tool). {next}"),
         );
     }
     if applied || i.status == "partial" {
@@ -1493,6 +1507,56 @@ mod tests {
             diag("game_dvr_off", "applied", incomplete, &f),
             Diagnosis::Configured
         );
+    }
+
+    #[test]
+    fn ultimate_plan_is_not_drift_of_high_performance() {
+        // Old High performance entry still open, user switched to Ultimate.
+        let f = desktop();
+        let d = diagnose(&Input {
+            meta: meta("power_high_performance").unwrap(),
+            status: "not_applied",
+            journal: JournalState {
+                open: true,
+                incomplete: false,
+            },
+            facts: &f,
+            applied_ids: &[],
+            equivalent_active: true,
+        });
+        assert_eq!(d.0, Diagnosis::Configured);
+        // Without the equivalent it is real drift, and undo is suggested.
+        let d = diagnose(&Input {
+            meta: meta("power_high_performance").unwrap(),
+            status: "not_applied",
+            journal: JournalState {
+                open: true,
+                incomplete: false,
+            },
+            facts: &f,
+            applied_ids: &[],
+            equivalent_active: false,
+        });
+        assert_eq!(d.0, Diagnosis::Drifted);
+        assert!(d.1.contains("apply it again"));
+    }
+
+    #[test]
+    fn drift_of_an_unoffered_tweak_does_not_suggest_reapplying() {
+        let f = desktop();
+        let d = diagnose(&Input {
+            meta: meta("edge_prelaunch_off").unwrap(),
+            status: "not_applied",
+            journal: JournalState {
+                open: true,
+                incomplete: false,
+            },
+            facts: &f,
+            applied_ids: &[],
+            equivalent_active: false,
+        });
+        assert_eq!(d.0, Diagnosis::Drifted);
+        assert!(!d.1.contains("apply it again"), "{}", d.1);
     }
 
     #[test]
