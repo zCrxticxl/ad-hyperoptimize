@@ -178,6 +178,7 @@ export const api = {
   healthScan: () => invoke<any>("cmd_health_scan"),
   optimizeApply: (ids: string[], restorePoint: boolean) => invoke<any>("cmd_optimize_apply", { ids, restorePoint }),
   resetRetired: () => invoke<any>("cmd_reset_retired"),
+  openWindowsSettings: (page: string) => invoke<void>("cmd_open_windows_settings", { page }),
   autooptScan: () => invoke<any>("cmd_autoopt_scan"),
   autooptScore: () => invoke<any>("cmd_autoopt_score"),
   autooptApply: (items: any[]) => invoke<any>("cmd_autoopt_apply", { items }),

@@ -214,6 +214,23 @@ async fn cmd_health_scan() -> Value {
         .unwrap_or_default()
 }
 
+/// Opens one of a fixed set of Windows Settings pages. The page name is
+/// matched against an allowlist, never passed through.
+#[tauri::command]
+fn cmd_open_windows_settings(page: String) -> Result<(), String> {
+    let uri = match page.as_str() {
+        "display-advanced" => "ms-settings:display-advanced",
+        "display-advancedgraphics" => "ms-settings:display-advancedgraphics",
+        _ => return Err(format!("unknown settings page '{page}'")),
+    };
+    let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
+    std::process::Command::new(format!(r"{root}\explorer.exe"))
+        .arg(uri)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("could not open Windows Settings: {e}"))
+}
+
 #[tauri::command(async)]
 async fn cmd_reset_retired() -> Value {
     tauri::async_runtime::spawn_blocking(optimizer::reset_retired)
@@ -1771,6 +1788,7 @@ pub fn run() {
             cmd_health_scan,
             cmd_optimize_apply,
             cmd_reset_retired,
+            cmd_open_windows_settings,
             cmd_autoopt_score,
             cmd_autoopt_apply,
             // game profiles / auto-switcher

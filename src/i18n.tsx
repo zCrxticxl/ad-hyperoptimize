@@ -1623,6 +1623,13 @@ const de = {
   retConfirm: "{n} Einstellungen ohne Nutzen auf ihre Originalwerte zurücksetzen?",
   retShowItems: "Einzelne Einstellungen anzeigen",
   retAdminHint: "Einige brauchen Administratorrechte und werden sonst übersprungen.",
+  gsTitle: "Gaming-Setup",
+  gsHint: "Prüft Einstellungen außerhalb der Tweaks, die nachweislich zählen: Bildwiederholrate, RAM-Takt (XMP/EXPO), Windows-Grafikoptionen und Resizable BAR. Alle Werte werden direkt ausgelesen.",
+  gsOpenSettings: "Windows-Einstellungen öffnen",
+  gsStatus_ok: "OK",
+  gsStatus_warning: "Handeln",
+  gsStatus_info: "Hinweis",
+  gsStatus_unknown: "Unbekannt",
 };
 
 // ── English ───────────────────────────────────────────────────────────────────
@@ -3219,6 +3226,13 @@ const en: typeof de = {
   retConfirm: "Reset {n} settings with no benefit to their original values?",
   retShowItems: "Show individual settings",
   retAdminHint: "Some need administrator rights and are skipped otherwise.",
+  gsTitle: "Gaming setup",
+  gsHint: "Checks settings outside the tweaks that demonstrably matter: refresh rate, memory speed (XMP/EXPO), Windows graphics options and Resizable BAR. Every value is read directly.",
+  gsOpenSettings: "Open Windows Settings",
+  gsStatus_ok: "OK",
+  gsStatus_warning: "Action",
+  gsStatus_info: "Note",
+  gsStatus_unknown: "Unknown",
 };
 
 export type UiText = typeof en;

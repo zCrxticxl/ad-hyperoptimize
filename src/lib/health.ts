@@ -63,6 +63,15 @@ export type HealthCheckFinding = {
   tool: string | null;
 };
 
+export type GamingCheck = {
+  id: "refresh" | "xmp" | "windowed" | "vrr" | "rebar" | string;
+  status: "ok" | "warning" | "info" | "unknown";
+  title: string;
+  detail: string;
+  /** Windows Settings page that controls it, if any. */
+  settings: string | null;
+};
+
 export type HealthScan = {
   time: string;
   admin: boolean;
@@ -86,6 +95,7 @@ export type HealthScan = {
     retiredActive: number;
   };
   checks: HealthCheckFinding[];
+  gaming: GamingCheck[];
   items: HealthItem[];
   error?: string;
 };

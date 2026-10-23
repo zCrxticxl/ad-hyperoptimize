@@ -560,6 +560,11 @@ pub fn apply_tweak(id: String) -> Result<String, String> {
     Ok(format!("Applied: {}", t.name))
 }
 
+/// Whether an exact pre-apply state was captured for this tweak.
+pub(crate) fn has_captured_state(id: &str) -> bool {
+    state_path(id).is_ok_and(|p| p.exists())
+}
+
 pub fn revert_tweak(id: String) -> Result<String, String> {
     let t = TWEAKS
         .iter()

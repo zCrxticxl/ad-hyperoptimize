@@ -1,5 +1,5 @@
 import React from "react";
-import { fmtAge } from "../api";
+import { api, fmtAge } from "../api";
 import { Badge, Card, ErrorBanner, Spinner } from "../components/ui";
 import { OptCard } from "../components/OptCard";
 import { RetiredCard } from "../components/RetiredCard";
@@ -87,6 +87,23 @@ export default function SystemCheck({ mode, go }: { mode: Mode; go: (id: string,
             </div>
           ))}
         </div>
+      </Card>
+
+      <Card title={t("gsTitle")} style={{ marginTop: 14 }}>
+        <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>{t("gsHint")}</div>
+        {(scan.gaming ?? []).map((g) => (
+          <div key={g.id} className="finding-row">
+            <Badge cls={g.status === "ok" ? "st-applied" : g.status === "warning" ? "risk-High" : g.status === "info" ? "st-partial" : "st-unknown"}>
+              {g.status === "ok" ? "✓" : g.status === "warning" ? "!" : g.status === "info" ? "i" : "?"} {t(`gsStatus_${g.status}` as TKey)}
+            </Badge>
+            <div className="finding-copy"><b>{g.title}</b><span>{g.detail}</span></div>
+            {g.settings && (
+              <button className="row-action" onClick={() => api.openWindowsSettings(g.settings!).catch(() => {})}>
+                {t("gsOpenSettings")} →
+              </button>
+            )}
+          </div>
+        ))}
       </Card>
 
       {scan.checks.length > 0 && (

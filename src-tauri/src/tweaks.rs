@@ -1566,7 +1566,24 @@ fn effective_status(id: &str) -> Option<&'static str> {
                 .ok()
                 .flatten(),
         )),
+        // Fullscreen optimizations are off only when FSEBehaviorMode is 2; the
+        // two companion values are commonly 0 by default and must not make a
+        // default system look "partially" tweaked.
+        "fse_optimizations_off" => Some(fse_status(
+            reg_read("HKCU", r"System\GameConfigStore", "GameDVR_FSEBehaviorMode")
+                .ok()
+                .flatten(),
+        )),
         _ => None,
+    }
+}
+
+#[cfg(any(windows, test))]
+fn fse_status(value: Option<RegVal>) -> &'static str {
+    match value {
+        Some(RegVal::Dword(2)) => "applied",
+        Some(RegVal::Dword(_)) | None => "not_applied",
+        Some(_) => "unknown",
     }
 }
 
@@ -2266,6 +2283,13 @@ mod tests {
         }
         assert_eq!(parse_tcp_autotuning("SomethingElse"), None);
         assert_eq!(parse_tcp_autotuning(""), None);
+    }
+
+    #[test]
+    fn fse_state_is_decided_by_behavior_mode() {
+        assert_eq!(fse_status(Some(RegVal::Dword(2))), "applied");
+        assert_eq!(fse_status(Some(RegVal::Dword(0))), "not_applied");
+        assert_eq!(fse_status(None), "not_applied");
     }
 
     #[test]

@@ -37,6 +37,31 @@ pub struct System {
     pub ultimate_active: bool,
     pub pagefile_disabled: bool,
     pub defender_realtime: Option<bool>,
+    pub ram_modules: Vec<RamModule>,
+    pub displays: Vec<Display>,
+    /// HKCU DirectXUserGlobalSettings; None when the value does not exist.
+    pub dx_settings: Option<String>,
+    /// (BAR1 total MiB, framebuffer total MiB) from nvidia-smi.
+    pub nvidia_bar: Option<(u64, u64)>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RamModule {
+    pub part: String,
+    /// Win32_PhysicalMemory.ConfiguredClockSpeed (MT/s on current firmware).
+    pub configured: u32,
+    /// SMBIOS memory type: 26 = DDR4, 34 = DDR5.
+    pub smbios_type: u32,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Display {
+    pub monitor: String,
+    pub width: u32,
+    pub height: u32,
+    pub current_hz: u32,
+    /// Highest refresh rate the monitor/driver offers at the current resolution.
+    pub max_hz_same_res: u32,
 }
 
 /// Locale-independent model-name rules (documented in the UI as such).
@@ -371,18 +396,22 @@ pub fn classify_after_apply(reboot: Reboot, readback: (&str, &str)) -> (Outcome,
 }
 
 /// Classifies a finished reset of a retired tweak by reading the state back.
-pub fn classify_after_reset(readback: (&str, &str)) -> (Outcome, String) {
+/// "Still applied" is only accepted for tweaks whose target is the Windows
+/// default; anywhere else something re-applied it or the reset did not stick.
+pub fn classify_after_reset(id: &str, readback: (&str, &str)) -> (Outcome, String) {
     match readback {
         ("not_applied", "live") => (
             Outcome::Verified,
             "Reset; the original value was confirmed in Windows.".into(),
         ),
-        // The undo succeeded, so the restored original equals this setting
-        // (it was the Windows default all along).
-        ("applied", _) => (
+        ("applied", _) if optregistry::MATCHES_WINDOWS_DEFAULT.contains(&id) => (
             Outcome::Already,
             "The original value is identical to this setting (Windows default); nothing to change."
                 .into(),
+        ),
+        ("applied", _) => (
+            Outcome::Failed,
+            "Still active after the reset: another tool, a policy or another page of this app sets it again.".into(),
         ),
         ("partial", _) => (
             Outcome::Failed,
@@ -393,6 +422,221 @@ pub fn classify_after_reset(readback: (&str, &str)) -> (Outcome, String) {
             "Reset ran; Windows offers no way to read this setting back.".into(),
         ),
     }
+}
+
+// ── Gaming setup checks (pure) ───────────────────────────────────────────────
+
+/// Rated speed encoded in a memory kit's part number, in MT/s. Kingston/HyperX
+/// encode it as two digits after the generation (KF436C… = 3600, KF560C… =
+/// 6000); most other vendors spell it out (CMK32GX4M2Z3600C18, F4-3600C16…).
+/// None when the part number carries no plausible speed.
+pub fn ram_rated_from_part(part: &str) -> Option<u32> {
+    let p = part.trim().to_ascii_uppercase();
+    for prefix in ["KF4", "KF5", "KHX"] {
+        if let Some(rest) = p.strip_prefix(prefix) {
+            let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+            if digits.len() == 2 && rest[2..].starts_with('C') {
+                return digits.parse::<u32>().ok().map(|d| d * 100);
+            }
+        }
+    }
+    p.split(|c: char| !c.is_ascii_digit())
+        .filter(|run| run.len() == 4)
+        .filter_map(|run| run.parse::<u32>().ok())
+        .filter(|v| (2133..=9600).contains(v))
+        .max()
+}
+
+fn gaming(id: &str, status: &str, title: String, detail: String, settings: Option<&str>) -> Value {
+    json!({ "id": id, "status": status, "title": title, "detail": detail, "settings": settings })
+}
+
+pub fn ram_check(modules: &[RamModule]) -> Value {
+    let configured: Vec<u32> = modules
+        .iter()
+        .map(|m| m.configured)
+        .filter(|&c| c > 0)
+        .collect();
+    let Some(&speed) = configured.iter().min() else {
+        return gaming(
+            "xmp",
+            "unknown",
+            "Memory speed".into(),
+            "Windows did not report the configured memory speed.".into(),
+            None,
+        );
+    };
+    let rated = modules
+        .iter()
+        .filter_map(|m| ram_rated_from_part(&m.part))
+        .max();
+    let ddr = modules.first().map(|m| m.smbios_type).unwrap_or(0);
+    match rated {
+        Some(r) if speed + 100 < r => gaming("xmp", "warning",
+            format!("Memory runs at {speed} MT/s, the kit is rated for {r} MT/s"),
+            "The rated speed comes from the modules' part number. Enable XMP (Intel) or EXPO/DOCP (AMD) in the BIOS, then check stability. Faster memory mainly helps CPU-bound games.".into(),
+            None),
+        Some(r) => gaming("xmp", "ok",
+            format!("Memory runs at its rated {speed} MT/s"),
+            format!("Matches the {r} MT/s encoded in the part number, so XMP/EXPO (or equivalent) is active."),
+            None),
+        None if (ddr == 26 && speed <= 2666) || (ddr == 34 && speed <= 4800) => gaming("xmp", "info",
+            format!("Memory runs at {speed} MT/s, a standard base speed"),
+            "The part number does not reveal the kit's rating. If the label on your modules shows a higher speed, enable XMP/EXPO in the BIOS.".into(),
+            None),
+        None => gaming("xmp", "ok", format!("Memory runs at {speed} MT/s"),
+            "The part number does not reveal the kit's rating; this speed is above the standard base speeds.".into(),
+            None),
+    }
+}
+
+pub fn refresh_check(displays: &[Display]) -> Value {
+    if displays.is_empty() {
+        return gaming(
+            "refresh",
+            "unknown",
+            "Display refresh rate".into(),
+            "The active displays could not be read.".into(),
+            None,
+        );
+    }
+    let below: Vec<&Display> = displays
+        .iter()
+        .filter(|d| d.max_hz_same_res >= d.current_hz + 10)
+        .collect();
+    let describe = |d: &Display| {
+        format!(
+            "{}: {} Hz at {}×{} (up to {} Hz possible)",
+            d.monitor, d.current_hz, d.width, d.height, d.max_hz_same_res
+        )
+    };
+    if below.is_empty() {
+        gaming(
+            "refresh",
+            "ok",
+            "Displays run at their highest refresh rate".into(),
+            displays
+                .iter()
+                .map(|d| {
+                    format!(
+                        "{}: {} Hz at {}×{}",
+                        d.monitor, d.current_hz, d.width, d.height
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("; "),
+            None,
+        )
+    } else {
+        gaming(
+            "refresh",
+            "warning",
+            format!(
+                "{} display(s) run below their maximum refresh rate",
+                below.len()
+            ),
+            format!(
+                "{}. Choose the highest rate under Settings > Display > Advanced display.",
+                below
+                    .iter()
+                    .map(|d| describe(d))
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            ),
+            Some("display-advanced"),
+        )
+    }
+}
+
+/// `SwapEffectUpgradeEnable` / `VRROptimizeEnable` from the DirectX user
+/// settings string (`Key=1;Key=0;`). None = not set (Windows default).
+pub fn dx_flag(settings: Option<&str>, key: &str) -> Option<bool> {
+    settings?
+        .split(';')
+        .filter_map(|kv| kv.split_once('='))
+        .find(|(k, _)| k.trim().eq_ignore_ascii_case(key))
+        .map(|(_, v)| v.trim() == "1")
+}
+
+pub fn dx_checks(build: u32, settings: Option<&str>) -> Vec<Value> {
+    // Both settings exist from Windows 11 22H2 (build 22621).
+    if build < 22621 {
+        return vec![];
+    }
+    let windowed = match dx_flag(settings, "SwapEffectUpgradeEnable") {
+        Some(true) => gaming("windowed", "ok", "Optimizations for windowed games: on".into(),
+            "DirectX 10/11 games in windowed or borderless mode use the modern presentation model (lower latency, Auto HDR and VRR in windowed mode).".into(),
+            None),
+        Some(false) => gaming("windowed", "info", "Optimizations for windowed games: off".into(),
+            "Turning it on lets DirectX 10/11 games in windowed or borderless mode use the modern presentation model, with lower latency. Turn it off again if a game misbehaves.".into(),
+            Some("display-advancedgraphics")),
+        None => gaming("windowed", "info", "Optimizations for windowed games: Windows default".into(),
+            "Not set explicitly. Check it under Settings > Display > Graphics; it can lower latency for DirectX 10/11 games in windowed or borderless mode.".into(),
+            Some("display-advancedgraphics")),
+    };
+    let vrr = match dx_flag(settings, "VRROptimizeEnable") {
+        Some(true) => gaming("vrr", "ok", "Variable refresh rate for all games: on".into(),
+            "Games without their own VRR support also use G-SYNC/FreeSync.".into(), None),
+        _ => gaming("vrr", "info", "Variable refresh rate for all games: off".into(),
+            "Only useful if your monitor supports G-SYNC, FreeSync or VRR: then games without their own VRR support can use it too.".into(),
+            Some("display-advancedgraphics")),
+    };
+    vec![windowed, vrr]
+}
+
+/// (BAR1 total, framebuffer total) in MiB from `nvidia-smi -q -d MEMORY`.
+pub fn parse_nvidia_bar(out: &str) -> Option<(u64, u64)> {
+    let mut section = "";
+    let (mut fb, mut bar1) = (None, None);
+    for line in out.lines() {
+        let t = line.trim();
+        if t.starts_with("FB Memory Usage") {
+            section = "fb";
+        } else if t.starts_with("BAR1 Memory Usage") {
+            section = "bar1";
+        } else if let Some(v) = t.strip_prefix("Total") {
+            let mib = v
+                .trim_start_matches([' ', ':'])
+                .split_whitespace()
+                .next()
+                .and_then(|n| n.parse::<u64>().ok());
+            match section {
+                "fb" if fb.is_none() => fb = mib,
+                "bar1" if bar1.is_none() => bar1 = mib,
+                _ => {}
+            }
+            section = "";
+        }
+    }
+    Some((bar1?, fb?))
+}
+
+pub fn rebar_check(has_nvidia: bool, bar: Option<(u64, u64)>) -> Value {
+    match (has_nvidia, bar) {
+        (false, _) => gaming("rebar", "unknown", "Resizable BAR".into(),
+            "Only NVIDIA GPUs can be checked here (via nvidia-smi). For AMD, see Smart Access Memory in AMD Software or the BIOS.".into(),
+            None),
+        (true, None) => gaming("rebar", "unknown", "Resizable BAR".into(),
+            "nvidia-smi did not report the BAR1 size.".into(), None),
+        (true, Some((bar1, fb))) if bar1 * 10 >= fb * 9 => gaming("rebar", "ok",
+            "Resizable BAR is active".into(),
+            format!("BAR1 {bar1} MiB covers the {fb} MiB of video memory. The NVIDIA driver uses it per game where it helps."),
+            None),
+        (true, Some((bar1, _))) => gaming("rebar", "info", "Resizable BAR is off".into(),
+            format!("BAR1 is only {bar1} MiB. Enabling \"Above 4G Decoding\" and \"Re-Size BAR Support\" in the BIOS (UEFI boot, CSM off) helps some games; the driver enables it per game only where it helps."),
+            None),
+    }
+}
+
+pub fn gaming_checks(s: &System) -> Vec<Value> {
+    let has_nvidia = s
+        .gpus
+        .iter()
+        .any(|(n, _, _)| n.to_ascii_lowercase().contains("nvidia"));
+    let mut out = vec![refresh_check(&s.displays), ram_check(&s.ram_modules)];
+    out.extend(dx_checks(s.build, s.dx_settings.as_deref()));
+    out.push(rebar_check(has_nvidia, s.nvidia_bar));
+    out
 }
 
 // ── System checks beyond the tweak catalog (pure) ────────────────────────────
@@ -490,6 +734,84 @@ pub fn system_checks(s: &System, journal: &[JournalEntry], today: chrono::NaiveD
 
 // ── I/O layer ────────────────────────────────────────────────────────────────
 
+/// Active displays via EnumDisplayDevices/EnumDisplaySettings: the current mode
+/// and the highest refresh rate offered at the same resolution. One line per
+/// display: monitor|width|height|currentHz|maxHzSameResolution.
+const DISPLAYS_PS: &str = r#"
+Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+public static class AdhoDisplays {
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    public struct DEVMODE {
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string dmDeviceName;
+        public short dmSpecVersion; public short dmDriverVersion; public short dmSize; public short dmDriverExtra;
+        public int dmFields; public int dmPositionX; public int dmPositionY; public int dmDisplayOrientation; public int dmDisplayFixedOutput;
+        public short dmColor; public short dmDuplex; public short dmYResolution; public short dmTTOption; public short dmCollate;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string dmFormName;
+        public short dmLogPixels; public int dmBitsPerPel; public int dmPelsWidth; public int dmPelsHeight;
+        public int dmDisplayFlags; public int dmDisplayFrequency; public int dmICMMethod; public int dmICMIntent;
+        public int dmMediaType; public int dmDitherType; public int dmReserved1; public int dmReserved2;
+        public int dmPanningWidth; public int dmPanningHeight;
+    }
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    public struct DISPLAY_DEVICE {
+        public int cb;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string DeviceName;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string DeviceString;
+        public int StateFlags;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string DeviceID;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string DeviceKey;
+    }
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    static extern bool EnumDisplayDevices(string device, uint index, ref DISPLAY_DEVICE dd, uint flags);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    static extern bool EnumDisplaySettings(string device, int mode, ref DEVMODE dm);
+    public static List<string> Report() {
+        var lines = new List<string>();
+        for (uint i = 0; ; i++) {
+            var dd = new DISPLAY_DEVICE(); dd.cb = Marshal.SizeOf(dd);
+            if (!EnumDisplayDevices(null, i, ref dd, 0)) break;
+            if ((dd.StateFlags & 1) == 0) continue; // not attached to the desktop
+            var cur = new DEVMODE(); cur.dmSize = (short)Marshal.SizeOf(cur);
+            if (!EnumDisplaySettings(dd.DeviceName, -1, ref cur)) continue;
+            int max = cur.dmDisplayFrequency;
+            for (int m = 0; ; m++) {
+                var mode = new DEVMODE(); mode.dmSize = (short)Marshal.SizeOf(mode);
+                if (!EnumDisplaySettings(dd.DeviceName, m, ref mode)) break;
+                if (mode.dmPelsWidth == cur.dmPelsWidth && mode.dmPelsHeight == cur.dmPelsHeight && mode.dmDisplayFrequency > max)
+                    max = mode.dmDisplayFrequency;
+            }
+            var mon = new DISPLAY_DEVICE(); mon.cb = Marshal.SizeOf(mon);
+            string name = EnumDisplayDevices(dd.DeviceName, 0, ref mon, 0) ? mon.DeviceString : dd.DeviceString;
+            lines.Add(name.Replace("|", "/") + "|" + cur.dmPelsWidth + "|" + cur.dmPelsHeight + "|" + cur.dmDisplayFrequency + "|" + max);
+        }
+        return lines;
+    }
+}
+'@
+[AdhoDisplays]::Report()
+"#;
+
+pub fn parse_displays(out: &str) -> Vec<Display> {
+    out.lines()
+        .filter_map(|l| {
+            let f: Vec<&str> = l.trim().split('|').collect();
+            if f.len() != 5 {
+                return None;
+            }
+            Some(Display {
+                monitor: f[0].to_string(),
+                width: f[1].parse().ok()?,
+                height: f[2].parse().ok()?,
+                current_hz: f[3].parse().ok()?,
+                max_hz_same_res: f[4].parse().ok()?,
+            })
+        })
+        .collect()
+}
+
 const FACTS_PS: &str = r#"
 $o = [ordered]@{}
 $cv = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion'
@@ -506,6 +828,8 @@ try { $cs = Get-CimInstance Win32_ComputerSystem -ErrorAction Stop
       $o.pagefileAuto = [bool]$cs.AutomaticManagedPagefile } catch {}
 $o.pagefiles = @(Get-CimInstance Win32_PageFileUsage -ErrorAction SilentlyContinue).Count
 $o.hasBattery = @(Get-CimInstance Win32_Battery -ErrorAction SilentlyContinue).Count -gt 0
+$o.ram = @(Get-CimInstance Win32_PhysicalMemory -ErrorAction SilentlyContinue | ForEach-Object {
+    @{ part = ([string]$_.PartNumber).Trim(); configured = [int]$_.ConfiguredClockSpeed; type = [int]$_.SMBIOSMemoryType } })
 try {
     $sysDisk = (Get-Partition -DriveLetter $env:SystemDrive.Substring(0,1) -ErrorAction Stop | Get-Disk).Number
     $pd = @(Get-PhysicalDisk -ErrorAction Stop)
@@ -546,6 +870,18 @@ pub fn detect() -> Result<System, String> {
         pagefile_disabled: v["pagefileAuto"].as_bool() == Some(false)
             && v["pagefiles"].as_u64() == Some(0),
         defender_realtime: v["defenderRealtime"].as_bool(),
+        ram_modules: match &v["ram"] {
+            Value::Array(a) => a.clone(),
+            o @ Value::Object(_) => vec![o.clone()],
+            _ => vec![],
+        }
+        .iter()
+        .map(|m| RamModule {
+            part: m["part"].as_str().unwrap_or_default().to_string(),
+            configured: m["configured"].as_u64().unwrap_or(0) as u32,
+            smbios_type: m["type"].as_u64().unwrap_or(0) as u32,
+        })
+        .collect(),
         ..Default::default()
     };
     let gpus = match &v["gpus"] {
@@ -573,6 +909,29 @@ pub fn detect() -> Result<System, String> {
         (Some(active), Some(ultimate)) => active.eq_ignore_ascii_case(&ultimate),
         _ => false,
     };
+    if let Ok(out) = crate::ps::run(DISPLAYS_PS) {
+        sys.displays = parse_displays(&out);
+    }
+    sys.dx_settings = match crate::tweaks::reg_read(
+        "HKCU",
+        r"Software\Microsoft\DirectX\UserGpuPreferences",
+        "DirectXUserGlobalSettings",
+    ) {
+        Ok(Some(crate::safety::RegVal::Str(v))) => Some(v),
+        _ => None,
+    };
+    // Absolute path: the elevated app must not run a nvidia-smi found on PATH.
+    if sys
+        .gpus
+        .iter()
+        .any(|(n, _, _)| n.to_ascii_lowercase().contains("nvidia"))
+    {
+        let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
+        let smi = format!(r"{root}\System32\nvidia-smi.exe");
+        if let Ok((_, out, _)) = crate::ps::exec_capture(&smi, &["-q", "-d", "MEMORY"]) {
+            sys.nvidia_bar = parse_nvidia_bar(&out);
+        }
+    }
     Ok(sys)
 }
 
@@ -670,6 +1029,7 @@ pub fn scan() -> Value {
         let journal = crate::safety::load_journal().unwrap_or_default();
         let items = evaluate(&system, &journal);
         let checks = system_checks(&system, &journal, chrono::Local::now().date_naive());
+        let gaming = gaming_checks(&system);
         let count = |d: Diagnosis| items.iter().filter(|i| i.diagnosis == d).count();
         let summary = json!({
             "configured": count(Diagnosis::Configured),
@@ -679,7 +1039,8 @@ pub fn scan() -> Value {
             "retiredActive": count(Diagnosis::RetiredActive),
             "failed": count(Diagnosis::Failed),
             "notApplicable": count(Diagnosis::NotApplicable) + count(Diagnosis::Unsupported),
-            "attention": checks.iter().filter(|c| c["severity"] == "warning").count(),
+            "attention": checks.iter().filter(|c| c["severity"] == "warning").count()
+                + gaming.iter().filter(|c| c["status"] == "warning").count(),
         });
         json!({
             "time": chrono::Local::now().to_rfc3339(),
@@ -687,12 +1048,17 @@ pub fn scan() -> Value {
             "system": system_json(&system),
             "summary": summary,
             "checks": checks,
+            "gaming": gaming,
             "items": items.iter().map(|i| item_json(i, admin)).collect::<Vec<_>>(),
         })
     }
     #[cfg(not(windows))]
     json!({ "error": "The health check is only available on Windows." })
 }
+
+/// Retired tweaks that the Debloater also offers under its own id and state
+/// file: (tweak id, debloater id).
+const DEBLOATER_DUPLICATES: &[(&str, &str)] = &[("cortana_off", "cortana_off")];
 
 /// Resets every retired tweak that is still active (journaled undo with the
 /// captured originals, else the engine's verified force-revert), then reads
@@ -721,10 +1087,22 @@ pub fn reset_retired() -> Value {
                 );
                 continue;
             }
+            // The same setting may also be held by a duplicate in another
+            // catalog with its own undo state; reset that too.
+            // Only with an exact captured state, never the guessed-default undo.
+            if let Some(dup) = DEBLOATER_DUPLICATES
+                .iter()
+                .find(|(t, _)| *t == id)
+                .map(|(_, d)| *d)
+            {
+                if crate::debloater::has_captured_state(dup) {
+                    let _ = crate::debloater::revert_tweak(dup.to_string());
+                }
+            }
             let (outcome, detail) = match crate::tweaks::revert(id) {
                 Err(e) => (Outcome::Failed, e),
                 Ok(_) => match crate::tweaks::status_of(id) {
-                    Some(readback) => classify_after_reset(readback),
+                    Some(readback) => classify_after_reset(id, readback),
                     None => (
                         Outcome::Unverified,
                         "The setting could not be read back.".into(),
@@ -1005,16 +1383,24 @@ mod tests {
     #[test]
     fn reset_is_only_verified_when_windows_confirms() {
         assert_eq!(
-            classify_after_reset(("not_applied", "live")).0,
+            classify_after_reset("nagle_off", ("not_applied", "live")).0,
             Outcome::Verified
         );
         assert_eq!(
-            classify_after_reset(("applied", "live")).0,
+            classify_after_reset("remote_registry_off", ("applied", "live")).0,
             Outcome::Already
         );
-        assert_eq!(classify_after_reset(("partial", "live")).0, Outcome::Failed);
+        // Anywhere else "still applied" is a failure, never a success.
         assert_eq!(
-            classify_after_reset(("unknown", "none")).0,
+            classify_after_reset("cortana_off", ("applied", "live")).0,
+            Outcome::Failed
+        );
+        assert_eq!(
+            classify_after_reset("nagle_off", ("partial", "live")).0,
+            Outcome::Failed
+        );
+        assert_eq!(
+            classify_after_reset("nagle_off", ("unknown", "none")).0,
             Outcome::Unverified
         );
     }
@@ -1165,6 +1551,12 @@ mod tests {
         }
         println!("SYSTEM {}", v["system"]);
         println!("SUMMARY {}", v["summary"]);
+        for c in v["gaming"].as_array().unwrap() {
+            println!(
+                "GAMING {} {} | {} | {}",
+                c["status"], c["id"], c["title"], c["detail"]
+            );
+        }
         for c in v["checks"].as_array().unwrap() {
             println!("CHECK {} {} | {}", c["severity"], c["id"], c["title"]);
         }
@@ -1180,6 +1572,101 @@ mod tests {
                 i["oneClick"]
             );
         }
+    }
+
+    #[test]
+    fn ram_part_numbers_reveal_rated_speed() {
+        assert_eq!(ram_rated_from_part("CMK32GX4M2Z3600C18"), Some(3600));
+        assert_eq!(ram_rated_from_part("F4-3600C16D-32GTZN"), Some(3600));
+        assert_eq!(ram_rated_from_part("F5-6000J3038F16GX2-TZ5RK"), Some(6000));
+        assert_eq!(ram_rated_from_part("KF436C17BBK2/16"), Some(3600));
+        assert_eq!(ram_rated_from_part("KF560C40BBK2-32"), Some(6000));
+        assert_eq!(ram_rated_from_part("TF3D416G3600HC18J"), Some(3600));
+        assert_eq!(ram_rated_from_part("M378A1K43CB2-CTD"), None);
+        assert_eq!(ram_rated_from_part("BL2K16G36C16U4B"), None);
+    }
+
+    #[test]
+    fn xmp_check_compares_configured_with_rated() {
+        let m = |part: &str, configured: u32, t: u32| RamModule {
+            part: part.into(),
+            configured,
+            smbios_type: t,
+        };
+        assert_eq!(
+            ram_check(&[m("CMK32GX4M2Z3600C18", 2133, 26)])["status"],
+            "warning"
+        );
+        assert_eq!(
+            ram_check(&[m("CMK32GX4M2Z3600C18", 3600, 26)])["status"],
+            "ok"
+        );
+        assert_eq!(
+            ram_check(&[m("M378A1K43CB2-CTD", 2400, 26)])["status"],
+            "info"
+        );
+        assert_eq!(
+            ram_check(&[m("M378A1K43CB2-CTD", 3200, 26)])["status"],
+            "ok"
+        );
+        assert_eq!(
+            ram_check(&[m("M323R2GA3BB0-CQKOD", 4800, 34)])["status"],
+            "info"
+        );
+        assert_eq!(ram_check(&[])["status"], "unknown");
+    }
+
+    #[test]
+    fn refresh_check_flags_displays_below_maximum() {
+        let d = |cur: u32, max: u32| Display {
+            monitor: "M".into(),
+            width: 1920,
+            height: 1080,
+            current_hz: cur,
+            max_hz_same_res: max,
+        };
+        assert_eq!(refresh_check(&[d(239, 239)])["status"], "ok");
+        assert_eq!(refresh_check(&[d(239, 240)])["status"], "ok"); // rounding, not a mistake
+        assert_eq!(refresh_check(&[d(60, 144)])["status"], "warning");
+        assert_eq!(
+            refresh_check(&[d(240, 240), d(60, 165)])["status"],
+            "warning"
+        );
+        assert_eq!(refresh_check(&[])["status"], "unknown");
+        assert_eq!(
+            parse_displays("LG ULTRAGEAR|1920|1080|239|240\nbad"),
+            vec![Display {
+                monitor: "LG ULTRAGEAR".into(),
+                width: 1920,
+                height: 1080,
+                current_hz: 239,
+                max_hz_same_res: 240
+            }]
+        );
+    }
+
+    #[test]
+    fn directx_user_settings_are_parsed() {
+        let s = Some("SwapEffectUpgradeEnable=1;VRROptimizeEnable=0;");
+        assert_eq!(dx_flag(s, "SwapEffectUpgradeEnable"), Some(true));
+        assert_eq!(dx_flag(s, "VRROptimizeEnable"), Some(false));
+        assert_eq!(dx_flag(None, "SwapEffectUpgradeEnable"), None);
+        let c = dx_checks(26200, s);
+        assert_eq!(c[0]["status"], "ok");
+        assert_eq!(c[1]["status"], "info");
+        assert_eq!(dx_checks(26200, None)[0]["status"], "info");
+        assert!(dx_checks(19045, s).is_empty()); // Windows 10: not available
+    }
+
+    #[test]
+    fn rebar_is_read_from_nvidia_smi() {
+        let out = "GPU 00000000:06:00.0\n    FB Memory Usage\n        Total                  : 16376 MiB\n        Used : 1552 MiB\n    BAR1 Memory Usage\n        Total                  : 16384 MiB\n        Used : 16355 MiB\n";
+        assert_eq!(parse_nvidia_bar(out), Some((16384, 16376)));
+        assert_eq!(rebar_check(true, parse_nvidia_bar(out))["status"], "ok");
+        let off = out.replace("16384 MiB", "256 MiB");
+        assert_eq!(rebar_check(true, parse_nvidia_bar(&off))["status"], "info");
+        assert_eq!(rebar_check(false, None)["status"], "unknown");
+        assert_eq!(parse_nvidia_bar("garbage"), None);
     }
 
     #[test]
