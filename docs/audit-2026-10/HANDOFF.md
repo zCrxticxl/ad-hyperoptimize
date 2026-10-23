@@ -82,6 +82,8 @@ The second cleanup pass (`8309a36` … `f1b2290`) was made in a cloud (Linux) se
 
 ## Done
 
+- **In-game FPS measurement** (`src-tauri/src/frametime.rs`, Benchmark page): imports PresentMon / CapFrameX / FrameView CSV, avg FPS, 1 % / 0.1 % lows, before/after comparison with ≥ 3 runs per state and a noise threshold. Parser and statistics are unit-tested; the page was checked in the browser with mocked data only. No real capture has been imported yet.
+
 - **Second cleanup pass on the other catalogs** (`8309a36` … `f1b2290`; details and tests in `optimization-engine.md`, section "Second cleanup pass"):
   - `perftweaks.rs`: `ram_flush_standby` removed (one-shot, nothing to reset).
   - `privacy.rs`: `prv_ceip_off`, `prv_maps_update_off` retired.
@@ -96,15 +98,14 @@ The second cleanup pass (`8309a36` … `f1b2290`) was made in a cloud (Linux) se
    - Debloater `lock_screen_ads` vs Optimize `lockscreen_ads_off`, Debloater `xbox_gamebar` vs Optimize `game_dvr_off`/`gamebar_popups_off`: overlapping values, not merged.
    - Privacy Center vs Optimize privacy tweaks (`telemetry_minimal`, `advertising_id_off`, `content_suggestions_off`, `activity_history_off`, `wer_off`, `delivery_opt_off`): still two catalogs. Merging needs a decision on which page owns privacy.
    - Linux build: `tweaks::reg_read` is Windows-only but used unconditionally (see above).
-2. **Translations** of the new strings (`hc*`, `om*`, `opt*`, `ret*`, `gs*`, `wd*`, `perfRamFlushRemoved`, `navSystemCheck`, …; `perfRamDesc` was removed from the other locales because it still described the flush) for es/fr/pt/pl/ru/tr/sv in `src/locales/*.ts`.
+2. **Translations:** German engine and catalog texts are done (`src/lib/engineText.ts`, `src/locales/deTweaks.ts`). Still open: es/fr/pt/pl/ru/tr/sv for the new UI strings (`hc*`, `om*`, `opt*`, `ret*`, `gs*`, `wd*`, `perfRamFlushRemoved`, `navSystemCheck`, …; `perfRamDesc` was removed from the other locales because it still described the flush) and the engine texts (an `engineText` table per language) in `src/locales/*.ts`.
 3. **Small UI items:**
-   - `fmtAge` is English-only ("just now").
    - Monitor names show as "Generic PnP Monitor"; `WmiMonitorID` gives real names.
    - The Optimize page `h1` duplicates the section title.
 4. **CI and supply chain:**
    - Pin GitHub Actions to commit SHAs.
    - Bump `time` (RUSTSEC-2026-0009) and check the new `cargo audit` job.
-5. **Structural security (HIGH):** the whole WebView runs elevated, so all ~160 commands are reachable from the renderer. Design an unelevated UI plus a small elevated broker with an allow-listed command surface. Write the design document before implementing.
+5. **Structural security (HIGH):** the whole WebView runs elevated, so all 163 commands are reachable from the renderer. The design is written: `docs/audit-2026-10/elevation-design.md` (recommended: on-demand elevated helper `--broker` over an ACL-protected named pipe, typed allowlist, five migration phases). **Waiting for the owner's decisions in section 7 of that document** before any code changes.
 6. **Windows validation** (owner or Windows VM): run the matrix from `REPORT.md` section G and the "Not tested" list in `optimization-engine.md`.
    - Apply/undo via Optimize My PC.
    - Reset all.
