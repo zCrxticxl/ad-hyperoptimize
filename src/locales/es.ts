@@ -1214,7 +1214,6 @@ export const ui: Partial<UiText> = {
   findDiskHealthWarningRec: "Haz una copia de seguridad inmediata y revisa los detalles SMART; planea el reemplazo.",
   findHeavyStartupTitle: "Carga de inicio elevada",
   findHeavyStartupDetail: "{count} programas se inician al iniciar sesión. Cada uno añade tiempo de arranque y RAM en idle.",
-  findHeavyStartupRec: "Desactiva entradas no esenciales (Administrador de tareas → Inicio). Aplica el ajuste de retraso de inicio para llegar al escritorio más rápido.",
   findDriverProblemsTitle: "Dispositivos con problemas de controlador",
   findDriverProblemsDetail: "{count} dispositivo(s) reportan códigos de error de ConfigManager (controladores faltantes/rotos).",
   findDriverProblemsRec: "Abre el Administrador de dispositivos y actualiza o reinstala los controladores marcados.",

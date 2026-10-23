@@ -1214,7 +1214,6 @@ export const ui: Partial<UiText> = {
   findDiskHealthWarningRec: "Hemen yedekleyin ve SMART ayrıntılarını kontrol edin; değişimi planlayın.",
   findHeavyStartupTitle: "Ağır başlangıç yükü",
   findHeavyStartupDetail: "{count} program girişte başlatılıyor. Her biri önyükleme süresi ve boşta RAM ekler.",
-  findHeavyStartupRec: "Gerekli olmayan girişleri devre dışı bırakın (Görev Yöneticisi → Başlangıç). Daha hızlı masaüstü erişimi için başlangıca erteleme iyileştirmesini uygulayın.",
   findDriverProblemsTitle: "Sürücü sorunları olan cihazlar",
   findDriverProblemsDetail: "{count} cihaz ConfigManager hata kodları raporluyor (eksik/bozuk sürücüler).",
   findDriverProblemsRec: "Cihaz Yöneticisi'ni açın ve işaretli sürücüleri güncelleyin veya yeniden yükleyin.",

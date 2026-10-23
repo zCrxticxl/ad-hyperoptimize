@@ -6,6 +6,9 @@ import { useLang } from "../i18n";
 import { localizeFinding, localizeSummary } from "../localize";
 import type { Mode } from "../App";
 
+/** Findings whose fix is a page, not a tweak. */
+const FINDING_PAGE: Record<string, string> = { heavy_startup: "startup" };
+
 export default function Dashboard({ mode, go }: { mode: Mode; go: (p: string, target?: string) => void }) {
   const { t } = useLang();
   const [analysis, setAnalysis] = useState<any | null>(null);
@@ -76,7 +79,9 @@ export default function Dashboard({ mode, go }: { mode: Mode; go: (p: string, ta
             return <div key={index} className="finding-row">
               <Badge cls={`sev-${finding.severity}`}>{severityLabels[finding.severity]}</Badge>
               <div className="finding-copy"><b>{localized.title}</b><span>{localized.recommendation}</span></div>
-              {finding.tweakIds?.length > 0 && <button className="row-action" onClick={() => go("optimize", finding.tweakIds[0])}>{t("dashFix")}</button>}
+              {finding.tweakIds?.length > 0
+                ? <button className="row-action" onClick={() => go("optimize", finding.tweakIds[0])}>{t("dashFix")}</button>
+                : FINDING_PAGE[finding.code] && <button className="row-action" onClick={() => go(FINDING_PAGE[finding.code])}>{t("dashFix")}</button>}
             </div>;
           })}
         </div>

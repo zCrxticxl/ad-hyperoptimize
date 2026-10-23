@@ -165,11 +165,20 @@ pub fn analyze(scan: &Value, security: &Value, cleanup: &Value) -> Value {
     // Startup bloat
     if let Some(items) = scan["startup_items"].as_array() {
         if items.len() > 10 {
-            findings.push(f(3, "heavy_startup", "Heavy startup load",
-                format!("{} programs launch at login. Each adds boot time and idle RAM.", items.len()),
-                "Disable nonessential entries (Task Manager → Startup). Apply the startup-delay tweak for faster time-to-desktop.",
-                vec!["startup_delay_off"],
-                json!({ "count": items.len() })));
+            findings.push(f(
+                3,
+                "heavy_startup",
+                "Heavy startup load",
+                format!(
+                    "{} programs launch at login. Each adds boot time and idle RAM.",
+                    items.len()
+                ),
+                // No tweak: startup_delay_off has no proven benefit, and the
+                // real fix is disabling entries on the Startup page.
+                "Disable nonessential entries on the Startup page.",
+                vec![],
+                json!({ "count": items.len() }),
+            ));
         }
     }
 
@@ -492,4 +501,38 @@ pub fn analyze(scan: &Value, security: &Value, cleanup: &Value) -> Value {
             "recommendation": x.recommendation, "tweakIds": x.tweak_ids, "params": x.params,
         })).collect::<Vec<_>>(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::analyze;
+    use serde_json::json;
+
+    /// A finding's "Fix" button jumps to its tweak, so it may only name tweaks
+    /// the engine offers (not retired, not "no proven benefit").
+    #[test]
+    fn findings_only_link_offerable_tweaks() {
+        let scan = json!({
+            "startup_items": (0..15).map(|i| json!({ "Name": format!("app{i}") })).collect::<Vec<_>>(),
+            "volumes": [{ "DriveLetter": "C", "Size": 100.0, "SizeRemaining": 5.0 }],
+        });
+        let out = analyze(&scan, &json!({}), &json!({}));
+        let findings = out["findings"].as_array().expect("findings");
+        let startup = findings
+            .iter()
+            .find(|f| f["code"] == "heavy_startup")
+            .expect("heavy_startup");
+        assert!(startup["tweakIds"].as_array().unwrap().is_empty());
+        for f in findings {
+            for id in f["tweakIds"].as_array().unwrap() {
+                let id = id.as_str().unwrap();
+                let m = crate::optregistry::meta(id).unwrap_or_else(|| panic!("{id} unknown"));
+                assert!(
+                    crate::optregistry::offerable(m.evidence),
+                    "{id} is not offerable"
+                );
+                assert!(!crate::optregistry::is_retired(id), "{id} is retired");
+            }
+        }
+    }
 }

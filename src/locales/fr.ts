@@ -1214,7 +1214,6 @@ export const ui: Partial<UiText> = {
   findDiskHealthWarningRec: "Sauvegardez immédiatement et vérifiez les détails SMART ; planifiez le remplacement.",
   findHeavyStartupTitle: "Charge de démarrage élevée",
   findHeavyStartupDetail: "{count} programmes se lancent à la connexion. Chacun ajoute du temps de démarrage et de la RAM au repos.",
-  findHeavyStartupRec: "Désactivez les entrées non essentielles (Gestionnaire des tâches → Démarrage). Appliquez la modification de retard de démarrage pour un temps d'accès au bureau plus rapide.",
   findDriverProblemsTitle: "Appareils avec des problèmes de pilote",
   findDriverProblemsDetail: "{count} appareil(s) signalent des codes d'erreur ConfigManager (pilotes manquants/cassés).",
   findDriverProblemsRec: "Ouvrez le Gestionnaire de périphériques et mettez à jour ou réinstallez les pilotes signalés.",

@@ -1214,7 +1214,6 @@ export const ui: Partial<UiText> = {
   findDiskHealthWarningRec: "Faça backup imediatamente e verifique os detalhes SMART; planeie a substituição.",
   findHeavyStartupTitle: "Carga pesada de arranque",
   findHeavyStartupDetail: "{count} programas iniciam ao sessão. Cada um adiciona tempo de arranque e RAM em repouso.",
-  findHeavyStartupRec: "Desative entradas não essenciais (Task Manager → Arranque). Aplique o ajuste de atraso de arranque para um tempo de arranque mais rápido.",
   findDriverProblemsTitle: "Dispositivos com problemas de driver",
   findDriverProblemsDetail: "{count} dispositivo(s) reportam códigos de erro do ConfigManager (drivers em falta/danificados).",
   findDriverProblemsRec: "Abra o Device Manager e atualize ou reinstale os drivers assinalados.",

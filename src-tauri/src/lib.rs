@@ -922,9 +922,10 @@ async fn cmd_disk_organize_apply(items: Vec<Value>) -> Value {
 async fn cmd_analyze(force: bool) -> Value {
     // v2: findings now carry `code`+`params` for i18n (old cached "analysis"
     // entries lack these fields and crash the localizer), bump the cache key
-    // so stale pre-v2 files on disk are ignored instead of served.
+    // so stale pre-v2 files on disk are ignored instead of served. v3: the
+    // heavy-startup finding no longer links the startup-delay tweak.
     tauri::async_runtime::spawn_blocking(move || {
-        cache::get_or("analysis_v2", force, || {
+        cache::get_or("analysis_v3", force, || {
             let scan = cache::data_or("scan", force, crate::scan::full_scan);
             let security = cache::data_or("security", force, crate::security::scan);
             let cleanup = cache::data_or("cleanup", force, crate::cleanup::scan);
@@ -941,7 +942,7 @@ async fn cmd_generate_report() -> Result<Value, String> {
         let scan = cache::data_or("scan", false, crate::scan::full_scan);
         let security = cache::data_or("security", false, crate::security::scan);
         let cleanup = cache::data_or("cleanup", false, crate::cleanup::scan);
-        let analysis = cache::data_or("analysis_v2", false, || {
+        let analysis = cache::data_or("analysis_v3", false, || {
             crate::analysis::analyze(&scan, &security, &cleanup)
         });
         let history = crate::tweaks::history();

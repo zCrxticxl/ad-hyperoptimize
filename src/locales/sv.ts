@@ -1214,7 +1214,6 @@ export const ui: Partial<UiText> = {
   findDiskHealthWarningRec: "Säkerhetskopera omedelbart och kontrollera SMART-detaljer; planera utbyte.",
   findHeavyStartupTitle: "Tung uppstartslast",
   findHeavyStartupDetail: "{count} program startar vid inloggning. Varje lägger till uppstartstid och overksam RAM.",
-  findHeavyStartupRec: "Inaktivera onödiga poster (Aktivitetshanteraren → Autostart). Tillämpa uppdröjnadenoptimeringen för snabbare skrivbord.",
   findDriverProblemsTitle: "Enheter med drivrutinsproblem",
   findDriverProblemsDetail: "{count} enhet(er) rapporterar ConfigManager-felkoder (saknade/trasiga drivrutiner).",
   findDriverProblemsRec: "Öppna Enhetshanteraren och uppdatera eller installera om de flaggade drivrutinerna.",

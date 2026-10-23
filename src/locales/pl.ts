@@ -1214,7 +1214,6 @@ export const ui: Partial<UiText> = {
   findDiskHealthWarningRec: "Wykonaj natychmiast kopię zapasową i sprawdź szczegóły SMART; zaplanuj wymianę.",
   findHeavyStartupTitle: "Duże obciążenie przy starcie",
   findHeavyStartupDetail: "{count} programów uruchamia się przy logowaniu. Każdy wydłuża czas uruchamiania i zużywa RAM w stanie bezczynności.",
-  findHeavyStartupRec: "Wyłącz nieistotne wpisy (Menedżer zadań → Autostart). Zastosuj modyfikację opóźnienia uruchamiania dla szybszego czasu do pulpitu.",
   findDriverProblemsTitle: "Urządzenia z problemami sterowników",
   findDriverProblemsDetail: "{count} urządzeń raportuje kody błędów ConfigManager (brakujące/uszkodzone sterowniki).",
   findDriverProblemsRec: "Otwórz Menedżer urządzeń i zaktualizuj lub przeinstaluj zaznaczone sterowniki.",
