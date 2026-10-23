@@ -45,6 +45,10 @@ export function OptCard({ item, admin, focused }: { item: HealthItem; admin: boo
     item.status !== "unsupported" &&
     !["notApplicable", "drifted", "failed", "redundant", "configured", "retired", "retiredActive"].includes(item.diagnosis);
   const adminBlocked = item.requiresAdmin && !admin;
+  // Drifted/failed items are no longer (fully) active but still hold an open
+  // journal entry: Undo restores the captured originals and closes it, so
+  // they must offer it too, or the card is a dead end.
+  const undoable = item.canUndo && (applied || ["drifted", "failed"].includes(item.diagnosis));
 
   const run = async (kind: "apply" | "undo") => {
     if (busy) return;
@@ -81,7 +85,7 @@ export function OptCard({ item, admin, focused }: { item: HealthItem; admin: boo
           <button className="btn small ghost" onClick={() => setOpen(!open)} aria-expanded={open}>
             {open ? "▲" : "▼"}
           </button>
-          {applied && item.canUndo && (
+          {undoable && (
             <button className="btn small ghost" disabled={busy || adminBlocked} onClick={() => run("undo")}
               title={adminBlocked ? t("hcAdminNeeded") : ""}>
               {busy ? <Spinner /> : t("hcUndo")}
@@ -108,7 +112,7 @@ export function OptCard({ item, admin, focused }: { item: HealthItem; admin: boo
           <span className="muted">{t("hcRisk")}</span>
           <span>{item.risk === "Low" ? t("riskLow") : item.risk === "Medium" ? t("riskMedium") : t("riskHigh")}{adminBlocked ? ` · ${t("hcAdminNeeded")}` : ""}</span>
           <span className="muted">{t("hcRestore")}</span>
-          <span>{applied ? (item.canUndo ? t("hcRestoreUndo") : "–") : t("hcRestoreAfter")}</span>
+          <span>{undoable ? t("hcRestoreUndo") : applied ? "–" : t("hcRestoreAfter")}</span>
           <span className="muted">{t("hcColName")}</span>
           <span className="muted">{loc.description}</span>
           <span /><RiskNotice id={item.id} />
