@@ -1084,6 +1084,55 @@ fn classify_open_target(path: &str, reports_dir: &std::path::Path) -> Result<Ope
     }
 }
 
+/// Runs every read-only scan the UI calls on page load against the real
+/// system and fails on PowerShell parser errors (a broken generated script
+/// only shows up at runtime). Read-only, but slow and system-dependent, so it
+/// is opt-in: `cargo test --locked -- --ignored read_only_scans`.
+#[cfg(all(test, windows))]
+mod smoke {
+    #[test]
+    #[ignore]
+    fn read_only_scans_have_no_powershell_parser_errors() {
+        let scans: Vec<(&str, fn() -> serde_json::Value)> = vec![
+            ("autoopt", crate::autoopt::scan),
+            ("bootopt", crate::bootopt::scan),
+            ("cleanup", crate::cleanup::scan),
+            ("debloater uwp", crate::debloater::list_uwp),
+            ("debloater tweaks", crate::debloater::list_tweaks),
+            ("gputweaks", crate::gputweaks::scan),
+            ("hwprofile", crate::hwprofile::hw_profile),
+            ("msi", crate::perftweaks::msi_list),
+            ("powerplan", crate::powerplan::list_plans),
+            ("privacy", crate::privacy::scan),
+            ("processes", crate::procmgr::list),
+            ("profiles", crate::profiles::list),
+            ("regclean", crate::regclean::scan),
+            ("schedtasks", crate::schedtasks::list),
+            ("security", crate::security::scan),
+            ("services", crate::services::list),
+            ("startup", crate::startup::list),
+            ("tweaks", crate::tweaks::list_with_status),
+            ("uninstaller", crate::uninstaller::list_apps),
+        ];
+        let markers = [
+            "ParserError",
+            "ParseException",
+            "MissingEndParenthesis",
+            "UnexpectedToken",
+            "MissingEndCurlyBrace",
+            "MissingCatchOrFinally",
+        ];
+        let mut broken = Vec::new();
+        for (name, scan) in scans {
+            let out = scan().to_string();
+            if let Some(m) = markers.iter().find(|m| out.contains(*m)) {
+                broken.push(format!("{name}: {m}"));
+            }
+        }
+        assert!(broken.is_empty(), "scans with parser errors: {broken:?}");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{classify_open_target, OpenTarget};
