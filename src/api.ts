@@ -14,6 +14,7 @@ export const api = {
   listTweaks: () => invoke<any[]>("cmd_list_tweaks"),
   brokerStatus: () => invoke<{ available: boolean; connected: boolean }>("cmd_broker_status"),
   brokerUnlock: () => invoke<any>("cmd_broker_unlock"),
+  restartAsAdmin: () => invoke<void>("cmd_restart_as_admin"),
   applyTweak: (id: string) => invoke<any>("cmd_apply_tweak", { id }),
   revertTweak: (id: string) => invoke<any>("cmd_revert_tweak", { id }),
   history: () => invoke<any[]>("cmd_history"),

@@ -1739,6 +1739,10 @@ const de = {
   orgRunUndone: "zurückverschoben",
   orgUndo: "Zurückverschieben",
   orgHistoryHint: "Die letzten 20 Läufe werden gespeichert. Leere Ordner, die ein Lauf angelegt hat, werden beim Zurückverschieben wieder entfernt.",
+  restartAdmin: "Als Admin neu starten",
+  restartAdminHint: "Startet die App mit Administratorrechten neu (Windows fragt per UAC).",
+  restartAdminDev: "Entwicklungsmodus: Die App kann sich hier nicht selbst neu starten. Terminal als Administrator öffnen und „npm run tauri dev“ erneut ausführen.",
+  restartAdminDeclined: "Die Administrator-Anfrage wurde abgelehnt.",
 };
 
 // ── English ───────────────────────────────────────────────────────────────────
@@ -3451,6 +3455,10 @@ const en: typeof de = {
   orgRunUndone: "moved back",
   orgUndo: "Move back",
   orgHistoryHint: "The last 20 runs are kept. Empty folders a run created are removed again when moving back.",
+  restartAdmin: "Restart as admin",
+  restartAdminHint: "Restarts the app with administrator rights (Windows asks via UAC).",
+  restartAdminDev: "Development mode: the app cannot restart itself here. Open the terminal as administrator and run \"npm run tauri dev\" again.",
+  restartAdminDeclined: "The administrator prompt was declined.",
 };
 
 export type UiText = typeof en;

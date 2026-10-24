@@ -1638,41 +1638,72 @@ fn ensure_admin() {
             })
             .unwrap_or(false);
 
-        if !is_admin {
-            let Some(exe) = std::env::current_exe().ok() else {
-                return;
-            };
-            // Quote the path as a PS literal (ASCII + typographic quotes), hide the spawning shell entirely
-            let path = crate::ps::quote_single(&exe.to_string_lossy());
-            // Relaunch elevated and block on the UAC outcome before this
-            // unelevated instance shows any window. `Start-Process -Verb RunAs`
-            // throws if the user declines UAC; the try/catch maps that to a
-            // non-zero exit. On approval we exit immediately so ONLY the
-            // elevated window appears (no lingering second, unelevated window);
-            // on cancellation we fall through and keep running unelevated with
-            // the in-app admin hint.
-            let approved = std::process::Command::new(ps::powershell_exe())
-                .args([
-                    "-NoProfile",
-                    "-NonInteractive",
-                    "-WindowStyle",
-                    "Hidden",
-                    "-Command",
-                    &format!(
-                        "try {{ Start-Process -FilePath {} -Verb RunAs -ErrorAction Stop; exit 0 }} \
-                         catch {{ exit 1 }}",
-                        path
-                    ),
-                ])
-                .creation_flags(CREATE_NO_WINDOW)
-                .status()
-                .map(|s| s.success())
-                .unwrap_or(false);
-
-            if approved {
-                std::process::exit(0);
-            }
+        if !is_admin && relaunch_elevated() {
+            std::process::exit(0);
         }
+    }
+}
+
+/// Starts this executable again with administrator rights (UAC prompt).
+/// True when the user approved and the elevated instance was started.
+#[cfg(windows)]
+fn relaunch_elevated() -> bool {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000; // no console/PowerShell flash
+    let Some(exe) = std::env::current_exe().ok() else {
+        return false;
+    };
+    // Quote the path as a PS literal (ASCII + typographic quotes), hide the spawning shell entirely
+    let path = crate::ps::quote_single(&exe.to_string_lossy());
+    // Relaunch elevated and block on the UAC outcome before this
+    // unelevated instance shows any window. `Start-Process -Verb RunAs`
+    // throws if the user declines UAC; the try/catch maps that to a
+    // non-zero exit. On approval we exit immediately so ONLY the
+    // elevated window appears (no lingering second, unelevated window);
+    // on cancellation we fall through and keep running unelevated with
+    // the in-app admin hint.
+    std::process::Command::new(ps::powershell_exe())
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-WindowStyle",
+            "Hidden",
+            "-Command",
+            &format!(
+                "try {{ Start-Process -FilePath {} -Verb RunAs -ErrorAction Stop; exit 0 }} \
+                         catch {{ exit 1 }}",
+                path
+            ),
+        ])
+        .creation_flags(CREATE_NO_WINDOW)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// Topbar "Restart as administrator". A debug build (`npm run tauri dev`)
+/// loads its UI from the dev server that `tauri dev` stops when this
+/// process exits, so it is not relaunched; the terminal must be elevated.
+#[tauri::command(async)]
+async fn cmd_restart_as_admin(app: tauri::AppHandle) -> Result<(), String> {
+    if cfg!(debug_assertions) {
+        return Err("dev build".into());
+    }
+    #[cfg(windows)]
+    {
+        let ok = tauri::async_runtime::spawn_blocking(relaunch_elevated)
+            .await
+            .map_err(|_| "relaunch task panicked".to_string())?;
+        if !ok {
+            return Err("declined".into());
+        }
+        app.exit(0);
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = app;
+        Err("Windows only".into())
     }
 }
 
@@ -1703,6 +1734,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             // system scan
             cmd_is_admin,
+            cmd_restart_as_admin,
             cmd_full_scan,
             cmd_boot_analysis,
             cmd_event_logs,

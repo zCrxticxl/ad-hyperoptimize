@@ -1692,6 +1692,10 @@ export const ui: Partial<UiText> = {
   orgRunUndone: "przywrócono",
   orgUndo: "Przenieś z powrotem",
   orgHistoryHint: "Zapisywanych jest 20 ostatnich uruchomień. Puste foldery utworzone przez uruchomienie są usuwane przy przywracaniu.",
+  restartAdmin: "Uruchom ponownie jako admin",
+  restartAdminHint: "Uruchamia aplikację ponownie z uprawnieniami administratora (Windows pyta przez UAC).",
+  restartAdminDev: "Tryb deweloperski: aplikacja nie może tu sama się zrestartować. Otwórz terminal jako administrator i ponownie uruchom „npm run tauri dev”.",
+  restartAdminDeclined: "Prośba o uprawnienia administratora została odrzucona.",
 };
 
 export const tweaks: Record<string, { name?: string; description?: string; rationale?: string; impact?: string }> = {

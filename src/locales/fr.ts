@@ -1692,6 +1692,10 @@ export const ui: Partial<UiText> = {
   orgRunUndone: "remis en place",
   orgUndo: "Remettre en place",
   orgHistoryHint: "Les 20 dernières opérations sont conservées. Les dossiers vides créés par une opération sont supprimés lors de la remise en place.",
+  restartAdmin: "Redémarrer en admin",
+  restartAdminHint: "Redémarre l'application avec les droits administrateur (Windows le demande via l'UAC).",
+  restartAdminDev: "Mode développement : l'application ne peut pas se relancer elle-même ici. Ouvrez le terminal en administrateur et relancez « npm run tauri dev ».",
+  restartAdminDeclined: "La demande d'administrateur a été refusée.",
 };
 
 export const tweaks: Record<string, { name?: string; description?: string; rationale?: string; impact?: string }> = {

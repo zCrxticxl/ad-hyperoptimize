@@ -1692,6 +1692,10 @@ export const ui: Partial<UiText> = {
   orgRunUndone: "devolvido",
   orgUndo: "Devolver",
   orgHistoryHint: "As últimas 20 execuções são guardadas. Pastas vazias criadas por uma execução são removidas ao devolver.",
+  restartAdmin: "Reiniciar como admin",
+  restartAdminHint: "Reinicia o app com direitos de administrador (o Windows pergunta via UAC).",
+  restartAdminDev: "Modo de desenvolvimento: o app não consegue se reiniciar aqui. Abra o terminal como administrador e execute «npm run tauri dev» novamente.",
+  restartAdminDeclined: "A solicitação de administrador foi recusada.",
 };
 
 export const tweaks: Record<string, { name?: string; description?: string; rationale?: string; impact?: string }> = {

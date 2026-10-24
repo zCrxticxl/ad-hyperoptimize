@@ -1692,6 +1692,10 @@ export const ui: Partial<UiText> = {
   orgRunUndone: "возвращено",
   orgUndo: "Вернуть",
   orgHistoryHint: "Хранятся последние 20 запусков. Пустые папки, созданные запуском, при возврате удаляются.",
+  restartAdmin: "Перезапустить от админа",
+  restartAdminHint: "Перезапускает приложение с правами администратора (Windows спросит через UAC).",
+  restartAdminDev: "Режим разработки: приложение не может само перезапуститься. Откройте терминал от имени администратора и снова выполните «npm run tauri dev».",
+  restartAdminDeclined: "Запрос прав администратора отклонён.",
 };
 
 export const tweaks: Record<string, { name?: string; description?: string; rationale?: string; impact?: string }> = {

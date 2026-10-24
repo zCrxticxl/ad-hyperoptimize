@@ -1692,6 +1692,10 @@ export const ui: Partial<UiText> = {
   orgRunUndone: "tillbakaflyttad",
   orgUndo: "Flytta tillbaka",
   orgHistoryHint: "De senaste 20 körningarna sparas. Tomma mappar som en körning skapat tas bort vid tillbakaflyttning.",
+  restartAdmin: "Starta om som admin",
+  restartAdminHint: "Startar om appen med administratörsrättigheter (Windows frågar via UAC).",
+  restartAdminDev: "Utvecklingsläge: appen kan inte starta om sig själv här. Öppna terminalen som administratör och kör ”npm run tauri dev” igen.",
+  restartAdminDeclined: "Administratörsfrågan avböjdes.",
 };
 
 export const tweaks: Record<string, { name?: string; description?: string; rationale?: string; impact?: string }> = {

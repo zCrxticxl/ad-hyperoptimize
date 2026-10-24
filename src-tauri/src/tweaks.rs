@@ -1495,6 +1495,24 @@ fn retired_policy_reset_allowed(tweak_id: &str, path: &str) -> bool {
             .starts_with("software\\policies\\")
 }
 
+/// The documented Windows default that switches a retired tweak off without
+/// a journal entry (applied by another tool or an old version). For FSE the
+/// global values are inert unless HonorUserFSEBehaviorMode is 1, so writing
+/// its default 0 ends the effect without guessing the other values.
+fn retired_known_default(
+    tweak_id: &str,
+) -> Option<(&'static str, &'static str, &'static str, RegVal)> {
+    match tweak_id {
+        "fse_optimizations_off" => Some((
+            "HKCU",
+            r"System\GameConfigStore",
+            "GameDVR_HonorUserFSEBehaviorMode",
+            RegVal::Dword(0),
+        )),
+        _ => None,
+    }
+}
+
 /// False when a journal-less revert would have to run a hardcoded guess:
 /// Cmd actions with a pre-apply capture only have an exact undo in the
 /// journal (the catalog `revert` is a default, not the user's prior state).
@@ -1593,24 +1611,32 @@ fn effective_status(id: &str) -> Option<&'static str> {
                 .ok()
                 .flatten(),
         )),
-        // Fullscreen optimizations are off only when FSEBehaviorMode is 2; the
-        // two companion values are commonly 0 by default and must not make a
-        // default system look "partially" tweaked.
+        // The global FSE values only take effect while
+        // HonorUserFSEBehaviorMode is 1; FSEBehaviorMode=2 alone is common on
+        // default installs and inert, so it must not count as "active".
         "fse_optimizations_off" => Some(fse_status(
             reg_read("HKCU", r"System\GameConfigStore", "GameDVR_FSEBehaviorMode")
                 .ok()
                 .flatten(),
+            reg_read(
+                "HKCU",
+                r"System\GameConfigStore",
+                "GameDVR_HonorUserFSEBehaviorMode",
+            )
+            .ok()
+            .flatten(),
         )),
         _ => None,
     }
 }
 
 #[cfg(any(windows, test))]
-fn fse_status(value: Option<RegVal>) -> &'static str {
-    match value {
-        Some(RegVal::Dword(2)) => "applied",
-        Some(RegVal::Dword(_)) | None => "not_applied",
-        Some(_) => "unknown",
+fn fse_status(mode: Option<RegVal>, honor: Option<RegVal>) -> &'static str {
+    match (mode, honor) {
+        (Some(RegVal::Dword(2)), Some(RegVal::Dword(1))) => "applied",
+        (Some(RegVal::Raw { .. } | RegVal::Str(_)), _)
+        | (_, Some(RegVal::Raw { .. } | RegVal::Str(_))) => "unknown",
+        _ => "not_applied",
     }
 }
 
@@ -2045,6 +2071,21 @@ pub fn revert(tweak_id: &str) -> Result<Value, String> {
         );
     }
 
+    #[cfg(windows)]
+    if crate::optregistry::is_retired(tweak_id) {
+        if let Some((root, path, name, default)) = retired_known_default(tweak_id) {
+            safety::backup_registry_key(root, path)
+                .map_err(|e| format!("registry backup failed, nothing changed: {e}"))?;
+            reg_write(root, path, name, &default)?;
+            return match detect_status(&t) {
+                "not_applied" => Ok(json!({ "status": "force_reverted", "journaled": false })),
+                other => Err(format!(
+                    "{root}\\{path}\\{name} was reset to the Windows default, but the setting still reads as {other}"
+                )),
+            };
+        }
+    }
+
     // live == "applied" | "partial" → undo each action using catalog defaults
     let mut errs = Vec::new();
     for a in t.actions.iter().rev() {
@@ -2367,10 +2408,19 @@ mod tests {
     }
 
     #[test]
-    fn fse_state_is_decided_by_behavior_mode() {
-        assert_eq!(fse_status(Some(RegVal::Dword(2))), "applied");
-        assert_eq!(fse_status(Some(RegVal::Dword(0))), "not_applied");
-        assert_eq!(fse_status(None), "not_applied");
+    fn fse_state_needs_honor_user_flag() {
+        let d = |v| Some(RegVal::Dword(v));
+        assert_eq!(fse_status(d(2), d(1)), "applied");
+        // FSEBehaviorMode=2 without HonorUser=1 is the inert default.
+        assert_eq!(fse_status(d(2), d(0)), "not_applied");
+        assert_eq!(fse_status(d(2), None), "not_applied");
+        assert_eq!(fse_status(d(0), d(1)), "not_applied");
+        assert_eq!(fse_status(None, None), "not_applied");
+        assert_eq!(
+            retired_known_default("fse_optimizations_off").map(|d| d.2),
+            Some("GameDVR_HonorUserFSEBehaviorMode")
+        );
+        assert!(retired_known_default("game_dvr_off").is_none());
     }
 
     #[test]
