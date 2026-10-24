@@ -138,16 +138,29 @@ $msg
         reverted_items: 0,
         untrusted: false,
     })?;
-    let res = ps::run(&script).map(|s| s.trim().to_string());
+    // The script can fail after the registry write or the task registration
+    // ("did not stay running"): restore the captured state instead of
+    // leaving an open, half-applied entry.
+    let msg = match ps::run(&script) {
+        Ok(out) => out.trim().to_string(),
+        Err(e) => {
+            return match crate::tweaks::revert_entry(&entry_id) {
+                Ok(_) => Err(format!("{e}; all changes were rolled back")),
+                Err(re) => Err(format!(
+                    "{e}; rollback incomplete ({re}); restore token: {entry_id}"
+                )),
+            }
+        }
+    };
     crate::safety::with_journal(|entries| {
         let entry = entries
             .iter_mut()
             .find(|entry| entry.id == entry_id)
             .ok_or("Timer journal entry missing")?;
-        entry.completed = res.is_ok();
+        entry.completed = true;
         Ok(())
     })?;
-    res
+    Ok(msg)
 }
 
 pub fn timer_reset() -> Result<String, String> {

@@ -42,6 +42,7 @@ Severity:
 | `regclean.rs` | 1035 | reviewed |
 | `diskanalyzer.rs` | 1360 | reviewed |
 | `gamedb.rs` | 1205 | reviewed (data) |
+| `perftweaks.rs` | 640 | reviewed |
 
 ## Findings
 
@@ -83,3 +84,6 @@ Severity:
 | 34 | `diskanalyzer.rs:is_protected` | Info | Checked: `.`/`..`, NTFS streams, 8.3 aliases (non-existent paths), trailing dots/spaces, system folders, profile roots, `%ProgramData%` (holds the protected state folder), canonicalisation against junctions. Other users' profiles are not protected by design (admin tool, explicit selection). | ok |
 | 35 | `gamedb.rs` tips/settings | Low | Game advice with invented numbers or claims that are wrong/outdated: Dota "Vulkan … by 10-20%", Minecraft "Sodium … 2-3× FPS", PUBG "AA Ultra runs faster than lower settings", Valorant "Ultimate Performance can trigger Vanguard false flags", Cyberpunk "HDD streaming stutter: enable ReBAR", CS2 `Multicore Rendering` (CS:GO option, not in CS2) and `cl_interp_ratio`/`rate` "for 128-tick" (CS2 uses sub-tick), overlay "adds measurable latency". Elden Ring FPS Unlocker without the note that it only works offline (EAC off). | fixed: numbers and myths removed, the rest worded without unmeasured claims |
 | 36 | `gamedb.rs` | Info | The remaining game tips are community advice that the app cannot verify. CS2 recommends "Ultimate Performance", while `optregistry` rates plan gains as "usually small". | note |
+| 37 | `perftweaks.rs:timer_set` | Medium | If the script failed after the registry write or the task registration ("helper did not stay running"), nothing was rolled back. `GlobalTimerResolutionRequests` and possibly the SYSTEM task stayed in place; the entry remained open as incomplete. | fixed: `revert_entry` restores the captured state; the message says whether the rollback was complete |
+| 38 | `perftweaks.rs:msi_set`, `net_tweak`, `net_reset_all`, `pagefile_*` | Medium | These change the system without a journal entry or backup: MSI mode in `HKLM\…\Enum`, NIC advanced properties, the page-file configuration. "Undo" only exists as setting the opposite value. That writes e.g. `MSISupported=0` instead of restoring "not set" (driver default), and a NIC reset discards all previous custom values. This contradicts the journal → backup → undo pattern. | open: capture + journal per function (MSI: registry value; NIC: `Get-NetAdapterAdvancedProperty` before the change; page file: `Win32_PageFileSetting` + `AutomaticManagedPagefile`) |
+| 39 | `perftweaks.rs:TIMER_LEGACY_CLEANUP_PS` | Low | The elevated script resolves `$env:ProgramData` from the inherited environment (`trusted_env` does not set ProgramData). Effect is limited: it deletes only a file named `timerres.ps1` and an empty folder `ADHyperOptimize` under the path given. | open (low): add `ProgramData` to the trusted environment |
