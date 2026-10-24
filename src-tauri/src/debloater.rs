@@ -567,11 +567,16 @@ $out | ConvertTo-Json -Compress -Depth 4
 /// values back to their previous value (or removed if they were absent),
 /// service back to its previous start type and running state.
 fn restore_script(state: &serde_json::Value) -> String {
-    // Every interpolated field is single-quote-escaped: the state file lives
-    // in user-writable %APPDATA%, so a tampered file must never be able to
-    // break out of the quoted PS strings (this script runs elevated).
+    // Every interpolated field is single-quote-escaped and numbers are taken
+    // only as integers: this script runs elevated, so a tampered state file
+    // must never be able to break out of the quoted PS strings.
     let q = crate::ps::escape_single;
-    let mut lines = Vec::new();
+    // Each step runs on its own and reports its own error, so one failure
+    // does not hide the others and the message says what failed.
+    let step = |what: &str, body: String| {
+        format!("try {{ {body} }} catch {{ $e += '{what}: ' + $_.Exception.Message }}")
+    };
+    let mut steps = Vec::new();
     if let Some(arr) = state.as_array() {
         for it in arr {
             match it["kind"].as_str() {
@@ -579,19 +584,33 @@ fn restore_script(state: &serde_json::Value) -> String {
                     let root = q(it["root"].as_str().unwrap_or("HKCU"));
                     let path = q(it["path"].as_str().unwrap_or(""));
                     let name = q(it["name"].as_str().unwrap_or(""));
+                    let key = format!("{root}:\\{path}");
+                    let what = format!("{key}\\{name}");
+                    // A captured value implies its key existed: recreate it
+                    // if something removed it since.
+                    let ensure_key =
+                        format!("if (!(Test-Path '{key}')) {{ New-Item '{key}' -Force -EA Stop | Out-Null }}; ");
                     if it["value"].is_null() {
-                        lines.push(format!(
-                            "Remove-ItemProperty '{root}:\\{path}' '{name}' -EA SilentlyContinue"
+                        steps.push(step(
+                            &what,
+                            format!("Remove-ItemProperty '{key}' '{name}' -EA SilentlyContinue"),
                         ));
                     } else if it["isNumber"].as_bool().unwrap_or(false) {
-                        lines.push(format!(
-                            "Set-ItemProperty '{root}:\\{path}' '{name}' ([int]({v})) -Type DWord -EA Stop",
-                            v = it["value"]
+                        let Some(v) = it["value"].as_i64() else {
+                            steps.push(format!("$e += '{what}: captured value is not an integer'"));
+                            continue;
+                        };
+                        steps.push(step(
+                            &what,
+                            format!(
+                                "{ensure_key}Set-ItemProperty '{key}' '{name}' ([int]({v})) -Type DWord -EA Stop"
+                            ),
                         ));
                     } else {
                         let v = q(it["value"].as_str().unwrap_or(""));
-                        lines.push(format!(
-                            "Set-ItemProperty '{root}:\\{path}' '{name}' '{v}' -EA Stop"
+                        steps.push(step(
+                            &what,
+                            format!("{ensure_key}Set-ItemProperty '{key}' '{name}' '{v}' -EA Stop"),
                         ));
                     }
                 }
@@ -605,24 +624,30 @@ fn restore_script(state: &serde_json::Value) -> String {
                     } else {
                         "Manual"
                     };
-                    lines.push(format!(
-                        "Set-Service -Name '{svc}' -StartupType {start} -EA Stop"
-                    ));
+                    let mut body =
+                        format!("Set-Service -Name '{svc}' -StartupType {start} -EA Stop");
                     match it["status"].as_str() {
-                        Some("Running") => {
-                            lines.push(format!("Start-Service -Name '{svc}' -EA SilentlyContinue"))
-                        }
-                        Some("Stopped") => lines.push(format!(
-                            "Stop-Service -Name '{svc}' -Force -EA SilentlyContinue"
+                        Some("Running") => body.push_str(&format!(
+                            "; Start-Service -Name '{svc}' -EA SilentlyContinue"
+                        )),
+                        Some("Stopped") => body.push_str(&format!(
+                            "; Stop-Service -Name '{svc}' -Force -EA SilentlyContinue"
                         )),
                         _ => {}
                     }
+                    steps.push(step(&format!("service {svc}"), body));
                 }
                 _ => {}
             }
         }
     }
-    lines.join("; ")
+    if steps.is_empty() {
+        return String::new();
+    }
+    format!(
+        "$e = @(); {}; if ($e.Count) {{ [Console]::Error.WriteLine($e -join ' | '); exit 1 }}",
+        steps.join("; ")
+    )
 }
 
 pub fn apply_tweak(id: String) -> Result<String, String> {
@@ -737,6 +762,66 @@ mod tests {
     fn both_teams_generations_are_listed() {
         assert!(OPTIONAL_APPS.contains(&"Microsoft.Teams"));
         assert!(OPTIONAL_APPS.contains(&"MSTeams"));
+    }
+
+    #[test]
+    fn restore_script_reports_each_failure_and_recreates_keys() {
+        let state = serde_json::json!([
+            { "kind": "reg", "root": "HKLM", "path": "SOFTWARE\\Policies\\X", "name": "A", "value": 0, "isNumber": true },
+            { "kind": "reg", "root": "HKCU", "path": "Software\\Y", "name": "B", "value": null, "isNumber": false },
+            { "kind": "service", "name": "WerSvc", "startType": "Manual", "status": "Stopped" }
+        ]);
+        let s = restore_script(&state);
+        assert!(s.starts_with("$e = @();"));
+        assert!(s.contains("New-Item 'HKLM:\\SOFTWARE\\Policies\\X' -Force"));
+        assert!(s.contains(
+            "Set-ItemProperty 'HKLM:\\SOFTWARE\\Policies\\X' 'A' ([int](0)) -Type DWord"
+        ));
+        assert!(s.contains("Remove-ItemProperty 'HKCU:\\Software\\Y' 'B'"));
+        assert!(s.contains("Set-Service -Name 'WerSvc' -StartupType Manual"));
+        assert_eq!(s.matches("try {").count(), 3, "one try per step");
+        assert!(s.contains("[Console]::Error.WriteLine"));
+        assert_eq!(restore_script(&serde_json::json!([])), "");
+    }
+
+    /// Only parses the generated script (nothing is executed).
+    #[cfg(windows)]
+    #[test]
+    fn restore_script_parses_in_powershell() {
+        let state = serde_json::json!([
+            { "kind": "reg", "root": "HKLM", "path": "SOFTWARE\\Policies\\X", "name": "A", "value": 0, "isNumber": true },
+            { "kind": "reg", "root": "HKCU", "path": "Software\\Y", "name": "B", "value": "text", "isNumber": false },
+            { "kind": "reg", "root": "HKCU", "path": "Software\\Y", "name": "C", "value": null, "isNumber": false },
+            { "kind": "service", "name": "WerSvc", "startType": "Manual", "status": "Running" }
+        ]);
+        let script = restore_script(&state);
+        let out = std::process::Command::new("powershell.exe")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "$t = $null; $e = $null; \
+                 [void][System.Management.Automation.Language.Parser]::ParseInput($env:ADHO_SCRIPT, [ref]$t, [ref]$e); \
+                 $e.Count",
+            ])
+            .env("ADHO_SCRIPT", &script)
+            .output()
+            .unwrap();
+        let errors = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        assert_eq!(errors, "0", "script does not parse: {script}");
+    }
+
+    #[test]
+    fn restore_script_never_embeds_a_non_integer_as_number() {
+        let state = serde_json::json!([
+            { "kind": "reg", "root": "HKCU", "path": "Software\\Y", "name": "B", "value": "$(calc)", "isNumber": true },
+            { "kind": "reg", "root": "HKCU", "path": "Software\\Y'; calc; '", "name": "C", "value": "x", "isNumber": false }
+        ]);
+        let s = restore_script(&state);
+        assert!(!s.contains("([int]("), "{s}");
+        assert!(s.contains("captured value is not an integer"));
+        // Quotes in a path are doubled, so they cannot end the literal.
+        assert!(s.contains("Software\\Y''; calc; ''"), "{s}");
     }
 
     #[test]
