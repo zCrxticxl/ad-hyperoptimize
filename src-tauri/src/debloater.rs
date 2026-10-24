@@ -692,7 +692,14 @@ pub fn apply_tweak(id: String) -> Result<String, String> {
             .map_err(|e| format!("saving tweak state failed: {e}"))?;
         true
     };
-    if let Err(e) = ps::run(t.apply) {
+    let applied = ps::run_settled(t.apply).and_then(|_| {
+        if is_active(t)? {
+            Ok(())
+        } else {
+            Err(format!("{} did not reach the requested state", t.id))
+        }
+    });
+    if let Err(e) = applied {
         if !wrote_state {
             return Err(e);
         }
@@ -709,6 +716,21 @@ pub fn apply_tweak(id: String) -> Result<String, String> {
         ));
     }
     Ok(format!("Applied: {}", t.name))
+}
+
+/// Live check of one tweak (its `check` script).
+fn is_active(t: &Tweak) -> Result<bool, String> {
+    let out = ps::run(&format!("if({}){{'1'}}else{{'0'}}", t.check))?;
+    Ok(out.trim() == "1")
+}
+
+/// Documented-default undo, read back afterwards.
+fn undo_with_defaults(t: &Tweak) -> Result<String, String> {
+    let out = ps::run_settled(t.undo)?;
+    if is_active(t)? {
+        return Err(format!("{} is still active after the reset", t.id));
+    }
+    Ok(out)
 }
 
 /// Whether an exact pre-apply state was captured for this tweak.
@@ -730,7 +752,7 @@ pub fn revert_tweak(id: String) -> Result<String, String> {
         Some(state) => {
             let script = restore_script(&state);
             let res = if script.trim().is_empty() {
-                ps::run(t.undo)
+                undo_with_defaults(t)
             } else {
                 ps::run(&script)
             };
@@ -754,7 +776,7 @@ pub fn revert_tweak(id: String) -> Result<String, String> {
         )),
         // No captured state (apply happened outside this app or the state was
         // lost), fall back to the documented-default undo.
-        None => ps::run(t.undo).map(|_| format!("Reverted: {}", t.name)),
+        None => undo_with_defaults(t).map(|_| format!("Reverted: {}", t.name)),
     }
 }
 

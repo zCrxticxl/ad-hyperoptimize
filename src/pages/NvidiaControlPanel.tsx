@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { api } from "../api";
 import { Card, Spinner } from "../components/ui";
 import { useLang } from "../i18n";
+import { engineText } from "../lib/engineText";
 
 type OpenEntry = { id: string; name: string; time: string };
 type NvStatus = { supported: boolean; name?: string; openEntries?: OpenEntry[] };
@@ -10,7 +11,7 @@ type NvStatus = { supported: boolean; name?: string; openEntries?: OpenEntry[] }
  * NVIDIA drivers. It now opens NVIDIA's own panel and keeps Undo for
  * entries applied by earlier versions. */
 export default function NvidiaControlPanel({ admin }: { admin: boolean }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const [data, setData] = useState<NvStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
@@ -46,7 +47,7 @@ export default function NvidiaControlPanel({ admin }: { admin: boolean }) {
   const openPanel = async () => {
     setOpening(true);
     try { await api.nvOpenPanel(); }
-    catch (e: any) { setLog(String(e)); }
+    catch (e: any) { setLog(engineText(String(e), lang)); }
     finally { setOpening(false); }
   };
 

@@ -70,7 +70,7 @@ export function OptCard({ item, admin, focused }: { item: HealthItem; admin: boo
         setMsg({ ok: confirmed, text: confirmed ? t("hcApplied") : t("hcApplyNotConfirmed") });
       }
     } catch (e) {
-      setMsg({ ok: false, text: String(e) });
+      setMsg({ ok: false, text: tx(String(e)) });
       refreshBroker(); // the helper may have ended (idle timeout)
     } finally {
       setBusy(false);

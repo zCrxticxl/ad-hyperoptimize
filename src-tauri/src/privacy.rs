@@ -621,7 +621,7 @@ pub fn apply(id: String) -> Result<Value, String> {
     // The script may have changed some values before failing (or verify
     // found them wrong): restore the captured originals, like the tweak
     // engine does, instead of leaving an open half-applied entry.
-    if let Err(e) = ps::run(t.apply).and_then(|_| verify_applied(t)) {
+    if let Err(e) = ps::run_settled(t.apply).and_then(|_| verify_applied(t)) {
         return match crate::tweaks::revert_entry(&entry_id) {
             Ok(_) => Err(format!("{e}; all changes were rolled back")),
             Err(re) => Err(format!(
