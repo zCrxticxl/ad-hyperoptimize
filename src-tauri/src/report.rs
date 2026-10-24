@@ -24,6 +24,26 @@ fn sev_label(s: u64) -> (&'static str, &'static str) {
     }
 }
 
+/// Writes a new report file. The reports folder is user-writable while this
+/// process may be elevated: a junction in the path or a pre-planted link at
+/// the file name would redirect the write, so both are refused (create_new
+/// never opens an existing file or link).
+fn write_new(path: &std::path::Path, content: &str) -> Result<(), String> {
+    use std::io::Write as _;
+    if crate::diskanalyzer::has_reparse_ancestor(path) {
+        return Err(format!(
+            "refusing to write {}: a folder in the path is a link",
+            path.display()
+        ));
+    }
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .and_then(|mut f| f.write_all(content.as_bytes()))
+        .map_err(|e| format!("{}: {e}", path.display()))
+}
+
 pub fn generate(
     scan: &Value,
     analysis: &Value,
@@ -40,11 +60,10 @@ pub fn generate(
         "tool": concat!("AD HyperOptimize v", env!("CARGO_PKG_VERSION")),
         "analysis": analysis, "scan": scan, "security": security, "changeHistory": history,
     });
-    fs::write(
+    write_new(
         &json_path,
-        serde_json::to_string_pretty(&full).map_err(|e| e.to_string())?,
-    )
-    .map_err(|e| e.to_string())?;
+        &serde_json::to_string_pretty(&full).map_err(|e| e.to_string())?,
+    )?;
 
     let score = analysis["healthScore"].as_i64().unwrap_or(0);
     let summary = analysis["summary"].as_str().unwrap_or("");
@@ -129,7 +148,7 @@ td,th{{padding:10px;border-bottom:1px solid #21262d;vertical-align:top;text-alig
         nf = findings.len(),
         json_name = esc(&json_path.file_name().unwrap_or_default().to_string_lossy()),
     );
-    fs::write(&html_path, html).map_err(|e| e.to_string())?;
+    write_new(&html_path, &html)?;
 
     Ok(serde_json::json!({
         "htmlPath": html_path.to_string_lossy(),

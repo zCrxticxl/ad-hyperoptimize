@@ -256,6 +256,35 @@ fn is_backup_of(file_name: &str, root: &str, path: &str) -> bool {
         })
 }
 
+/// Writes a file in the user-writable data folder (`app_data_dir`). This
+/// process may be elevated while any process of the user can change that
+/// folder: a junction in the path or a link at the file name would redirect
+/// a plain `fs::write` to a file of their choice. Links in the path are
+/// refused; the content goes to a new temp file that then replaces the
+/// target by rename, which swaps the directory entry instead of following a
+/// planted link or hard link.
+pub fn write_user_file(path: &Path, content: &[u8]) -> Result<(), String> {
+    use std::io::Write as _;
+    if crate::diskanalyzer::has_reparse_ancestor(path) {
+        return Err(format!(
+            "refusing to write {}: a folder in the path is a link",
+            path.display()
+        ));
+    }
+    let tmp = path.with_extension(format!("tmp-{}", std::process::id()));
+    let _ = fs::remove_file(&tmp); // a stale temp file or link, never followed
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&tmp)
+        .and_then(|mut f| f.write_all(content))
+        .map_err(|e| format!("{}: {e}", tmp.display()))?;
+    fs::rename(&tmp, path).map_err(|e| {
+        let _ = fs::remove_file(&tmp);
+        format!("{}: {e}", path.display())
+    })
+}
+
 /// Newest `.reg` backup for a registry key, or None. Used by the force-revert
 /// path to restore prior state instead of blindly deleting values.
 pub fn latest_backup_for(root: &str, path: &str) -> Option<String> {
@@ -414,6 +443,20 @@ pub fn launch_rstrui() -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::{classify_restore_point, RestorePointObservation, RestorePointOutcome};
+
+    #[test]
+    fn user_files_are_replaced_not_appended() {
+        let dir = std::env::temp_dir().join(format!("adho-userfile-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("bench_history.json");
+        super::write_user_file(&f, b"first").unwrap();
+        super::write_user_file(&f, b"2").unwrap();
+        let content = std::fs::read_to_string(&f).unwrap();
+        let leftovers = std::fs::read_dir(&dir).unwrap().count();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(content, "2");
+        assert_eq!(leftovers, 1, "temp file left behind");
+    }
 
     #[test]
     fn backups_match_their_own_key_only() {

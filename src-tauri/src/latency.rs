@@ -114,6 +114,14 @@ pub fn wpr_stop() -> Result<Value, String> {
         "dpc-trace-{}.etl",
         chrono::Local::now().format("%Y%m%d-%H%M%S")
     ));
+    // wpr writes the trace with this process's rights into the
+    // user-writable reports folder: no link in the path, no existing file.
+    if crate::diskanalyzer::has_reparse_ancestor(&path) || path.symlink_metadata().is_ok() {
+        return Err(format!(
+            "refusing to write the trace to {}: link in the path or file exists",
+            path.display()
+        ));
+    }
     ps::exec(
         "wpr.exe",
         &["-stop", &path.to_string_lossy(), "PCOptSuite DPC trace"],

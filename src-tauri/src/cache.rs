@@ -52,7 +52,10 @@ pub fn store(key: &str, data: Value) -> Value {
     // An invalid key is never persisted (avoids writing outside the cache
     // dir); the in-memory envelope is still returned so callers work.
     if is_safe_cache_key(key) {
-        let _ = fs::write(path(key), serde_json::to_string(&env).unwrap_or_default());
+        let _ = crate::safety::write_user_file(
+            &path(key),
+            serde_json::to_string(&env).unwrap_or_default().as_bytes(),
+        );
     }
     env
 }

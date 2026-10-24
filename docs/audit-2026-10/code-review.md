@@ -59,6 +59,10 @@ Severity:
 | `procmgr.rs` | 340 | reviewed |
 | `ctxmenu.rs` | 246 | reviewed |
 | `softwareinstaller.rs` | 240 | reviewed |
+| `healthcheck.rs` | 256 | reviewed |
+| `monitor.rs` | 253 | reviewed |
+| `report.rs` | 175 | reviewed |
+| `bench.rs` | 160 | reviewed |
 
 ## Findings
 
@@ -134,3 +138,5 @@ Severity:
 | 68 | `softwareinstaller.rs:install_succeeded` | Medium | Exit code `0x8A150014` was treated as "already installed". With `winget install` it means "no package found". A wrong or outdated catalog id was reported as installed. "Already installed" is `0x8A150061`, which counted as an error before. | fixed: success = 0 / `0x8A15002B` / `0x8A150061`; test |
 | 69 | `softwareinstaller.rs` / `drivers.rs` catalog | Low | Two different AMD winget ids (`AdvancedMicroDevices.AMDSoftware.Adrenalin` vs. `AMD.Software.Adrenalin.Edition`). At least one is probably wrong; `Nvidia.GeForceExperience` has been replaced by the NVIDIA App. Not verifiable here (no access to winget-pkgs). | open: check with `winget search` on Windows |
 | 70 | `ctxmenu.rs` | Low | "Disable all bloat" also renames "Scan with Microsoft Defender", "Previous Versions", "Open with" and "Pin to Taskbar". Calling these bloat is debatable. Some paths (`*\shell\taskbarpin`, `*\shell\printto`) do not exist on current Windows and show as "not present". Renaming is reversible; no journal. | open: decide the bulk-action scope |
+| 71 | `report.rs`, `bench.rs`, `cache.rs`, `frametime.rs`, `latency.rs:wpr_stop` | Medium | The (possibly elevated) app wrote into the **user-writable** `%APPDATA%\PCOptSuite` with `fs::write` (`bench_history.json`, `fps_runs.json`, `cache\*.json`, reports) or let `wpr.exe` write a trace there. If user-level code replaces the folder with a junction (e.g. to `\RPC Control` with object symlinks), the elevated write goes to a file of its choice. This is the classic arbitrary-file-write primitive for privilege escalation. | fixed: `safety::write_user_file` (no link in the path, new temp file + rename, which replaces a planted link instead of following it); reports with `create_new`; `wpr -stop` only when there is no link in the path and no existing file. Test `user_files_are_replaced_not_appended` |
+| 72 | `healthcheck.rs`, `monitor.rs` | Info | Checked: SFC/DISM verdict from exit code + recognised sentences, never "OK" without evidence; monitor start/stop race-free (one loop per flag, join under lock). | ok |

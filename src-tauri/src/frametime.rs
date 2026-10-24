@@ -274,8 +274,13 @@ fn save_runs(runs: &[Value]) -> Result<(), String> {
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir).map_err(|e| format!("creating data folder: {e}"))?;
     }
-    fs::write(path, serde_json::to_string_pretty(runs).unwrap_or_default())
-        .map_err(|e| format!("saving measurements: {e}"))
+    crate::safety::write_user_file(
+        &path,
+        serde_json::to_string_pretty(runs)
+            .unwrap_or_default()
+            .as_bytes(),
+    )
+    .map_err(|e| format!("saving measurements: {e}"))
 }
 
 fn clean_text(s: &str, max: usize) -> String {

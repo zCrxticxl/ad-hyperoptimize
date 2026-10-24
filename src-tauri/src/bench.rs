@@ -139,9 +139,11 @@ pub fn run(kind: &str) -> Result<Value, String> {
         },
     };
     hist.push(result.clone());
-    if let Err(e) = fs::write(
-        history_path(),
-        serde_json::to_string_pretty(&hist).unwrap_or_default(),
+    if let Err(e) = crate::safety::write_user_file(
+        &history_path(),
+        serde_json::to_string_pretty(&hist)
+            .unwrap_or_default()
+            .as_bytes(),
     ) {
         result["historyError"] = json!(format!("result not saved to history: {e}"));
     }
