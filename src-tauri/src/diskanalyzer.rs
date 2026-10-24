@@ -638,7 +638,12 @@ pub fn scan_largest(path: String, limit: usize, app: Option<tauri::AppHandle>) -
             }
 
             if meta.is_dir() {
-                stack.push(fpath);
+                // Same rule as walk(): a junction reports is_dir() too, and
+                // descending into it double-counts sizes or loops forever
+                // (a junction to an ancestor; MAX_FILES only counts files).
+                if !is_reparse_point(&fpath) {
+                    stack.push(fpath);
+                }
             } else if meta.is_file() {
                 if files.len() >= MAX_FILES {
                     break 'walk;
