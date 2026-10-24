@@ -148,12 +148,15 @@ pub static COMMANDS: &[(&str, Class, &str)] = &[
         User,
         "user-chosen files with the user's own rights",
     ),
-    ("cmd_disk_organize_preview", Read, "folder listing"),
+    ("cmd_organizer_folders", Read, "known folders"),
+    ("cmd_organizer_preview", Read, "folder listing"),
     (
-        "cmd_disk_organize_apply",
+        "cmd_organizer_apply",
         User,
-        "moves files in a user folder",
+        "moves files in a user folder (logged)",
     ),
+    ("cmd_organizer_runs", Read, "organizer history"),
+    ("cmd_organizer_undo", User, "moves logged files back"),
     // ── security ──
     (
         "cmd_security_scan",

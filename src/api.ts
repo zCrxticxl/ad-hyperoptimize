@@ -154,8 +154,11 @@ export const api = {
   diskTempAge: () => invoke<any>("cmd_disk_temp_age"),
   diskDelete: (paths: string[]) => invoke<any>("cmd_disk_delete", { paths }),
   diskMove: (paths: string[], destDir: string) => invoke<any>("cmd_disk_move", { paths, destDir }),
-  diskOrganizePreview: (folder: string) => invoke<any>("cmd_disk_organize_preview", { folder }),
-  diskOrganizeApply: (items: any[]) => invoke<any>("cmd_disk_organize_apply", { items }),
+  organizerFolders: () => invoke<any>("cmd_organizer_folders"),
+  organizerPreview: (folder: string, byMonth: boolean) => invoke<any>("cmd_organizer_preview", { folder, byMonth }),
+  organizerApply: (folder: string, byMonth: boolean, srcs: string[]) => invoke<any>("cmd_organizer_apply", { folder, byMonth, srcs }),
+  organizerRuns: () => invoke<any>("cmd_organizer_runs"),
+  organizerUndo: (runId: string) => invoke<any>("cmd_organizer_undo", { runId }),
   schedTasksList: () => invoke<any>("cmd_schedtasks_list"),
   schedTaskToggle: (path: string, name: string, enable: boolean) =>
     invoke<any>("cmd_schedtask_toggle", { path, name, enable }),

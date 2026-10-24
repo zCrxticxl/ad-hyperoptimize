@@ -25,6 +25,7 @@ mod latency;
 mod monitor;
 mod optimizer;
 mod optregistry;
+mod organizer;
 mod perftweaks;
 mod powerplan;
 mod privacy;
@@ -976,20 +977,44 @@ async fn cmd_regclean_restore(backup_path: String) -> Result<Value, String> {
 
 // ---- disk organizer ----
 #[tauri::command(async)]
-async fn cmd_disk_organize_preview(folder: String) -> Value {
-    tauri::async_runtime::spawn_blocking(move || diskanalyzer::organize_preview(folder))
+async fn cmd_organizer_folders() -> Value {
+    tauri::async_runtime::spawn_blocking(organizer::folders)
         .await
         .unwrap_or_default()
 }
 
 #[tauri::command(async)]
-async fn cmd_disk_organize_apply(items: Vec<Value>) -> Value {
-    tauri::async_runtime::spawn_blocking(move || diskanalyzer::organize_apply(items))
+async fn cmd_organizer_preview(folder: String, by_month: bool) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || organizer::preview(folder, by_month))
+        .await
+        .map_err(|_| "organizer task panicked".to_string())?
+}
+
+#[tauri::command(async)]
+async fn cmd_organizer_apply(
+    folder: String,
+    by_month: bool,
+    srcs: Vec<String>,
+) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || organizer::apply(folder, by_month, srcs))
+        .await
+        .map_err(|_| "organizer task panicked".to_string())?
+}
+
+#[tauri::command(async)]
+async fn cmd_organizer_runs() -> Value {
+    tauri::async_runtime::spawn_blocking(organizer::runs)
         .await
         .unwrap_or_default()
 }
 
-// ---- analysis / report ----
+#[tauri::command(async)]
+async fn cmd_organizer_undo(run_id: String) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || organizer::undo(run_id))
+        .await
+        .map_err(|_| "organizer task panicked".to_string())?
+}
+
 #[tauri::command(async)]
 async fn cmd_analyze(force: bool) -> Value {
     // v2: findings now carry `code`+`params` for i18n (old cached "analysis"
@@ -1831,8 +1856,11 @@ pub fn run() {
             cmd_disk_temp_age,
             cmd_disk_delete,
             cmd_disk_move,
-            cmd_disk_organize_preview,
-            cmd_disk_organize_apply,
+            cmd_organizer_folders,
+            cmd_organizer_preview,
+            cmd_organizer_apply,
+            cmd_organizer_runs,
+            cmd_organizer_undo,
             // sched tasks
             cmd_schedtasks_list,
             cmd_schedtask_toggle,

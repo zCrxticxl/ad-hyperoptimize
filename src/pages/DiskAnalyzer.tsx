@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { api, fmtBytes } from "../api";
 import { Card, Spinner } from "../components/ui";
 import { useLang } from "../i18n";
+import { Organizer } from "../components/Organizer";
 
 // ── types ────────────────────────────────────────────────────────────────────
 
@@ -580,145 +581,6 @@ function TempTab() {
   );
 }
 
-// ── Organizer tab ─────────────────────────────────────────────────────────────
-
-const CAT_COLORS: Record<string, string> = {
-  "Images":      "#3b9edd",
-  "Videos":      "#9b59b6",
-  "Music":       "#e74c3c",
-  "Documents":   "#27ae60",
-  "Archives":    "#e67e22",
-  "Code":        "#1abc9c",
-  "Executables": "#e91e63",
-  "Fonts":       "#795548",
-  "3D & CAD":    "#607d8b",
-  "Torrents":    "#009688",
-};
-
-
-type OrgItem = { src: string; dest: string; name: string; size: number; sizeFmt: string; cat: string; catFolder: string; icon: string };
-type OrgPreview = { items: OrgItem[] };
-
-// ─── Organize Tab ─────────────────────────────────────────────────────────────
-
-function OrganizeTab() {
-  const { t } = useLang();
-  // No default: the user names the folder whose top-level files are sorted.
-  const [root, setRoot]         = useState("");
-  const [preview, setPreview]   = useState<OrgPreview | null>(null);
-  const [busy, setBusy]         = useState(false);
-  const [log, setLog]           = useState<{ msg: string; ok: boolean; errors: string[] } | null>(null);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-
-  const loadPreview = async () => {
-    setPreview(null);
-    setSelected(new Set());
-    setPreview(await api.diskOrganizePreview(root.trim()));
-  };
-
-  const doPreview = async () => {
-    setBusy(true); setLog(null);
-    try { await loadPreview(); }
-    catch (e: any) { setLog({ msg: String(e), ok: false, errors: [] }); }
-    finally { setBusy(false); }
-  };
-
-  const doApply = async () => {
-    if (!preview) return;
-    const items = preview.items.filter(it => selected.has(it.src));
-    if (!items.length) return;
-    const total = items.reduce((a, it) => a + (it.size || 0), 0);
-    if (!window.confirm(t("diskOrganizeConfirm").replace("{n}", String(items.length)).replace("{size}", fmtBytes(total)))) return;
-    setBusy(true); setLog(null);
-    try {
-      // Backend returns { moved, failed, errors[] }, never render the object itself.
-      const r = await api.diskOrganizeApply(items);
-      const moved = Number(r?.moved ?? 0);
-      const failed = Number(r?.failed ?? 0);
-      const errors: string[] = Array.isArray(r?.errors) ? r.errors.map(String) : [];
-      setLog({
-        msg: t("diskOrganizeResult").replace("{moved}", String(moved)).replace("{failed}", String(failed)),
-        ok: failed === 0,
-        errors,
-      });
-      // Moved files no longer exist at their old paths: rebuild the preview.
-      try { await loadPreview(); } catch { /* the result message above stays visible */ }
-    } catch (e: any) {
-      setLog({ msg: String(e), ok: false, errors: [] });
-    } finally { setBusy(false); }
-  };
-
-  const toggleAll = () => {
-    if (!preview) return;
-    if (selected.size === preview.items.length) setSelected(new Set());
-    else setSelected(new Set(preview.items.map(i => i.src)));
-  };
-
-  return (
-    <div style={{ paddingTop: 8 }}>
-      <div className="row" style={{ gap: 8, marginBottom: 12 }}>
-        <input
-          value={root}
-          onChange={e => setRoot(e.target.value)}
-          placeholder={t("diskOrganizeFolder")}
-          style={{ flex: 1, padding: "7px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg2)", color: "var(--text)", fontSize: 13 }}
-        />
-        <button className="btn small" onClick={doPreview} disabled={busy || !root.trim()}>
-          {busy ? <Spinner /> : t("diskOrganizePreview")}
-        </button>
-      </div>
-
-      {log && (
-        <div role={log.ok ? "status" : "alert"} style={{ marginBottom: 10, padding: "8px 12px", borderRadius: 6, background: log.ok ? "rgba(80,200,120,0.08)" : "rgba(255,97,125,.08)", border: `1px solid ${log.ok ? "var(--green)" : "var(--red)"}`, color: log.ok ? "var(--green)" : "var(--red)", fontSize: 13 }}>
-          {log.msg}
-          {log.errors.length > 0 && (
-            <ul className="mono" style={{ margin: "6px 0 0", paddingLeft: 18, fontSize: 11, maxHeight: 160, overflowY: "auto" }}>
-              {log.errors.map((e, i) => <li key={i}>{e}</li>)}
-            </ul>
-          )}
-        </div>
-      )}
-
-      {preview && (
-        <>
-          <div className="row" style={{ justifyContent: "space-between", marginBottom: 8 }}>
-            <span className="muted" style={{ fontSize: 13 }}>{preview.items.length} {t("diskFilesWord")} · {fmtBytes(preview.items.reduce((a, it) => a + (it.size || 0), 0))}</span>
-            <div className="row" style={{ gap: 8 }}>
-              <button className="btn small ghost" onClick={toggleAll}>
-                {selected.size === preview.items.length ? t("diskDeselectAll") : t("diskSelectAll")}
-              </button>
-              <button className="btn small" onClick={doApply} disabled={busy || selected.size === 0}>
-                {busy ? <Spinner /> : `${t("diskMoveBtn")} (${selected.size})`}
-              </button>
-            </div>
-          </div>
-          <div style={{ maxHeight: 400, overflowY: "auto" }}>
-            {preview.items.map(it => (
-              <div key={it.src} className="row" style={{ padding: "5px 0", borderBottom: "1px solid var(--border)", gap: 10, alignItems: "center" }}>
-                <input
-                  type="checkbox"
-                  checked={selected.has(it.src)}
-                  onChange={() => {
-                    const next = new Set(selected);
-                    if (next.has(it.src)) next.delete(it.src); else next.add(it.src);
-                    setSelected(next);
-                  }}
-                />
-                <span style={{ fontSize: 18 }}>{it.icon}</span>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.name}</div>
-                  <div className="muted" style={{ fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>→ {it.dest}</div>
-                </div>
-                <span className="muted" style={{ fontSize: 12, flexShrink: 0 }}>{it.sizeFmt}</span>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 const DA_TABS = ["largest", "duplicates", "temp", "organize"] as const;
@@ -776,7 +638,7 @@ export default function DiskAnalyzer() {
       {tab === "largest"    && <LargestTab    path={path} drives={drives} currentRoot={currentRoot} />}
       {tab === "duplicates" && <DuplicatesTab path={path} drives={drives} currentRoot={currentRoot} />}
       {tab === "temp"       && <TempTab />}
-      {tab === "organize"   && <OrganizeTab />}
+      {tab === "organize"   && <Organizer />}
     </>
   );
 }
