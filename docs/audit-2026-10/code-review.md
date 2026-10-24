@@ -67,6 +67,7 @@ Severity:
 | `scan.rs` | 136 | reviewed |
 | `latency.rs` | 137 | reviewed |
 | `cache.rs` | 115 | reviewed |
+| `analysis.rs` | 560 | reviewed |
 
 ## Findings
 
@@ -147,3 +148,7 @@ Severity:
 | 73 | `scan.rs:boot_analysis`, `bootopt.rs:query_boot_events` | Medium | Boot time from event 100 (Diagnostics-Performance) was read wrongly. `scan.rs` took `Data[0]`, which is `BootTsVersion` (always 2), so the analysis saw "2 ms boot time". `bootopt.rs` looked for a field `BootDuration`; as far as I know event 100 calls it `BootTime`, which would make `lastBootMs` always -1. | fixed: `BootTime` read by name (bootopt keeps `BootDuration` as a fallback). Field names to be confirmed on Windows (`(Get-WinEvent … Id=100 -MaxEvents 1).ToXml()`) |
 | 74 | `scan.rs:event_log_summary` | Low | Minidumps read from a hardcoded `C:\Windows\Minidump`. | fixed: `$env:SystemRoot` (trusted environment, see #2) |
 | 75 | `hwmonitor.rs:fans` | Low | `Win32_Fan.DesiredSpeed` is the *target* speed, not a measured RPM, and is not reported on most boards. It is shown as `rpm`. | open (low): label as "target" or drop |
+| 76 | `analysis.rs` (dates) | Medium | Windows PowerShell 5.1 serializes `DateTime` as `"/Date(1698765432100)/"`. The "uptime over 7 days" and "GPU driver over 2 years old" findings parsed RFC 3339 / `yyyymmdd` and therefore **never** fired. | fixed: `ps_date_ms`; tests |
+| 77 | `analysis.rs` (hosts) | Low | The hosts finding read a `count` field that `security::hosts_entries` does not provide (it returns `active`/`disabled`); it never fired. | fixed: number of active entries; test |
+| 78 | `analysis.rs` + translations | Low | 1) HVCI: invented "costs roughly 3-8% performance" (all 9 languages). 2) Power plan: "Balanced/Power Saver throttle the CPU and increase latency, switch to High/Ultimate" contradicts `optregistry` (gains usually small, not on laptops). 3) "Many services are bloat/telemetry" without evidence. | fixed: no number; only Power saver is flagged (recommendation: Balanced or High performance, desktop/plugged in); neutral service text; de/en/es/fr/pl/pt/ru/sv/tr updated |
+| 79 | `analysis.rs` (temperature, RAM speed) | Low | ACPI thermal zones (`MSAcpi_ThermalZoneTemperature`) are often not the CPU temperature, yet the finding is "Critical CPU temperature". The RAM-speed check (avg < 2666 "MHz") overlaps `optimizer::ram_check` and also hits DDR4-2400 laptops that are correctly at JEDEC speed. | open (low) |
