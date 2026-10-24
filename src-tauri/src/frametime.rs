@@ -121,7 +121,7 @@ pub fn parse_capture(csv: &str) -> Result<Capture, String> {
             None => counts.push((app.clone(), 1)),
         }
     }
-    counts.sort_by(|a, b| b.1.cmp(&a.1));
+    counts.sort_by_key(|a| std::cmp::Reverse(a.1));
     let main = counts.first().and_then(|(a, _)| a.clone());
     let other_apps = counts
         .iter()
