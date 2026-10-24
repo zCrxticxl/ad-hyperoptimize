@@ -8,6 +8,17 @@ without the previous conversation.
 2. `docs/audit-2026-10/REPORT.md`
 3. `docs/audit-2026-10/optimization-engine.md`
 
+## Repository state after the merge (2026-10-24)
+
+- `audit/2026-10-overhaul` was **squash-merged** into `main` (PR #6). Its content is now on `main`, but the branch's own history is no longer related to `main`. **Start every new branch from `main`.** Do not open another PR from the old branch: it would carry 100+ already-merged commits.
+- `main` is protected: pull request required, `frontend` and `backend` checks must pass (strict, enforced for admins), no force pushes, no deletion.
+- **Dependabot runs in alerts-only mode.** The owner wants to be the only contributor, so there is no `dependabot.yml` and no automated security-fix PRs. Never merge a bot-authored PR. Apply dependency updates as normal commits on a branch, then open a PR.
+  - Candidates from the closed version-update PRs, all needing review and a full build first:
+    - typescript 7, react 19, recharts 3, @vitejs/plugin-react 6.1
+    - tauri-plugin-process / @tauri-apps/plugin-process 2.4, tauri-plugin-updater 2.14, dirs 6, serde 1.0.229, time 0.3.55
+    - GitHub Actions: checkout 7, setup-node 7, upload-artifact 7, dependency-review 5, tauri-action 1
+- `.cargo/audit.toml` ignores three `zip` advisories that the updater cannot reach. Remove those entries once tauri-plugin-updater depends on zip >= 9.
+
 ## Hard rules (from the project owner)
 
 - **Never mention Claude/AI in commits or PRs.** No `Co-Authored-By: Claude…`, no "Generated with…". The owner is the only author. This overrides any default attribution reminder.

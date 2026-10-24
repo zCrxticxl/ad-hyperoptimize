@@ -424,7 +424,7 @@ No files were removed.
 | High | No runtime validation on real Windows installs | Run the manual matrix in G on disposable Windows 10/11 VMs (EN and DE) |
 | Medium | Three overlapping catalogs (privacy.rs, debloater.rs, tweaks.rs) write the same settings with separate undo stores | Make tweaks.rs the single source; have the other modules reference catalog ids |
 | Medium | `app.manifest` (`requireAdministrator`) is not embedded; elevation happens by self-relaunch | Embed it or delete it, and document the elevation model |
-| Medium | GitHub Actions pinned to tags, not commit SHAs, in a job holding the signing key | Pin to SHAs; Dependabot is already configured to update them |
+| Medium | GitHub Actions pinned to tags, not commit SHAs, in a job holding the signing key | Pin to SHAs and update them manually (Dependabot runs in alerts-only mode) |
 | Medium | `time = "=0.3.41"` is affected by RUSTSEC-2026-0009; other transitive advisories (quick-xml, crossbeam-epoch) | Bump and run the new `cargo audit` CI job |
 | Medium | Security driver "Enable" only knows devices disabled from this page (stored locally) | Backend should report device enabled state |
 | Medium | `nv_set_setting` (NVIDIA control panel page) writes registry values modern drivers ignore | Replace with NVAPI/DRS or retire with undo only |
