@@ -229,10 +229,17 @@ pub fn boost_start(pid: u32) -> Result<String, String> {
     .ok()
     .map(|s| s.trim().to_string())
     .filter(|s| !s.is_empty());
+    // Game Mode is switched on below; its previous value (None = not set,
+    // the Windows default) is restored on stop.
+    let prev_game_mode = match tweaks::reg_read("HKCU", GAME_BAR_KEY, "AutoGameModeEnabled")? {
+        None => None,
+        Some(crate::safety::RegVal::Dword(v)) => Some(v),
+        Some(_) => return Err("unexpected AutoGameModeEnabled type; boost not started".into()),
+    };
 
     // Write-ahead: persist the pre-boost state BEFORE changing anything, so
     // a partial apply (or a crash mid-apply) is still restorable by stop.
-    save_boost_state(&prev_plan, prev_toast.as_deref())?;
+    save_boost_state(&prev_plan, prev_toast.as_deref(), prev_game_mode)?;
 
     // Power plan: an installed Ultimate Performance scheme if present,
     // otherwise High Performance. A failure here aborts and restores.
@@ -284,25 +291,51 @@ else {{ "Game boost active for PID {pid} ({plan_label})" }}
     }
 }
 
+const GAME_BAR_KEY: &str = r"Software\Microsoft\GameBar";
+
 /// Persist the pre-boost state for exact restore in boost_stop.
-fn save_boost_state(prev_plan: &str, prev_toast: Option<&str>) -> Result<(), String> {
+fn save_boost_state(
+    prev_plan: &str,
+    prev_toast: Option<&str>,
+    prev_game_mode: Option<u32>,
+) -> Result<(), String> {
     let path = boost_state_path()?;
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
-    let v = json!({ "prevPlan": prev_plan, "prevToast": prev_toast });
+    let v =
+        json!({ "prevPlan": prev_plan, "prevToast": prev_toast, "prevGameMode": prev_game_mode });
     std::fs::write(&path, serde_json::to_string(&v).unwrap_or_default())
         .map_err(|e| format!("saving boost state failed: {e}"))
 }
 
+/// Pre-boost state as saved by boost_start.
+struct BoostState {
+    plan: String,
+    toast: Option<String>,
+    /// None: not recorded (state written by an older version, leave Game
+    /// Mode alone); Some(None): the value did not exist; Some(Some(v)): v.
+    game_mode: Option<Option<u32>>,
+}
+
+fn parse_boost_state(v: &Value) -> BoostState {
+    BoostState {
+        plan: v["prevPlan"].as_str().unwrap_or_default().to_string(),
+        toast: v["prevToast"].as_str().map(str::to_string),
+        game_mode: match v.get("prevGameMode") {
+            None => None,
+            Some(Value::Null) => Some(None),
+            Some(n) => n.as_u64().and_then(|n| u32::try_from(n).ok()).map(Some),
+        },
+    }
+}
+
 /// Read (without consuming) the pre-boost state; `None` when no state was
 /// saved or the file is unreadable.
-fn read_boost_state() -> Option<(String, Option<String>)> {
+fn read_boost_state() -> Option<BoostState> {
     let raw = std::fs::read_to_string(boost_state_path().ok()?).ok()?;
     let v: Value = serde_json::from_str(&raw).ok()?;
-    let plan = v["prevPlan"].as_str().unwrap_or_default().to_string();
-    let toast = v["prevToast"].as_str().map(str::to_string);
-    Some((plan, toast))
+    Some(parse_boost_state(&v))
 }
 
 fn remove_boost_state() {
@@ -314,7 +347,12 @@ fn remove_boost_state() {
 pub fn boost_stop() -> Result<String, String> {
     // No recorded state means there is nothing we changed to restore. Never
     // guess a "Balanced" plan the user may never have had.
-    let Some((prev_plan, prev_toast)) = read_boost_state() else {
+    let Some(BoostState {
+        plan: prev_plan,
+        toast: prev_toast,
+        game_mode: prev_game_mode,
+    }) = read_boost_state()
+    else {
         if boost_state_path()?.exists() {
             // Unparseable state can never be restored; drop it so a new boost
             // is possible, and say honestly that nothing was restored.
@@ -350,11 +388,20 @@ pub fn boost_stop() -> Result<String, String> {
         _ => "Remove-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Notifications\\Settings' NOC_GLOBAL_SETTING_TOASTS_ENABLED -EA SilentlyContinue".to_string(),
     };
 
+    let game_mode_restore = match prev_game_mode {
+        None => String::new(),
+        Some(Some(v)) => format!(
+            "try {{ Set-ItemProperty 'HKCU:\\Software\\Microsoft\\GameBar' AutoGameModeEnabled {v} -Type DWord -EA Stop }} catch {{ $errs += ('Game Mode restore failed: ' + $_.Exception.Message) }}"
+        ),
+        Some(None) => "Remove-ItemProperty 'HKCU:\\Software\\Microsoft\\GameBar' AutoGameModeEnabled -EA SilentlyContinue".to_string(),
+    };
+
     let script = format!(
         r#"
 $errs = @()
 {plan_restore}
 try {{ {toast_restore} }} catch {{ $errs += ('toast restore failed: ' + $_.Exception.Message) }}
+{game_mode_restore}
 if ($errs.Count) {{ Write-Error ('Game boost stopped, but: ' + ($errs -join '; ')) }} else {{ 'Game boost stopped, settings restored' }}
 "#
     );
@@ -607,6 +654,22 @@ mod tests {
         assert_eq!(strip_exe("game.exe"), "game");
         assert_eq!(strip_exe(".exe"), ".exe");
         assert_eq!(strip_exe("vgc"), "vgc");
+    }
+
+    #[test]
+    fn boost_state_keeps_absent_and_legacy_game_mode_apart() {
+        let st = |v: Value| parse_boost_state(&v).game_mode;
+        // Written by an older version: Game Mode is left alone on stop.
+        assert_eq!(st(json!({ "prevPlan": "x" })), None);
+        // The value did not exist before the boost: it is removed again.
+        assert_eq!(
+            st(json!({ "prevPlan": "x", "prevGameMode": null })),
+            Some(None)
+        );
+        assert_eq!(
+            st(json!({ "prevPlan": "x", "prevGameMode": 0 })),
+            Some(Some(0))
+        );
     }
 
     #[test]

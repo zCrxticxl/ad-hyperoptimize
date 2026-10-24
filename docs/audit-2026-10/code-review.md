@@ -43,6 +43,7 @@ Severity:
 | `diskanalyzer.rs` | 1360 | reviewed |
 | `gamedb.rs` | 1205 | reviewed (data) |
 | `perftweaks.rs` | 640 | reviewed |
+| `gameboost.rs` | 650 | reviewed |
 
 ## Findings
 
@@ -87,3 +88,5 @@ Severity:
 | 37 | `perftweaks.rs:timer_set` | Medium | If the script failed after the registry write or the task registration ("helper did not stay running"), nothing was rolled back. `GlobalTimerResolutionRequests` and possibly the SYSTEM task stayed in place; the entry remained open as incomplete. | fixed: `revert_entry` restores the captured state; the message says whether the rollback was complete |
 | 38 | `perftweaks.rs:msi_set`, `net_tweak`, `net_reset_all`, `pagefile_*` | Medium | These change the system without a journal entry or backup: MSI mode in `HKLM\…\Enum`, NIC advanced properties, the page-file configuration. "Undo" only exists as setting the opposite value. That writes e.g. `MSISupported=0` instead of restoring "not set" (driver default), and a NIC reset discards all previous custom values. This contradicts the journal → backup → undo pattern. | open: capture + journal per function (MSI: registry value; NIC: `Get-NetAdapterAdvancedProperty` before the change; page file: `Win32_PageFileSetting` + `AutomaticManagedPagefile`) |
 | 39 | `perftweaks.rs:TIMER_LEGACY_CLEANUP_PS` | Low | The elevated script resolves `$env:ProgramData` from the inherited environment (`trusted_env` does not set ProgramData). Effect is limited: it deletes only a file named `timerres.ps1` and an empty folder `ADHyperOptimize` under the path given. | open (low): add `ProgramData` to the trusted environment |
+| 40 | `gameboost.rs:boost_start/boost_stop` | Low | The boost sets `AutoGameModeEnabled=1`, but only the power plan and notifications were captured and restored. Game Mode stayed on after "settings restored", even if the user had turned it off. | fixed: previous value captured (`prevGameMode`, `null` = not set) and restored. State files from older versions have no field and leave Game Mode untouched. Test `boost_state_keeps_absent_and_legacy_game_mode_apart` |
+| 41 | `gameboost.rs:quick_boost_start` (revert) | Low | The priority undo addresses the process by PID. If the game has exited and Windows reused the PID, the undo sets the captured priority (usually Normal) on an unrelated process. | open (low): check the process name in the revert as `kill_background` does |
