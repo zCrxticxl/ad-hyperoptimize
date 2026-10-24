@@ -104,13 +104,14 @@ impl Drop for InstallGuard {
 }
 
 /// True when the winget exit code reports success. Language-agnostic:
-/// 0 = installed, -1978335212 (0x8A150014) / -1978335189 (0x8A15002B) =
-/// already installed / no applicable upgrade. Output text is never used,
-/// so a localized or failing run can't be reported as success.
+/// 0 = installed, -1978335189 (0x8A15002B) = installed, no newer version,
+/// -1978335135 (0x8A150061) = already installed. -1978335212 (0x8A150014)
+/// is "no package found" and a failure: counting it as success reported a
+/// wrong or outdated catalog id as installed. Output text is never used.
 fn install_succeeded(first_line: &str) -> bool {
     matches!(
         first_line.trim(),
-        "EXIT:0" | "EXIT:-1978335212" | "EXIT:-1978335189"
+        "EXIT:0" | "EXIT:-1978335189" | "EXIT:-1978335135"
     )
 }
 
@@ -169,8 +170,7 @@ pub fn install_apps(winget_ids: Vec<String>, app: AppHandle) {
 
             match crate::ps::run_long(&script) {
                 Ok(out) => {
-                    // Use exit code as primary indicator, language-agnostic
-                    // -1978335212 = already installed, -1978335189 = no applicable upgrade
+                    // Exit code only, language-agnostic (see install_succeeded).
                     let success = install_succeeded(out.lines().next().unwrap_or(""));
                     let msg = out
                         .lines()
@@ -228,8 +228,10 @@ mod tests {
     #[test]
     fn success_comes_only_from_the_exit_code() {
         assert!(install_succeeded("EXIT:0"));
-        assert!(install_succeeded("EXIT:-1978335212"));
         assert!(install_succeeded("EXIT:-1978335189"));
+        assert!(install_succeeded("EXIT:-1978335135"));
+        // "No package found": nothing was installed.
+        assert!(!install_succeeded("EXIT:-1978335212"));
         assert!(!install_succeeded("EXIT:1"));
         assert!(!install_succeeded("EXIT:-1978335215"));
         assert!(!install_succeeded("Successfully installed"));

@@ -57,6 +57,8 @@ Severity:
 | `updates.rs` | 360 | reviewed |
 | `drivers.rs` | 320 | reviewed |
 | `procmgr.rs` | 340 | reviewed |
+| `ctxmenu.rs` | 246 | reviewed |
+| `softwareinstaller.rs` | 240 | reviewed |
 
 ## Findings
 
@@ -129,3 +131,6 @@ Severity:
 | 65 | `gputweaks.rs:nv_open_panel` | Info | Starts the NVIDIA Control Panel elevated (`Start-Process` in the admin process). No browser, but inconsistent with #62. | open (low) |
 | 66 | `procmgr.rs:set_priority/set_affinity/perm_set` | Medium | The protected list (csrss, lsass, dwm, smss, …) only applied to kill. Priority (including `Idle`/`RealTime`) and core affinity could be set for these processes. With `perm_set` it applied permanently through IFEO to every future start. `Idle` or one core on dwm/csrss stalls the system. | fixed: same protection for priority, affinity and permanent priority; test |
 | 67 | `procmgr.rs:perm_set` | Low | Wrote `IFEO\<exe>\PerfOptions\CpuPriorityClass` in HKLM without capturing the previous value (e.g. another tool's override). Remove then deletes the value without restoring the earlier one. | fixed: journal entry with the captured previous value (undo via history); `perm_remove` unchanged |
+| 68 | `softwareinstaller.rs:install_succeeded` | Medium | Exit code `0x8A150014` was treated as "already installed". With `winget install` it means "no package found". A wrong or outdated catalog id was reported as installed. "Already installed" is `0x8A150061`, which counted as an error before. | fixed: success = 0 / `0x8A15002B` / `0x8A150061`; test |
+| 69 | `softwareinstaller.rs` / `drivers.rs` catalog | Low | Two different AMD winget ids (`AdvancedMicroDevices.AMDSoftware.Adrenalin` vs. `AMD.Software.Adrenalin.Edition`). At least one is probably wrong; `Nvidia.GeForceExperience` has been replaced by the NVIDIA App. Not verifiable here (no access to winget-pkgs). | open: check with `winget search` on Windows |
+| 70 | `ctxmenu.rs` | Low | "Disable all bloat" also renames "Scan with Microsoft Defender", "Previous Versions", "Open with" and "Pin to Taskbar". Calling these bloat is debatable. Some paths (`*\shell\taskbarpin`, `*\shell\printto`) do not exist on current Windows and show as "not present". Renaming is reversible; no journal. | open: decide the bulk-action scope |
