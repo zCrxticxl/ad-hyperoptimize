@@ -26,7 +26,7 @@ rayon = "1.10"
 rand = "0.8"
 # Pin: time >=0.3.44 conflicts with cookie 0.18.1 (E0119 in expiration.rs).
 # Remove once cookie ships a fix and tauri picks it up.
-time = "=0.3.41"
+time = "=0.3.47"
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52"
