@@ -73,6 +73,7 @@ Severity:
 | `broker.rs`, `broker/pipe.rs` | 1150 | reviewed |
 | `commands.rs`, `main.rs`, `build.rs` | 610 | reviewed |
 | **Rust backend** | | **complete** |
+| `App.tsx`, `main.tsx`, hooks, `api.ts`, `lib/health.ts`, `OptCard`, `RetiredCard`, `Optimize`, `OptimizeMyPc`, `Dashboard`, `SystemCheck` | ~1700 | reviewed |
 
 ## Findings
 
@@ -162,3 +163,7 @@ Severity:
 | 82 | `frametime.rs:compare_metric` | Medium | The before/after verdict used 2 × standard error as "about a 95 % interval". That only holds for many runs. With 3 runs per state (the minimum allowed) the correct factor is 2.8–4.3 (t distribution, Welch df 2–4). Ordinary run-to-run variation could be reported as "better/worse", which defeats the purpose of the feature. | fixed: Welch–Satterthwaite df + t table (rounded down, conservative), still at least 1 %; test `small_samples_use_the_t_distribution`; method text (de/en) adjusted |
 | 83 | `broker.rs`, `broker/pipe.rs` | Info | Checked: protected pipe DACL (user + SYSTEM), `FILE_FLAG_FIRST_PIPE_INSTANCE`, one instance, no remote clients; client PID + same image path checked by the broker; server PID checked by the client; 256-bit nonce, constant-time compare; `SECURITY_IDENTIFICATION`; typed requests with `deny_unknown_fields`; ids validated before the engine; idle and connect timeouts. | ok |
 | 84 | `commands.rs` | Info | `cmd_boot_analysis` is described as "may enable the log". That is no longer true: the boot log is only read. | note |
+| 85 | `App.tsx:REVERTIBLE_TOOLS` | Low | The health check (SFC/DISM) carried the "revertible" pill. SFC replaces system files, and DISM `/StartComponentCleanup` removes superseded updates for good (they can no longer be uninstalled). | fixed: moved to "not revertible" |
+| 86 | `api.ts` ↔ `lib.rs` | Info | Checked by script: every `invoke` targets a registered command with matching parameter names (camelCase ↔ snake_case). | ok |
+| 87 | `Optimize.tsx` (restore point) | Low | With the admin helper connected but an unelevated UI, the restore-point button is active, but `cmd_create_restore_point` is not routed through the broker and always fails with "Administrator rights required". Only with the `broker` feature (not the default build). | open (broker phase 3) |
+| 88 | `App.tsx` (beginner mode) | Low | "Advanced performance tweaks" (`perftweaks`: page file off, MSI mode, NIC properties, timer task) is marked `basic` and therefore visible in beginner mode, although these are the riskiest actions without a journal (#38). | open: decide |

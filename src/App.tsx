@@ -118,7 +118,7 @@ export type Mode = "beginner" | "expert";
  * also links to the undo hub. */
 const REVERTIBLE_TOOLS = new Set([
   "optimize", "autoopt", "systemcheck", "regclean", "gputweaks", "nvcontrol",
-  "bootopt", "privacy", "services", "startup", "schedtasks", "healthcheck",
+  "bootopt", "privacy", "services", "startup", "schedtasks",
   "perftweaks", "powerplan", "gameboost", "restorepoints",
   "profiles", "gameprofiles", "ctxmenu",
 ]);
@@ -126,6 +126,9 @@ const REVERTIBLE_TOOLS = new Set([
  * undone from inside the app; they get a warning pill linking to restore points. */
 const IRREVERSIBLE_TOOLS = new Set([
   "cleanup", "uninstaller", "diskanalyzer", "debloater", "softinstaller", "drivers", "updates",
+  // SFC/DISM repairs replace system files; DISM component cleanup removes
+  // superseded updates for good (they can no longer be uninstalled).
+  "healthcheck",
 ]);
 
 const MODE_KEY = "ui.mode";
