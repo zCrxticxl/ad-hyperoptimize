@@ -581,6 +581,18 @@ pub fn catalog() -> Vec<Tweak> {
             actions: vec![Action::RegSet { root: "HKLM", path: "SYSTEM\\CurrentControlSet\\Control\\GraphicsDrivers", name: "HwSchMode", value: RegVal::Dword(2) }],
         },
         Tweak {
+            id: "hvci_off",
+            name: "Turn off Memory Integrity (HVCI)",
+            category: "Gaming",
+            description: "Sets Core isolation > Memory integrity (HypervisorEnforcedCodeIntegrity) to off. RESTART REQUIRED. Lowers security: kernel code integrity is no longer enforced by the hypervisor.",
+            rationale: "Hypervisor-enforced code integrity checks kernel memory through the hypervisor, which costs CPU time. Independent tests measured a few percent lower average FPS with it on, and much more in some CPU-bound games; others show no difference.",
+            impact: "May raise FPS in CPU-bound games, depending on the game; measure before and after. Windows Security will report Memory integrity as off.",
+            risk: "High",
+            requires_admin: true,
+            reversible: true,
+            actions: vec![Action::RegSet { root: "HKLM", path: "SYSTEM\\CurrentControlSet\\Control\\DeviceGuard\\Scenarios\\HypervisorEnforcedCodeIntegrity", name: "Enabled", value: RegVal::Dword(0) }],
+        },
+        Tweak {
             id: "priority_separation",
             name: "Foreground priority boost (Win32PrioritySeparation 0x26)",
             category: "Gaming",
@@ -2072,6 +2084,9 @@ fn windows_default(path: &str, name: &str) -> Option<WinDefault> {
         }),
         "Enabled" if path.ends_with("AdvertisingInfo") => d(1),
         "MenuShowDelay" => sz("400"),
+        // Memory integrity on: the default of current clean installs on
+        // supported hardware.
+        "Enabled" if path.ends_with("HypervisorEnforcedCodeIntegrity") => d(1),
         "SubscribedContent-338389Enabled"
         | "SoftLandingEnabled"
         | "RotatingLockScreenOverlayEnabled"
