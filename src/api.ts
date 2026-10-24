@@ -130,8 +130,7 @@ export const api = {
   gpuTweakApply: (id: string, driverKey: string) => invoke<any>("cmd_gpu_tweak_apply", { id, driverKey }),
   gpuTweakRevert: (id: string, driverKey: string) => invoke<any>("cmd_gpu_tweak_revert", { id, driverKey }),
   // nvidia control panel
-  nvGetSettings: () => invoke<any>("cmd_nv_get_settings"),
-  nvSetSetting: (setting: string, value: string) => invoke<any>("cmd_nv_set_setting", { setting, value }),
+  nvStatus: () => invoke<any>("cmd_nv_status"),
   nvOpenPanel: () => invoke<string>("cmd_nv_open_panel"),
   regcleanScan: () => invoke<any>("cmd_regclean_scan"),
   regcleanClean: (entries: any[]) => invoke<any>("cmd_regclean_clean", { entries }),

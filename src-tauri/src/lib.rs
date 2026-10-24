@@ -932,17 +932,10 @@ async fn cmd_gpu_tweak_revert(id: String, driver_key: String) -> Result<String, 
 
 // ---- nvidia control panel ----
 #[tauri::command(async)]
-async fn cmd_nv_get_settings() -> Value {
-    tauri::async_runtime::spawn_blocking(gputweaks::nv_get_settings)
+async fn cmd_nv_status() -> Value {
+    tauri::async_runtime::spawn_blocking(gputweaks::nv_status)
         .await
         .unwrap_or_default()
-}
-
-#[tauri::command(async)]
-async fn cmd_nv_set_setting(setting: String, value: String) -> Result<Value, String> {
-    tauri::async_runtime::spawn_blocking(move || gputweaks::nv_set_setting(setting, value))
-        .await
-        .map_err(|_| "nvidia task panicked".to_string())?
 }
 
 #[tauri::command(async)]
@@ -1804,8 +1797,7 @@ pub fn run() {
             cmd_gpu_scan,
             cmd_gpu_tweak_apply,
             cmd_gpu_tweak_revert,
-            cmd_nv_get_settings,
-            cmd_nv_set_setting,
+            cmd_nv_status,
             cmd_nv_open_panel,
             // registry clean
             cmd_regclean_scan,

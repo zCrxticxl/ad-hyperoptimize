@@ -433,12 +433,7 @@ pub static COMMANDS: &[(&str, Class, &str)] = &[
         "HKLM driver key, services",
     ),
     ("cmd_gpu_tweak_revert", Privileged, "journal undo"),
-    ("cmd_nv_get_settings", Read, "NVIDIA driver profile"),
-    (
-        "cmd_nv_set_setting",
-        Privileged,
-        "NVIDIA driver profile (global)",
-    ),
+    ("cmd_nv_status", Read, "GPU vendor, journal"),
     ("cmd_nv_open_panel", User, "starts the NVIDIA Control Panel"),
     // ── game booster / game profiles ──
     ("cmd_gameboost_background_procs", Read, "process list"),
