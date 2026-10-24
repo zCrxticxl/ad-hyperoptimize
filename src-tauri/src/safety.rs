@@ -17,7 +17,8 @@ static STATE_DIR: OnceLock<Result<PathBuf, String>> = OnceLock::new();
 /// user-writable %APPDATA% folder is migrated into it once, validated.
 /// Unelevated sessions keep using %APPDATA%: nothing they record can run with
 /// more rights than they have, and an elevated session only takes it over via
-/// that validation. Fails closed: if the protected folder can't be
+/// that validation. With the `broker` feature the unelevated UI reads the
+/// protected folder instead, which the elevated helper writes. Fails closed: if the protected folder can't be
 /// established, privileged operations fail instead of using a writable one.
 pub fn state_dir() -> Result<PathBuf, String> {
     STATE_DIR.get_or_init(resolve_state_dir).clone()
@@ -26,12 +27,25 @@ pub fn state_dir() -> Result<PathBuf, String> {
 fn resolve_state_dir() -> Result<PathBuf, String> {
     #[cfg(windows)]
     if ps::is_admin() {
-        let dir = crate::statestore::program_data_dir()?.join("ADHyperOptimize");
+        let dir = protected_state_dir()?;
         crate::statestore::ensure_secure_dir(&dir)?;
         crate::statestore::migrate_legacy(&app_data_dir(), &dir);
         return Ok(dir);
     }
+    // Broker mode: the elevated helper records journal and captured states in
+    // the protected folder, so the unelevated UI must read the same folder
+    // (Authenticated Users may read it, only SYSTEM/Administrators write) or
+    // status, undo and history would not match what was applied. The UI never
+    // creates, hardens or migrates it; the broker does that on first use.
+    #[cfg(all(windows, feature = "broker"))]
+    return protected_state_dir();
+    #[allow(unreachable_code)]
     Ok(app_data_dir())
+}
+
+#[cfg(windows)]
+fn protected_state_dir() -> Result<PathBuf, String> {
+    Ok(crate::statestore::program_data_dir()?.join("ADHyperOptimize"))
 }
 
 pub fn app_data_dir() -> PathBuf {

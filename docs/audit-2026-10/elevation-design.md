@@ -270,6 +270,19 @@ In the app:
 - Found while testing: Apply of `hibernate_off` failed with "could not capture the previous state". This is an engine bug, not a broker one. Fixed in the next commit.
 - Still to test in the app with `--features broker`: unlock button, Apply/Undo through the helper.
 
+### State folder in broker mode (fix after the first app test)
+
+The first app test with `--features broker` showed the Debloater "applied 5 optimizations" while the list stayed at 0/5.
+
+**Cause:**
+- The elevated broker records the journal and captured states in the protected `%ProgramData%\ADHyperOptimize` folder.
+- The unelevated UI still read `%APPDATA%\PCOptSuite`.
+
+**Fix (decision 3):** With the `broker` feature, `safety::state_dir()` in the unelevated UI resolves to the protected folder.
+- The folder already grants Authenticated Users read & execute (`harden`); only SYSTEM and Administrators may write.
+- The UI never creates, hardens or migrates it; the broker does on first use.
+- Without the broker connected, journaled changes from the unelevated UI now fail to write (access denied). That is intended: they belong to the broker. Phase 4 routes the rest.
+
 ### Phase 3, second step: engine and catalog pages routed
 
 All commands that go through the journaled engine or the Privacy/Debloater catalogs now use the broker when it is connected:
