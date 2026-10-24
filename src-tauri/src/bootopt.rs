@@ -139,7 +139,8 @@ if ($events) {{
         $xml  = [xml]$e.ToXml()
         $data = @{{}}
         foreach ($d in $xml.Event.EventData.Data) {{ $data[$d.Name] = $d.'#text' }}
-        $bd  = if ($data['BootDuration'])          {{ [int]$data['BootDuration'] }}          else {{ 0 }}
+        # Event 100 names the total boot duration BootTime.
+        $bd  = if ($data['BootTime']) {{ [int]$data['BootTime'] }} elseif ($data['BootDuration']) {{ [int]$data['BootDuration'] }} else {{ 0 }}
         $mp  = if ($data['MainPathBootTime'])       {{ [int]$data['MainPathBootTime'] }}       else {{ 0 }}
         $pb  = if ($data['BootPostBootTime'])       {{ [int]$data['BootPostBootTime'] }}       else {{ 0 }}
         $sd  = if ($data['SystemDriveInitialization']) {{ [int]$data['SystemDriveInitialization'] }} else {{ 0 }}

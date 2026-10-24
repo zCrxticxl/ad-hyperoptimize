@@ -83,7 +83,8 @@ pub fn full_scan() -> Value {
 /// Boot time analysis via Event Log (event 100 of Diagnostics-Performance).
 pub fn boot_analysis() -> Value {
     section(
-        "Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-Diagnostics-Performance/Operational'; Id=100} -MaxEvents 10 -ErrorAction Stop | ForEach-Object { $x=[xml]$_.ToXml(); @{ time=$_.TimeCreated.ToString('s'); bootMs=[int64]$x.Event.EventData.Data[0].'#text' } }"
+        // By name: Data[0] is BootTsVersion (always 2), the duration is BootTime.
+        "Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-Diagnostics-Performance/Operational'; Id=100} -MaxEvents 10 -ErrorAction Stop | ForEach-Object { $x=[xml]$_.ToXml(); $b=($x.Event.EventData.Data | Where-Object { $_.Name -eq 'BootTime' } | Select-Object -First 1).'#text'; @{ time=$_.TimeCreated.ToString('s'); bootMs=[int64]$b } }"
     )
 }
 
@@ -97,7 +98,7 @@ pub fn event_log_summary() -> Value {
             "Get-WinEvent -FilterHashtable @{LogName='System'; Id=41,1001} -MaxEvents 10 -ErrorAction Stop | Select-Object TimeCreated,Id,ProviderName"
         ),
         "minidumps": section(
-            "Get-ChildItem 'C:\\Windows\\Minidump' -ErrorAction Stop | Select-Object Name,Length,LastWriteTime"
+            "Get-ChildItem (Join-Path $env:SystemRoot 'Minidump') -ErrorAction Stop | Select-Object Name,Length,LastWriteTime"
         )
     })
 }

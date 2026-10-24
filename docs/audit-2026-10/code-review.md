@@ -63,6 +63,10 @@ Severity:
 | `monitor.rs` | 253 | reviewed |
 | `report.rs` | 175 | reviewed |
 | `bench.rs` | 160 | reviewed |
+| `hwmonitor.rs` | 143 | reviewed |
+| `scan.rs` | 136 | reviewed |
+| `latency.rs` | 137 | reviewed |
+| `cache.rs` | 115 | reviewed |
 
 ## Findings
 
@@ -140,3 +144,6 @@ Severity:
 | 70 | `ctxmenu.rs` | Low | "Disable all bloat" also renames "Scan with Microsoft Defender", "Previous Versions", "Open with" and "Pin to Taskbar". Calling these bloat is debatable. Some paths (`*\shell\taskbarpin`, `*\shell\printto`) do not exist on current Windows and show as "not present". Renaming is reversible; no journal. | open: decide the bulk-action scope |
 | 71 | `report.rs`, `bench.rs`, `cache.rs`, `frametime.rs`, `latency.rs:wpr_stop` | Medium | The (possibly elevated) app wrote into the **user-writable** `%APPDATA%\PCOptSuite` with `fs::write` (`bench_history.json`, `fps_runs.json`, `cache\*.json`, reports) or let `wpr.exe` write a trace there. If user-level code replaces the folder with a junction (e.g. to `\RPC Control` with object symlinks), the elevated write goes to a file of its choice. This is the classic arbitrary-file-write primitive for privilege escalation. | fixed: `safety::write_user_file` (no link in the path, new temp file + rename, which replaces a planted link instead of following it); reports with `create_new`; `wpr -stop` only when there is no link in the path and no existing file. Test `user_files_are_replaced_not_appended` |
 | 72 | `healthcheck.rs`, `monitor.rs` | Info | Checked: SFC/DISM verdict from exit code + recognised sentences, never "OK" without evidence; monitor start/stop race-free (one loop per flag, join under lock). | ok |
+| 73 | `scan.rs:boot_analysis`, `bootopt.rs:query_boot_events` | Medium | Boot time from event 100 (Diagnostics-Performance) was read wrongly. `scan.rs` took `Data[0]`, which is `BootTsVersion` (always 2), so the analysis saw "2 ms boot time". `bootopt.rs` looked for a field `BootDuration`; as far as I know event 100 calls it `BootTime`, which would make `lastBootMs` always -1. | fixed: `BootTime` read by name (bootopt keeps `BootDuration` as a fallback). Field names to be confirmed on Windows (`(Get-WinEvent … Id=100 -MaxEvents 1).ToXml()`) |
+| 74 | `scan.rs:event_log_summary` | Low | Minidumps read from a hardcoded `C:\Windows\Minidump`. | fixed: `$env:SystemRoot` (trusted environment, see #2) |
+| 75 | `hwmonitor.rs:fans` | Low | `Win32_Fan.DesiredSpeed` is the *target* speed, not a measured RPM, and is not reported on most boards. It is shown as `rpm`. | open (low): label as "target" or drop |
