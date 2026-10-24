@@ -8,6 +8,7 @@ import Dashboard from "./pages/Dashboard";
 import Hardware from "./pages/Hardware";
 import Monitor from "./pages/Monitor";
 import Latency from "./pages/Latency";
+import GameDiag from "./pages/GameDiag";
 import Optimize from "./pages/Optimize";
 import Cleanup from "./pages/Cleanup";
 import Security from "./pages/Security";
@@ -98,6 +99,7 @@ export const buildNav: NavBuilder = (t) => [
   { id: "monitor", group: t("navSecMonitor"), icon: "📈", desc: t("secDescMonitor"), accent: "slate", items: [
     { id: "hardware", icon: "🧩", label: t("navHardware"), desc: t("toolDescHardware"), basic: true, keywords: "hardware specs cpu gpu ram komponenten" },
     { id: "monitor", icon: "📈", label: t("navMonitor"), desc: t("toolDescMonitor"), basic: true, keywords: "monitor live metrics usage auslastung" },
+    { id: "gamediag", icon: "🎯", label: t("navGameDiag"), desc: t("toolDescGameDiag"), basic: true, keywords: "stutter ruckler throttling drosselung diagnose fps lag monitor hdr maus polling audio ssd" },
     { id: "hwmonitor", icon: "🌡️", label: t("navHwMonitor"), desc: t("toolDescHwMonitor"), keywords: "sensors temps temperature lüfter fans" },
     { id: "benchmark", icon: "🏁", label: t("navBenchmark"), desc: t("toolDescBenchmark"), basic: true, keywords: "benchmark test score messen" },
     { id: "pcconfig", icon: "🛠️", label: t("navPcConfig"), desc: t("toolDescPcConfig"), keywords: "pc build configurator upgrade bottleneck" },
@@ -151,6 +153,7 @@ function renderTool(page: string, mode: Mode, admin: boolean | null, go: (id: st
     case "hardware": return <Hardware mode={mode} />;
     case "monitor": return <Monitor />;
     case "latency": return <Latency />;
+    case "gamediag": return <GameDiag />;
     case "processes": return <Processes />;
     case "startup": return <Startup admin={!!admin} focusId={target} />;
     case "schedtasks": return <ScheduledTasks admin={!!admin} focusId={target} />;

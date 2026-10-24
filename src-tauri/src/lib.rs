@@ -1,4 +1,5 @@
 mod analysis;
+mod audio;
 mod bench;
 mod bootopt;
 mod broker;
@@ -12,11 +13,13 @@ mod commands;
 mod ctxmenu;
 mod debloater;
 mod diskanalyzer;
+mod display;
 mod drivers;
 mod frametime;
 mod gameboost;
 mod gamedb;
 mod gameprofile;
+mod gamestorage;
 mod gputweaks;
 mod healthcheck;
 mod hwmonitor;
@@ -26,6 +29,7 @@ mod monitor;
 mod optimizer;
 mod optregistry;
 mod organizer;
+mod pdh;
 mod perftweaks;
 mod powerplan;
 mod privacy;
@@ -39,9 +43,11 @@ mod scan;
 mod schedtasks;
 mod security;
 mod services;
+mod session;
 mod softwareinstaller;
 mod startup;
 mod statestore;
+mod throttle;
 mod tweaks;
 mod uninstaller;
 mod updates;
@@ -51,6 +57,7 @@ use tauri::{AppHandle, Manager, State};
 
 struct AppState {
     monitor: std::sync::Arc<monitor::MonitorState>,
+    session: std::sync::Arc<session::SessionState>,
     game_switcher: gameprofile::SharedState,
     boosted_pid: std::sync::Mutex<Option<u32>>,
 }
@@ -389,6 +396,82 @@ async fn cmd_run_benchmark(kind: String) -> Result<Value, String> {
 #[tauri::command(async)]
 async fn cmd_bench_history() -> Value {
     tauri::async_runtime::spawn_blocking(bench::history)
+        .await
+        .unwrap_or_default()
+}
+
+// ---- throttling + stutter log ----
+#[tauri::command(async)]
+async fn cmd_throttle_snapshot() -> Value {
+    tauri::async_runtime::spawn_blocking(throttle::snapshot)
+        .await
+        .unwrap_or_default()
+}
+
+#[tauri::command(async)]
+async fn cmd_session_start(state: State<'_, AppState>) -> Result<Value, String> {
+    let st = state.session.clone();
+    tauri::async_runtime::spawn_blocking(move || session::start(&st))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command(async)]
+async fn cmd_session_stop(state: State<'_, AppState>) -> Result<Value, String> {
+    // stop() joins the recorder thread: never on the main thread.
+    let st = state.session.clone();
+    tauri::async_runtime::spawn_blocking(move || session::stop(&st))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+fn cmd_session_status(state: State<'_, AppState>) -> Value {
+    session::status(&state.session)
+}
+
+#[tauri::command(async)]
+async fn cmd_session_list() -> Value {
+    tauri::async_runtime::spawn_blocking(session::list)
+        .await
+        .unwrap_or_default()
+}
+
+#[tauri::command(async)]
+async fn cmd_session_analyze(
+    id: String,
+    csv: Option<String>,
+    capture_end_ms: Option<i64>,
+) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || session::analyze(id, csv, capture_end_ms))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command(async)]
+async fn cmd_session_delete(id: String) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || session::delete(id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command(async)]
+async fn cmd_display_check() -> Value {
+    tauri::async_runtime::spawn_blocking(display::check)
+        .await
+        .unwrap_or_default()
+}
+
+#[tauri::command(async)]
+async fn cmd_audio_check() -> Value {
+    tauri::async_runtime::spawn_blocking(audio::check)
+        .await
+        .unwrap_or_default()
+}
+
+#[tauri::command(async)]
+async fn cmd_game_storage_check() -> Value {
+    tauri::async_runtime::spawn_blocking(gamestorage::check)
         .await
         .unwrap_or_default()
 }
@@ -1728,6 +1811,7 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .manage(AppState {
             monitor: std::sync::Arc::new(monitor::MonitorState::default()),
+            session: std::sync::Arc::new(session::SessionState::default()),
             game_switcher: gameprofile::new_state(),
             boosted_pid: std::sync::Mutex::new(None),
         })
@@ -1862,6 +1946,16 @@ pub fn run() {
             cmd_gpu_vendor,
             // latency / WPR
             cmd_latency_counters,
+            cmd_throttle_snapshot,
+            cmd_session_start,
+            cmd_session_stop,
+            cmd_session_status,
+            cmd_session_list,
+            cmd_session_analyze,
+            cmd_session_delete,
+            cmd_display_check,
+            cmd_audio_check,
+            cmd_game_storage_check,
             cmd_stall_probe,
             cmd_wpr_start,
             cmd_wpr_stop,

@@ -8,101 +8,6 @@ use std::time::Duration;
 use sysinfo::{Disks, Networks, System};
 use tauri::{AppHandle, Emitter};
 
-/// Live CPU frequency via PDH "% Processor Performance" (locale-independent
-/// thanks to PdhAddEnglishCounter). sysinfo/WMI only report the static base
-/// clock on Windows; this counter reflects real turbo/downclock state.
-#[cfg(windows)]
-mod freq {
-    use std::ffi::c_void;
-
-    type HQuery = *mut c_void;
-    type HCounter = *mut c_void;
-
-    #[repr(C)]
-    struct FmtValue {
-        c_status: u32,
-        _pad: u32,
-        double_value: f64,
-    }
-
-    const PDH_FMT_DOUBLE: u32 = 0x0000_0200;
-
-    #[link(name = "pdh")]
-    extern "system" {
-        fn PdhOpenQueryW(src: *const u16, user: usize, q: *mut HQuery) -> i32;
-        fn PdhAddEnglishCounterW(q: HQuery, path: *const u16, user: usize, c: *mut HCounter)
-            -> i32;
-        fn PdhCollectQueryData(q: HQuery) -> i32;
-        fn PdhGetFormattedCounterValue(
-            c: HCounter,
-            fmt: u32,
-            ctype: *mut u32,
-            val: *mut FmtValue,
-        ) -> i32;
-        fn PdhCloseQuery(q: HQuery) -> i32;
-    }
-
-    fn wide(s: &str) -> Vec<u16> {
-        s.encode_utf16().chain(std::iter::once(0)).collect()
-    }
-
-    pub struct PerfCounter {
-        query: HQuery,
-        counter: HCounter,
-    }
-    // Raw handles are only used from the monitor thread.
-    unsafe impl Send for PerfCounter {}
-
-    impl PerfCounter {
-        pub fn new() -> Option<Self> {
-            unsafe {
-                let mut q: HQuery = std::ptr::null_mut();
-                if PdhOpenQueryW(std::ptr::null(), 0, &mut q) != 0 {
-                    return None;
-                }
-                let path = wide("\\Processor Information(_Total)\\% Processor Performance");
-                let mut c: HCounter = std::ptr::null_mut();
-                if PdhAddEnglishCounterW(q, path.as_ptr(), 0, &mut c) != 0 {
-                    PdhCloseQuery(q);
-                    return None;
-                }
-                PdhCollectQueryData(q); // prime; rates need two samples
-                Some(Self {
-                    query: q,
-                    counter: c,
-                })
-            }
-        }
-
-        /// % of nominal frequency (>100 = turbo). Call once per tick.
-        pub fn read_pct(&self) -> Option<f64> {
-            unsafe {
-                if PdhCollectQueryData(self.query) != 0 {
-                    return None;
-                }
-                let mut val = FmtValue {
-                    c_status: 0,
-                    _pad: 0,
-                    double_value: 0.0,
-                };
-                let mut ctype = 0u32;
-                if PdhGetFormattedCounterValue(self.counter, PDH_FMT_DOUBLE, &mut ctype, &mut val)
-                    != 0
-                {
-                    return None;
-                }
-                Some(val.double_value)
-            }
-        }
-    }
-
-    impl Drop for PerfCounter {
-        fn drop(&mut self) {
-            unsafe { PdhCloseQuery(self.query) };
-        }
-    }
-}
-
 pub struct MonitorState {
     /// True while a monitor loop is running (informational).
     pub running: Arc<AtomicBool>,
@@ -143,8 +48,9 @@ pub fn start(app: AppHandle, st: &MonitorState) -> Result<(), String> {
         let mut sys = System::new_all();
         let mut networks = Networks::new_with_refreshed_list();
         let mut disks = Disks::new_with_refreshed_list();
-        #[cfg(windows)]
-        let freq_counter = freq::PerfCounter::new();
+        // Live clock via "% Processor Performance": sysinfo/WMI only report
+        // the static base clock on Windows.
+        let freq_counter = crate::pdh::PerfCounter::new(crate::pdh::CPU_PERFORMANCE);
         // First CPU sample is meaningless; prime it.
         sys.refresh_cpu();
         std::thread::sleep(Duration::from_millis(400));
@@ -160,14 +66,11 @@ pub fn start(app: AppHandle, st: &MonitorState) -> Result<(), String> {
             let cpu_total = per_core.iter().sum::<f32>() / per_core.len().max(1) as f32;
             let base_mhz = sys.cpus().first().map(|c| c.frequency()).unwrap_or(0);
             // Effective clock = base × "% Processor Performance" (turbo > 100%).
-            #[cfg(windows)]
             let freq_mhz = freq_counter
                 .as_ref()
-                .and_then(|f| f.read_pct())
+                .and_then(|f| f.read())
                 .map(|pct| (base_mhz as f64 * pct / 100.0).round() as u64)
                 .unwrap_or(base_mhz);
-            #[cfg(not(windows))]
-            let freq_mhz = base_mhz;
 
             let (mut rx, mut tx) = (0u64, 0u64);
             for n in networks.values() {
