@@ -561,7 +561,8 @@ pub fn scan() -> Value {
             "description": t.description,
             "risk":        t.risk,
             "applied":     applied,
-            "canRevert":   journal.iter().any(|entry| entry.tweak_id == format!("privacy:{}", t.id) && !entry.reverted),
+            "canRevert":   journal.iter().any(|entry| entry.tweak_id == format!("privacy:{}", t.id) && !entry.reverted)
+                || (applied && !retired_reset_targets(t.id).is_empty()),
             "retired":     retired_reason(t.id).is_some(),
             "retiredReason": retired_reason(t.id),
         });
@@ -628,16 +629,63 @@ pub fn apply(id: String) -> Result<Value, String> {
 }
 
 pub fn revert(id: String) -> Result<Value, String> {
-    if !TWEAKS.iter().any(|t| t.id == id) {
+    let Some(t) = TWEAKS.iter().find(|t| t.id == id) else {
         return Err(format!("Unknown tweak: {id}"));
-    }
+    };
     let entry = safety::load_journal()?
         .into_iter()
         .rev()
-        .find(|entry| entry.tweak_id == format!("privacy:{id}") && !entry.reverted)
-        .ok_or_else(|| format!("No saved previous state for {id}; refusing a blind reset"))?;
-    crate::tweaks::revert_entry(&entry.id)?;
-    Ok(json!({ "ok": true, "id": id, "entryId": entry.id }))
+        .find(|entry| entry.tweak_id == format!("privacy:{id}") && !entry.reverted);
+    if let Some(entry) = entry {
+        crate::tweaks::revert_entry(&entry.id)?;
+        return Ok(json!({ "ok": true, "id": id, "entryId": entry.id }));
+    }
+    if retired_reason(&id).is_none() {
+        return Err(format!(
+            "No saved previous state for {id}; refusing a blind reset"
+        ));
+    }
+    reset_retired_without_journal(t)
+}
+
+/// Registry values a journal-less reset of a retired item removes. Only values
+/// that still hold exactly what the item writes are touched.
+fn retired_reset_targets(id: &str) -> &'static [(&'static str, &'static str, &'static str)] {
+    if retired_reason(id).is_some() {
+        registry_targets(id)
+    } else {
+        &[]
+    }
+}
+
+/// A retired item cannot be re-applied to get a journal entry, so without one
+/// it would stay forever. Its values have no effect on current Windows; the
+/// value is removed (for a policy, "not configured" is the Windows default by
+/// definition) after exporting the key, and the result is read back.
+fn reset_retired_without_journal(t: &PrivacyTweak) -> Result<Value, String> {
+    let mut backups = Vec::new();
+    for (root, path, name) in retired_reset_targets(t.id) {
+        let current = crate::tweaks::reg_read(root, path, name)?;
+        let want = expected_dword(t.id, name);
+        let holds_tweak_value = matches!(
+            (&current, want),
+            (Some(safety::RegVal::Dword(v)), Some(w)) if *v == w
+        );
+        if !holds_tweak_value {
+            continue;
+        }
+        backups.push(safety::backup_registry_key(root, path)?);
+        let key = format!("{root}\\{path}");
+        ps::exec("reg.exe", &["delete", &key, "/v", name, "/f"])
+            .map_err(|e| format!("Removing {key}\\{name} failed: {}", e.trim()))?;
+    }
+    if check_one(t)? {
+        return Err(format!(
+            "{} is still active after the reset: a policy or another tool sets it again.",
+            t.id
+        ));
+    }
+    Ok(json!({ "ok": true, "id": t.id, "backups": backups }))
 }
 
 #[cfg(test)]
@@ -715,6 +763,15 @@ mod tests {
         assert!(!listed("prv_maps_update_off", false));
         assert!(listed("prv_telemetry_basic", false));
         assert!(listed("prv_telemetry_basic", true));
+    }
+
+    #[test]
+    fn journal_less_reset_only_for_retired_items() {
+        for (id, _) in RETIRED {
+            assert!(!super::retired_reset_targets(id).is_empty(), "{id}");
+        }
+        assert!(super::retired_reset_targets("prv_telemetry_basic").is_empty());
+        assert!(super::retired_reset_targets("prv_adid_off").is_empty());
     }
 
     #[test]
