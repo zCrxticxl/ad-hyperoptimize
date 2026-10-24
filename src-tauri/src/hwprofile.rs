@@ -301,11 +301,6 @@ fn compute_profile(mut data: Value) -> Value {
             "Critical: Low RAM (<8 GB)",
             "Every freed megabyte matters. Kill all non-essential background processes before launching your game. Consider a RAM upgrade for lasting improvement.");
     }
-    if is_integrated && !is_arc {
-        w!("game_booster", "no_discrete_gpu", "warning",
-            "No Discrete GPU",
-            "Game Booster's GPU Performance Mode requires a dedicated GPU. CPU and process priority optimizations still apply.");
-    }
     if cpu_tier == "budget" {
         w!("game_booster", "budget_cpu_priority", "info",
             "Budget CPU, Priority Boost Helps",
@@ -321,12 +316,12 @@ fn compute_profile(mut data: Value) -> Value {
     if is_laptop {
         w!("power_plan", "laptop_battery_drain", "warning",
             "Laptop, High Performance Drains Battery",
-            "High Performance and Ultimate Performance plans disable CPU frequency scaling. This can reduce battery life by 30-60%. Use only while plugged in.");
+            "High Performance and Ultimate Performance keep the CPU at higher clocks and shorten battery life. Use them only while plugged in.");
     }
     if cpu_tier == "budget" {
         w!("power_plan", "budget_cpu_plan", "info",
-            "Budget CPU, Power Plan is High Impact",
-            "Low-end CPUs downclock aggressively on Balanced plan. Switching to High Performance ensures sustained base clocks, high impact for budget hardware.");
+            "Budget CPU, Compare Power Plans",
+            "Low-end CPUs may clock down more on Balanced. If games stutter, compare Balanced and High Performance with the FPS measurement before keeping either.");
     }
     if !is_laptop && gpu_tier != "high" {
         w!("power_plan", "desktop_custom_plan_thermal_stack", "warning",
@@ -338,7 +333,7 @@ fn compute_profile(mut data: Value) -> Value {
     if has_hdd && !has_ssd {
         w!("dashboard", "hdd_only", "warning",
             "No SSD Detected",
-            "An SSD provides 5-10× faster Windows boot and load times. Upgrading to an SSD is the single highest-impact hardware improvement for most systems.");
+            "Windows boot and game load times are much shorter on an SSD. Upgrading to an SSD is the single highest-impact hardware improvement for most systems.");
     }
     if ram_total > 0 && ram_total < 8192 {
         w!("dashboard", "low_ram", "warning",
@@ -401,22 +396,12 @@ fn compute_profile(mut data: Value) -> Value {
     // OEM/SFF builds) this raises baseline temp until the card hits its
     // thermal limit and boost-clocks DROP below what adaptive boosting
     // would have given, net result: fewer FPS than stock.
-    if is_laptop && (is_nvidia || is_amd_gpu) {
-        // Laptop-specific message takes priority over the generic desktop
-        // thermal-throttle one below, laptop GPUs are TDP-capped, which is
-        // the more relevant/specific explanation for this hardware class.
-        risk!("nv_power_max_perf", "danger",
-            "Laptop GPU, Power/Thermal Limited",
-            "Laptop GPUs are capped by a manufacturer TDP limit, not just clock speed. Forcing max clock cannot exceed that cap, it only adds heat, which throttles the CPU/GPU pair via shared cooling. Expect no FPS gain and possible loss.");
-    } else if is_nvidia && gpu_not_high {
-        risk!("nv_power_max_perf", "danger",
-            "Thermal Throttle Risk on This GPU",
-            "Locks your GPU at maximum clock permanently. On this card/cooling combo this usually raises baseline temperature until the GPU hits its thermal limit mid-game and throttles BELOW stock boost clocks, net result is often lower FPS, not higher. Only beneficial on high-end cards with strong cooling (large air/AIO). Test with a benchmark before/after; revert if FPS drops or temps exceed ~80°C.");
-    }
+    // nv_power_max_perf gets no verdict: current drivers ignore its values
+    // (gputweaks::is_legacy_noop), so "locks the GPU at max clock" was false.
     if is_nvidia && gpu_not_high {
         risk!("nv_dynamic_pstate_off", "danger",
             "Thermal Throttle Risk on This GPU",
-            "Functionally overlaps with 'Maximum Performance', both force the GPU off its adaptive power curve. Combining them (or even just one, on this GPU tier) is the most common cause of FPS regressions reported on mid/budget cards. Apply only one at a time, monitor temps, revert if FPS drops.");
+            "Forces the GPU off its adaptive power curve. On mid/budget cards this is a common cause of reported FPS regressions. Monitor temps and revert if FPS drops.");
     }
 
     // ── Hardware-accelerated GPU scheduling ─────────────────────────────────

@@ -68,6 +68,7 @@ Severity:
 | `latency.rs` | 137 | reviewed |
 | `cache.rs` | 115 | reviewed |
 | `analysis.rs` | 560 | reviewed |
+| `hwprofile.rs` | 510 | reviewed |
 
 ## Findings
 
@@ -152,3 +153,5 @@ Severity:
 | 77 | `analysis.rs` (hosts) | Low | The hosts finding read a `count` field that `security::hosts_entries` does not provide (it returns `active`/`disabled`); it never fired. | fixed: number of active entries; test |
 | 78 | `analysis.rs` + translations | Low | 1) HVCI: invented "costs roughly 3-8% performance" (all 9 languages). 2) Power plan: "Balanced/Power Saver throttle the CPU and increase latency, switch to High/Ultimate" contradicts `optregistry` (gains usually small, not on laptops). 3) "Many services are bloat/telemetry" without evidence. | fixed: no number; only Power saver is flagged (recommendation: Balanced or High performance, desktop/plugged in); neutral service text; de/en/es/fr/pl/pt/ru/sv/tr updated |
 | 79 | `analysis.rs` (temperature, RAM speed) | Low | ACPI thermal zones (`MSAcpi_ThermalZoneTemperature`) are often not the CPU temperature, yet the finding is "Critical CPU temperature". The RAM-speed check (avg < 2666 "MHz") overlaps `optimizer::ram_check` and also hits DDR4-2400 laptops that are correctly at JEDEC speed. | open (low) |
+| 80 | `hwprofile.rs` warnings/verdicts + 7 overlays | Low | Invented numbers and stale statements: "battery life −30-60%", "SSD 5-10× faster", "Power Plan is High Impact" for budget CPUs (unmeasured). There was also a warning about the removed Game Booster "GPU Performance Mode", and a risk verdict for `nv_power_max_perf` ("locks your GPU at maximum clock"), although that tweak is a legacy no-op that is no longer offered. | fixed: texts without numbers (budget CPU: "compare with the FPS measurement"); warning and verdict removed; es/fr/pl/pt/ru/sv/tr updated |
+| 81 | `localize.ts` | Low | Hardware warnings and risk verdicts have overlays for 7 languages, but **not for German**: German users see these texts in English. | open (HANDOFF item 2, translations) |
