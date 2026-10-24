@@ -139,7 +139,10 @@ type Route = { tool: string; target?: string };
 /** Quick-access shortcuts on the dashboard, in the order of a sensible first pass. */
 const QUICK_TOOLS = ["autoopt", "optimize", "powerplan", "gputweaks", "privacy", "startup", "cleanup", "restorepoints"] as const;
 
-function renderTool(page: string, mode: Mode, admin: boolean | null, go: (id: string, target?: string) => void, setMode: (m: Mode) => void, target?: string) {
+/** `helper`: the admin helper (broker) is connected. Only pages whose admin
+ * actions are routed through it treat that as admin rights. */
+function renderTool(page: string, mode: Mode, admin: boolean | null, go: (id: string, target?: string) => void, setMode: (m: Mode) => void, target?: string, helper = false) {
+  const routed = !!admin || helper;
   switch (page) {
     case "dashboard": return <Dashboard mode={mode} go={go} />;
     case "hardware": return <Hardware mode={mode} />;
@@ -148,8 +151,8 @@ function renderTool(page: string, mode: Mode, admin: boolean | null, go: (id: st
     case "processes": return <Processes />;
     case "startup": return <Startup admin={!!admin} focusId={target} />;
     case "schedtasks": return <ScheduledTasks admin={!!admin} focusId={target} />;
-    case "optimize": return <Optimize mode={mode} admin={!!admin} focusId={target} onSwitchExpert={() => setMode("expert")} />;
-    case "profiles": return <Profiles admin={!!admin} />;
+    case "optimize": return <Optimize mode={mode} admin={routed} focusId={target} onSwitchExpert={() => setMode("expert")} />;
+    case "profiles": return <Profiles admin={routed} />;
     case "gameprofiles": return <GameProfiles />;
     case "cleanup": return <Cleanup admin={!!admin} />;
     case "regclean": return <RegClean admin={!!admin} />;
@@ -157,7 +160,7 @@ function renderTool(page: string, mode: Mode, admin: boolean | null, go: (id: st
     case "nvcontrol": return <NvidiaControlPanel admin={!!admin} />;
     case "diskanalyzer": return <DiskAnalyzer />;
     case "bootopt": return <BootOptimizer admin={!!admin} />;
-    case "privacy": return <PrivacyCenter admin={!!admin} focusId={target} />;
+    case "privacy": return <PrivacyCenter admin={routed} focusId={target} />;
     case "services": return <ServicesManager admin={!!admin} focusId={target} />;
     case "healthcheck": return <HealthCheck admin={!!admin} />;
     case "updates": return <Updates admin={!!admin} />;
@@ -166,13 +169,13 @@ function renderTool(page: string, mode: Mode, admin: boolean | null, go: (id: st
     case "powerplan": return <PowerPlan admin={!!admin} />;
     case "uninstaller": return <AppUninstaller admin={!!admin} />;
     case "ctxmenu": return <CtxMenuCleaner admin={!!admin} />;
-    case "debloater": return <Debloater admin={!!admin} focusId={target} />;
+    case "debloater": return <Debloater admin={routed} focusId={target} />;
     case "drivers": return <DriverManager admin={!!admin} />;
     case "gameboost": return <GameBooster admin={!!admin} />;
     case "security": return <Security mode={mode} admin={!!admin} go={go} />;
     case "benchmark": return <Benchmark />;
     case "reports": return <Reports />;
-    case "autoopt": return <OptimizeMyPc admin={!!admin} go={go} />;
+    case "autoopt": return <OptimizeMyPc admin={routed} go={go} />;
     case "systemcheck": return <SystemCheck mode={mode} go={go} />;
     case "restorepoints": return <RestorePointManager admin={!!admin} />;
     case "softinstaller": return <SoftwareInstaller admin={!!admin} />;
@@ -506,7 +509,7 @@ function AppInner() {
                   ))}
                 </div>
               )}
-              <div className="page-content" role="tabpanel" key={`${route.tool}:${route.target ?? ""}`}><ToolErrorBoundary resetKey={route.tool}>{renderTool(route.tool, mode, admin, openTool, setMode, route.target)}</ToolErrorBoundary></div>
+              <div className="page-content" role="tabpanel" key={`${route.tool}:${route.target ?? ""}`}><ToolErrorBoundary resetKey={route.tool}>{renderTool(route.tool, mode, admin, openTool, setMode, route.target, broker.connected)}</ToolErrorBoundary></div>
 
               {route.tool === "dashboard" && (
                 <section className="home-quick" aria-labelledby="home-quick-title">

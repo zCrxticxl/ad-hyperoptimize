@@ -176,9 +176,14 @@ async fn cmd_history() -> Value {
 
 #[tauri::command(async)]
 async fn cmd_revert_entry(entry_id: String) -> Result<Value, String> {
-    tauri::async_runtime::spawn_blocking(move || tweaks::revert_entry(&entry_id))
-        .await
-        .map_err(|_| "revert task panicked".to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        broker::route(broker::Request::RevertEntry {
+            entry_id: entry_id.clone(),
+        })
+        .unwrap_or_else(|| tweaks::revert_entry(&entry_id))
+    })
+    .await
+    .map_err(|_| "revert task panicked".to_string())?
 }
 
 // ---- safety / restore points ----
@@ -238,16 +243,25 @@ fn cmd_open_windows_settings(page: String) -> Result<(), String> {
 
 #[tauri::command(async)]
 async fn cmd_reset_retired() -> Value {
-    tauri::async_runtime::spawn_blocking(optimizer::reset_retired)
-        .await
-        .unwrap_or_default()
+    tauri::async_runtime::spawn_blocking(|| {
+        broker::route_value(broker::Request::ResetRetired {})
+            .unwrap_or_else(optimizer::reset_retired)
+    })
+    .await
+    .unwrap_or_default()
 }
 
 #[tauri::command(async)]
 async fn cmd_optimize_apply(ids: Vec<String>, restore_point: bool) -> Value {
-    tauri::async_runtime::spawn_blocking(move || optimizer::apply(ids, restore_point))
-        .await
-        .unwrap_or_default()
+    tauri::async_runtime::spawn_blocking(move || {
+        broker::route_value(broker::Request::OptimizeApply {
+            ids: ids.clone(),
+            restore_point,
+        })
+        .unwrap_or_else(|| optimizer::apply(ids, restore_point))
+    })
+    .await
+    .unwrap_or_default()
 }
 
 // ---- cleanup ----
@@ -425,16 +439,25 @@ async fn cmd_profile_list() -> Value {
 
 #[tauri::command(async)]
 async fn cmd_profile_apply(id: String, with_bench: bool) -> Result<Value, String> {
-    tauri::async_runtime::spawn_blocking(move || profiles::apply(&id, with_bench))
-        .await
-        .map_err(|_| "profile task panicked".to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        broker::route(broker::Request::ProfileApply {
+            id: id.clone(),
+            with_bench,
+        })
+        .unwrap_or_else(|| profiles::apply(&id, with_bench))
+    })
+    .await
+    .map_err(|_| "profile task panicked".to_string())?
 }
 
 #[tauri::command(async)]
 async fn cmd_profile_revert(id: String) -> Result<Value, String> {
-    tauri::async_runtime::spawn_blocking(move || profiles::revert(&id))
-        .await
-        .map_err(|_| "profile task panicked".to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        broker::route(broker::Request::ProfileRevert { id: id.clone() })
+            .unwrap_or_else(|| profiles::revert(&id))
+    })
+    .await
+    .map_err(|_| "profile task panicked".to_string())?
 }
 
 // ---- startup manager ----
@@ -544,16 +567,22 @@ async fn cmd_privacy_scan() -> Value {
 
 #[tauri::command(async)]
 async fn cmd_privacy_apply(id: String) -> Result<Value, String> {
-    tauri::async_runtime::spawn_blocking(move || privacy::apply(id))
-        .await
-        .map_err(|_| "privacy task panicked".to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        broker::route(broker::Request::PrivacyApply { id: id.clone() })
+            .unwrap_or_else(|| privacy::apply(id))
+    })
+    .await
+    .map_err(|_| "privacy task panicked".to_string())?
 }
 
 #[tauri::command(async)]
 async fn cmd_privacy_revert(id: String) -> Result<Value, String> {
-    tauri::async_runtime::spawn_blocking(move || privacy::revert(id))
-        .await
-        .map_err(|_| "privacy task panicked".to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        broker::route(broker::Request::PrivacyRevert { id: id.clone() })
+            .unwrap_or_else(|| privacy::revert(id))
+    })
+    .await
+    .map_err(|_| "privacy task panicked".to_string())?
 }
 
 // ---- services manager ----
@@ -669,23 +698,36 @@ async fn cmd_schedtask_toggle(path: String, name: String, enable: bool) -> Resul
 // ---- debloater ----
 #[tauri::command(async)]
 async fn cmd_debloater_uwp_list() -> Value {
-    tauri::async_runtime::spawn_blocking(debloater::list_uwp)
-        .await
-        .unwrap_or_default()
+    tauri::async_runtime::spawn_blocking(|| {
+        broker::route_value(broker::Request::DebloaterUwpList {})
+            .unwrap_or_else(debloater::list_uwp)
+    })
+    .await
+    .unwrap_or_default()
 }
 
 #[tauri::command(async)]
 async fn cmd_debloater_remove_uwp(package_full_name: String) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || debloater::remove_uwp(package_full_name))
-        .await
-        .map_err(|_| "debloater task panicked".to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        broker::route_string(broker::Request::DebloaterRemoveUwp {
+            package_full_name: package_full_name.clone(),
+        })
+        .unwrap_or_else(|| debloater::remove_uwp(package_full_name))
+    })
+    .await
+    .map_err(|_| "debloater task panicked".to_string())?
 }
 
 #[tauri::command(async)]
 async fn cmd_debloater_remove_provisioned(package_name: String) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || debloater::remove_uwp_provisioned(package_name))
-        .await
-        .map_err(|_| "debloater task panicked".to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        broker::route_string(broker::Request::DebloaterRemoveProvisioned {
+            package_name: package_name.clone(),
+        })
+        .unwrap_or_else(|| debloater::remove_uwp_provisioned(package_name))
+    })
+    .await
+    .map_err(|_| "debloater task panicked".to_string())?
 }
 
 #[tauri::command(async)]
@@ -697,16 +739,22 @@ async fn cmd_debloater_tweaks_list() -> Value {
 
 #[tauri::command(async)]
 async fn cmd_debloater_tweak_apply(id: String) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || debloater::apply_tweak(id))
-        .await
-        .map_err(|_| "debloater task panicked".to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        broker::route_string(broker::Request::DebloaterApply { id: id.clone() })
+            .unwrap_or_else(|| debloater::apply_tweak(id))
+    })
+    .await
+    .map_err(|_| "debloater task panicked".to_string())?
 }
 
 #[tauri::command(async)]
 async fn cmd_debloater_tweak_revert(id: String) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || debloater::revert_tweak(id))
-        .await
-        .map_err(|_| "debloater task panicked".to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        broker::route_string(broker::Request::DebloaterRevert { id: id.clone() })
+            .unwrap_or_else(|| debloater::revert_tweak(id))
+    })
+    .await
+    .map_err(|_| "debloater task panicked".to_string())?
 }
 
 // ---- driver manager ----

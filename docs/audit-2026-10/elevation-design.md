@@ -263,11 +263,35 @@ In the app:
 2. Optimize: Apply and Undo an admin tweak (e.g. Hibernation), then rescan.
 3. Task Manager shows a second `ad-hyperoptimize.exe` running elevated; it ends with the app or after 15 min idle.
 
+### Phase 3, second step: engine and catalog pages routed
+
+All commands that go through the journaled engine or the Privacy/Debloater catalogs now use the broker when it is connected:
+- `cmd_revert_entry`, `cmd_reset_retired`, `cmd_optimize_apply`
+- `cmd_profile_apply` / `_revert`
+- `cmd_privacy_apply` / `_revert`
+- `cmd_debloater_tweak_apply` / `_revert`
+- `cmd_debloater_uwp_list` (reading all users' packages needs admin), `cmd_debloater_remove_uwp`, `cmd_debloater_remove_provisioned`
+
+Details:
+- **Validation:** every id is checked in the broker before the engine (`request_ids_valid`): catalog keys, journal ids, and package names as safe identifiers; Optimize My PC takes at most 256 ids.
+- **Health check:** treats a connected broker as admin, so one-click items are not blocked. Apply and reset run in the broker.
+- **UI:**
+  - only the pages whose actions are routed (Optimize, Optimize My PC, Profiles, Privacy, Debloater) treat the connected helper as admin rights; every other page still needs the app started as administrator
+  - after unlocking, the health check rescans
+- **Tests:** `every_request_id_is_checked` (malformed ids rejected for every request type, protocol field names, limits).
+- **Verification here:**
+  - clippy for Windows with and without the feature: clean
+  - Windows tests under Wine: 19/19
+  - `--broker-selftest` under Wine: "ok"
+  - Linux tests: 163 passed
+
 ### Next in phase 3
 
-Route the remaining privileged commands, module by module:
-- Optimize My PC / reset retired
-- privacy, debloater
-- services, power plans
-- boot, security
-- …
+The remaining privileged modules:
+- services, scheduled tasks, startup
+- power plans, perf tweaks (timer, MSI, network adapters, page file)
+- boot (bcdedit), GPU tweaks, NVIDIA profile
+- security (Defender, hosts, drivers), restore points, cleanup
+- uninstaller, regclean, context menu
+- process manager, game booster and game profiles
+- updates, winget installs

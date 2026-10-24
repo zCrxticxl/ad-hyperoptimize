@@ -37,6 +37,85 @@ pub enum Request {
     RevertTweak {
         id: String,
     },
+    /// Undo one journal entry by its id.
+    RevertEntry {
+        entry_id: String,
+    },
+    /// Optimize My PC: approved tweak ids, each re-checked by the engine.
+    OptimizeApply {
+        ids: Vec<String>,
+        restore_point: bool,
+    },
+    /// Reset every retired tweak that is still active.
+    ResetRetired {},
+    PrivacyApply {
+        id: String,
+    },
+    PrivacyRevert {
+        id: String,
+    },
+    DebloaterApply {
+        id: String,
+    },
+    DebloaterRevert {
+        id: String,
+    },
+    ProfileApply {
+        id: String,
+        with_bench: bool,
+    },
+    ProfileRevert {
+        id: String,
+    },
+    /// Store apps of all users (needs admin to read).
+    DebloaterUwpList {},
+    DebloaterRemoveUwp {
+        package_full_name: String,
+    },
+    DebloaterRemoveProvisioned {
+        package_name: String,
+    },
+}
+
+/// Journal entry ids: `<tweak>-<timestamp>` and similar, no separators or
+/// quotes.
+pub fn valid_entry_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 128
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.' | b':'))
+}
+
+/// Every id a request carries is a catalog key or a journal id; checked here
+/// before any engine sees it.
+pub fn request_ids_valid(req: &Request) -> bool {
+    match req {
+        Request::Hello { .. }
+        | Request::Ping {}
+        | Request::ResetRetired {}
+        | Request::DebloaterUwpList {} => true,
+        // Package names: the debloater checks them again (safe identifier,
+        // optional-app catalog).
+        Request::DebloaterRemoveUwp {
+            package_full_name: name,
+        }
+        | Request::DebloaterRemoveProvisioned { package_name: name } => {
+            name.len() <= 256 && crate::ps::is_safe_ident(name)
+        }
+        Request::RevertEntry { entry_id } => valid_entry_id(entry_id),
+        Request::OptimizeApply { ids, .. } => {
+            ids.len() <= 256 && ids.iter().all(|i| valid_tweak_id(i))
+        }
+        Request::ApplyTweak { id }
+        | Request::RevertTweak { id }
+        | Request::PrivacyApply { id }
+        | Request::PrivacyRevert { id }
+        | Request::DebloaterApply { id }
+        | Request::DebloaterRevert { id }
+        | Request::ProfileApply { id, .. }
+        | Request::ProfileRevert { id } => valid_tweak_id(id),
+    }
 }
 
 /// Tweak ids are short snake_case catalog keys; anything else is rejected
@@ -54,12 +133,52 @@ pub type Executor = fn(&Request) -> Result<Value, String>;
 
 /// The broker's executor: the same engine functions the UI used to call.
 pub fn execute(req: &Request) -> Result<Value, String> {
+    if !request_ids_valid(req) {
+        return Err("invalid id".into());
+    }
     match req {
-        Request::ApplyTweak { id } if valid_tweak_id(id) => crate::tweaks::apply(id),
-        Request::RevertTweak { id } if valid_tweak_id(id) => crate::tweaks::revert(id),
-        Request::ApplyTweak { .. } | Request::RevertTweak { .. } => Err("invalid tweak id".into()),
+        Request::ApplyTweak { id } => crate::tweaks::apply(id),
+        Request::RevertTweak { id } => crate::tweaks::revert(id),
+        Request::RevertEntry { entry_id } => crate::tweaks::revert_entry(entry_id),
+        Request::OptimizeApply { ids, restore_point } => {
+            Ok(crate::optimizer::apply(ids.clone(), *restore_point))
+        }
+        Request::ResetRetired {} => Ok(crate::optimizer::reset_retired()),
+        Request::PrivacyApply { id } => crate::privacy::apply(id.clone()),
+        Request::PrivacyRevert { id } => crate::privacy::revert(id.clone()),
+        Request::DebloaterApply { id } => {
+            crate::debloater::apply_tweak(id.clone()).map(Value::from)
+        }
+        Request::DebloaterRevert { id } => {
+            crate::debloater::revert_tweak(id.clone()).map(Value::from)
+        }
+        Request::ProfileApply { id, with_bench } => crate::profiles::apply(id, *with_bench),
+        Request::ProfileRevert { id } => crate::profiles::revert(id),
+        Request::DebloaterUwpList {} => Ok(crate::debloater::list_uwp()),
+        Request::DebloaterRemoveUwp { package_full_name } => {
+            crate::debloater::remove_uwp(package_full_name.clone()).map(Value::from)
+        }
+        Request::DebloaterRemoveProvisioned { package_name } => {
+            crate::debloater::remove_uwp_provisioned(package_name.clone()).map(Value::from)
+        }
         Request::Hello { .. } | Request::Ping {} => Err("not an executable request".into()),
     }
+}
+
+/// For commands that answer with a plain JSON value (errors as `{ error }`).
+pub fn route_value(req: Request) -> Option<Value> {
+    route(req).map(|r| r.unwrap_or_else(|e| json!({ "error": e })))
+}
+
+/// For commands that answer with a string.
+pub fn route_string(req: Request) -> Option<Result<String, String>> {
+    route(req).map(|r| {
+        r.map(|v| {
+            v.as_str()
+                .map(str::to_string)
+                .unwrap_or_else(|| v.to_string())
+        })
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -361,10 +480,61 @@ mod tests {
             execute(&Request::ApplyTweak {
                 id: "x;calc".into()
             }),
-            Err("invalid tweak id".to_string())
+            Err("invalid id".to_string())
         );
         assert!(decode_request(r#"{"op":"applyTweak","id":"game_mode_on"}"#).is_ok());
         assert!(decode_request(r#"{"op":"applyTweak","id":"a","script":"x"}"#).is_err());
+    }
+
+    #[test]
+    fn every_request_id_is_checked() {
+        let bad = "x'; calc".to_string();
+        for req in [
+            Request::RevertEntry {
+                entry_id: bad.clone(),
+            },
+            Request::OptimizeApply {
+                ids: vec!["game_mode_on".into(), bad.clone()],
+                restore_point: true,
+            },
+            Request::PrivacyApply { id: bad.clone() },
+            Request::PrivacyRevert { id: bad.clone() },
+            Request::DebloaterApply { id: bad.clone() },
+            Request::DebloaterRevert { id: bad.clone() },
+            Request::ProfileApply {
+                id: bad.clone(),
+                with_bench: false,
+            },
+            Request::ProfileRevert { id: bad.clone() },
+            Request::DebloaterRemoveUwp {
+                package_full_name: bad.clone(),
+            },
+            Request::DebloaterRemoveProvisioned {
+                package_name: bad.clone(),
+            },
+        ] {
+            assert!(!request_ids_valid(&req), "{req:?}");
+            assert_eq!(execute(&req), Err("invalid id".to_string()));
+        }
+        assert!(request_ids_valid(&Request::RevertEntry {
+            entry_id: "game_mode_on-20261024013000123456".into()
+        }));
+        assert!(request_ids_valid(&Request::OptimizeApply {
+            ids: vec!["game_mode_on".into()],
+            restore_point: false
+        }));
+        assert!(!request_ids_valid(&Request::OptimizeApply {
+            ids: vec!["a".into(); 257],
+            restore_point: false
+        }));
+        // Field names are part of the protocol.
+        assert!(
+            decode_request(r#"{"op":"optimizeApply","ids":["a"],"restorePoint":true}"#).is_err()
+        );
+        assert!(
+            decode_request(r#"{"op":"optimizeApply","ids":["a"],"restore_point":true}"#).is_ok()
+        );
+        assert!(decode_request(r#"{"op":"resetRetired"}"#).is_ok());
     }
 
     #[test]

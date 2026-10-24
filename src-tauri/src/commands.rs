@@ -79,21 +79,37 @@ pub static COMMANDS: &[(&str, Class, &str)] = &[
         "journal undo / force-revert. Routed to the broker when connected (phase 3)",
     ),
     ("cmd_history", Read, "journal (readable by decision)"),
-    ("cmd_revert_entry", Privileged, "journal undo"),
+    (
+        "cmd_revert_entry",
+        Privileged,
+        "journal undo. Routed to the broker when connected (phase 3)",
+    ),
     (
         "cmd_health_scan",
         ReadAdmin,
         "Defender, BCD and powercfg reads; verify which parts need admin",
     ),
-    ("cmd_reset_retired", Privileged, "engine reverts"),
+    (
+        "cmd_reset_retired",
+        Privileged,
+        "engine reverts. Routed to the broker when connected (phase 3)",
+    ),
     (
         "cmd_optimize_apply",
         Privileged,
-        "engine applies, restore point",
+        "engine applies, restore point. Routed to the broker when connected (phase 3)",
     ),
     ("cmd_profile_list", Read, "catalog"),
-    ("cmd_profile_apply", Privileged, "engine applies"),
-    ("cmd_profile_revert", Privileged, "engine reverts"),
+    (
+        "cmd_profile_apply",
+        Privileged,
+        "engine applies. Routed to the broker when connected (phase 3)",
+    ),
+    (
+        "cmd_profile_revert",
+        Privileged,
+        "engine reverts. Routed to the broker when connected (phase 3)",
+    ),
     // ── restore points ──
     (
         "cmd_create_restore_point",
@@ -288,34 +304,38 @@ pub static COMMANDS: &[(&str, Class, &str)] = &[
     (
         "cmd_privacy_apply",
         Privileged,
-        "HKLM policies and services (mixed)",
+        "HKLM policies and services (mixed). Routed to the broker when connected (phase 3)",
     ),
-    ("cmd_privacy_revert", Privileged, "journal undo"),
+    (
+        "cmd_privacy_revert",
+        Privileged,
+        "journal undo. Routed to the broker when connected (phase 3)",
+    ),
     (
         "cmd_debloater_uwp_list",
         ReadAdmin,
-        "Get-AppxPackage -AllUsers",
+        "Get-AppxPackage -AllUsers. Routed to the broker when connected (phase 3)",
     ),
     (
         "cmd_debloater_remove_uwp",
         Privileged,
-        "Remove-AppxPackage -AllUsers",
+        "Remove-AppxPackage -AllUsers. Routed to the broker when connected (phase 3)",
     ),
     (
         "cmd_debloater_remove_provisioned",
         Privileged,
-        "Remove-AppxProvisionedPackage",
+        "Remove-AppxProvisionedPackage. Routed to the broker when connected (phase 3)",
     ),
     ("cmd_debloater_tweaks_list", Read, "registry and services"),
     (
         "cmd_debloater_tweak_apply",
         Privileged,
-        "HKLM policies and services (mixed)",
+        "HKLM policies and services (mixed). Routed to the broker when connected (phase 3)",
     ),
     (
         "cmd_debloater_tweak_revert",
         Privileged,
-        "captured state in the admin-only folder",
+        "captured state in the admin-only folder. Routed to the broker when connected (phase 3)",
     ),
     ("cmd_ctxmenu_list", Read, "HKCR/HKLM shell extensions"),
     ("cmd_ctxmenu_toggle", Privileged, "HKLM/HKCR"),

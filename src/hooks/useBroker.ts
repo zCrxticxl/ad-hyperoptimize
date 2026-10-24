@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
+import { rescanHealth } from "./useHealthScan";
 
 /** Admin helper (broker) state, shared by every component. `available` is
  * false unless the app was built with the `broker` feature. */
@@ -19,6 +20,8 @@ export async function unlockBroker(): Promise<void> {
   } finally {
     await refreshBroker();
   }
+  // The health check marks admin-only items as blocked; rescan so they unlock.
+  await rescanHealth().catch(() => {});
 }
 
 export function useBroker(): BrokerState {

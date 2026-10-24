@@ -1059,7 +1059,9 @@ pub fn scan() -> Value {
             Ok(s) => s,
             Err(e) => return json!({ "error": format!("System detection failed: {e}") }),
         };
-        let admin = crate::ps::is_admin();
+        // With the admin helper connected, admin-only items run elevated
+        // through it, so they are not blocked here.
+        let admin = crate::ps::is_admin() || crate::broker::connected();
         let journal = crate::safety::load_journal().unwrap_or_default();
         let items = evaluate(&system, &journal);
         let checks = system_checks(&system, &journal, chrono::Local::now().date_naive());
