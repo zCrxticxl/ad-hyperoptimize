@@ -77,6 +77,7 @@ Severity:
 | `PrivacyCenter`, `Debloater`, `PerfTweaks` | ~1220 | reviewed |
 | `GpuTweaks`, `BootOptimizer`, `NvidiaControlPanel`, `PowerPlan`, `Profiles`, `GameProfiles`, `GameBooster`, `Cleanup`, `RegClean`, `DiskAnalyzer` | ~3030 | reviewed |
 | `Security`, `ServicesManager`, `ScheduledTasks`, `Startup`, `Processes`, `DriverManager`, `Updates`, `SoftwareInstaller`, `AppUninstaller`, `CtxMenuCleaner` | ~3390 | reviewed |
+| `HealthCheck`, `HwMonitor`, `Hardware`, `Monitor`, `Latency`, `Benchmark`, `Reports`, `RestorePointManager`, `PcConfigurator`, `Settings`, `Changelog`, components (`FpsMeasure`, `HwWarnings`, `Onboarding`, `ui`), `i18n.tsx`, `localize.ts`, `lib/engineText`, `lib/pcAdvisor`, `lib/appCategory`, `data/hardwareCatalog`, locale files | ~9300 | reviewed (locales checked by script: same keys as `en`, same `{placeholders}`; 313 keys per language still fall back to English) |
 
 ## Findings
 
@@ -186,3 +187,11 @@ Severity:
 | 102 | `Security.tsx` autoruns | Low | A single non-Microsoft task or a single startup file arrives as a bare object (PowerShell unrolls one-element arrays); `Array.isArray` dropped it. | fixed: single objects are read as one row |
 | 103 | `AppUninstaller.tsx` | Low | "No leftovers found" appeared right after the uninstaller was launched, before any scan. | fixed: only after a scan |
 | 104 | `CtxMenuCleaner.tsx` | Low | A failed list left the page on an endless spinner (unhandled rejection). | fixed |
+| 105 | `scan.rs:dns_benchmark`, `Hardware.tsx` | Medium | A failed query (`catch {}`) was reported with its short elapsed time, so an unreachable DNS server looked like the fastest one. "Current" was resolved without `-Server`, i.e. from the local DNS cache, and therefore always looked fastest. One sample per server. | fixed: every server, the current one by its address, is queried directly (`-DnsOnly -NoHostsFile`); failures are shown as errors; time = median of 3 |
+| 106 | `latency.rs:stall_probe` verdict texts | Low | "poor" said "a driver is hogging DPC/ISR time" and "excellent" said "suitable for real-time audio and competitive gaming". The rating follows the single largest gap of an unpinned thread; ordinary preemption alone reaches it under load (the module doc says so). | fixed: texts name likely causes, not a proven culprit, and suggest an idle repeat and a deep trace |
+| 107 | `i18n.tsx:LangProvider` | Low | A stored language value that is not supported (old build, manual edit) was used as is. `TRANSLATIONS[lang]` was then undefined and every `t()` threw, which broke the whole UI. | fixed: only supported values are used |
+| 108 | `Benchmark.tsx` | Low | A disk benchmark half that could not run (`-1`) was shown as "-1 MB/s". | fixed: "-" |
+| 109 | `PcConfigurator.tsx` | Info | "+X % faster than your current system" is computed from a weighted catalog index (GPU 55 / CPU 30 / RAM 10 / storage 5), not measured. The card is titled "Estimated performance" and shows the weights. | open: label the number as an index if it should not read like a measured speed-up |
+| 110 | `hwmonitor.rs` | Info | `MSAcpi_ThermalZoneTemperature` is an ACPI zone, often not the CPU die; `Win32_Fan.DesiredSpeed` is a target, not a measured RPM. The page already points to HWiNFO/LibreHardwareMonitor. | open (low) |
+| 111 | locale files `risks` | Info | 5 risk overlays per language (`priority_separation`, `mmcss_games_task`, `power_throttling_off`, `disable_paging_executive`, `sysmain_off`) belong to verdicts removed in `0277206`; they are never used. | open (cleanup) |
+| 112 | `Changelog.tsx` | Info | The "Settings > Version" value comes from the first versioned `CHANGELOG.md` heading, not from `package.json`; both currently say 1.6.4. | open (low) |

@@ -162,7 +162,7 @@ export default function Hardware({ mode }: { mode: Mode }) {
             <table className="tbl mt">
               <tbody>
                 {asArr(dns).map((d: any, i: number) => (
-                  <tr key={i}><td>{d.server}</td><td>{d.ms} ms</td></tr>
+                  <tr key={i}><td>{d.server}</td><td>{d.ms != null ? `${d.ms} ms` : <span style={{ color: "var(--yellow)" }}>✘ {d.error ?? "-"}</span>}</td></tr>
                 ))}
               </tbody>
             </table>

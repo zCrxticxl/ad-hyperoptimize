@@ -3406,10 +3406,12 @@ export function LangProvider({ children }: { children: React.ReactNode }) {
   const [lang, setLangState] = useState<Lang>(() => {
     // First run: follow the system locale instead of assuming German.
     try {
-      const saved = localStorage.getItem("lang") as Lang | null;
-      if (saved) return saved;
-      const nav = (navigator.language || "").toLowerCase();
+      // A stored value is used only if it is a known language: an unknown
+      // one made TRANSLATIONS[lang] undefined and every t() call throw.
       const supported: Lang[] = ["de", "en", "es", "fr", "pt", "pl", "ru", "tr", "sv"];
+      const saved = localStorage.getItem("lang") as Lang | null;
+      if (saved && supported.includes(saved)) return saved;
+      const nav = (navigator.language || "").toLowerCase();
       return supported.find((l) => nav.startsWith(l)) ?? "en";
     } catch {
       return "en";

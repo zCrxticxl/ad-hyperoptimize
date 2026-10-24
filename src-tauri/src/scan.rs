@@ -116,11 +116,23 @@ pub fn component_health() -> Value {
 
 /// DNS benchmark: time lookups against popular resolvers.
 pub fn dns_benchmark() -> Value {
+    // Every server, the current one included, is queried directly: without
+    // -Server, Resolve-DnsName answers from the local cache and "Current"
+    // looked unrealistically fast. A failed query is reported as an error,
+    // not as its (short) time; the time is the median of three queries.
     section(
-        "$servers=@{'Current'=$null;'Cloudflare 1.1.1.1'='1.1.1.1';'Google 8.8.8.8'='8.8.8.8';'Quad9 9.9.9.9'='9.9.9.9'}; \
+        "$cur = (Get-DnsClientServerAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | \
+           Where-Object { $_.ServerAddresses } | Select-Object -First 1).ServerAddresses | Select-Object -First 1; \
+         $servers = [ordered]@{}; if ($cur) { $servers[\"Current ($cur)\"] = $cur }; \
+         $servers['Cloudflare 1.1.1.1']='1.1.1.1'; $servers['Google 8.8.8.8']='8.8.8.8'; $servers['Quad9 9.9.9.9']='9.9.9.9'; \
          $servers.GetEnumerator() | ForEach-Object { \
-           $t=Measure-Command { try { if ($_.Value) { Resolve-DnsName example.com -Server $_.Value -ErrorAction Stop | Out-Null } else { Resolve-DnsName example.com -ErrorAction Stop | Out-Null } } catch {} }; \
-           @{ server=$_.Key; ms=[math]::Round($t.TotalMilliseconds,1) } }"
+           $name = $_.Key; $srv = $_.Value; $times = @(); $err = $null; \
+           foreach ($i in 1..3) { \
+             try { $t = Measure-Command { Resolve-DnsName example.com -Server $srv -DnsOnly -NoHostsFile -ErrorAction Stop | Out-Null }; $times += $t.TotalMilliseconds } \
+             catch { $err = $_.Exception.Message } \
+           }; \
+           if ($times.Count -eq 0) { @{ server=$name; ms=$null; error=$err } } \
+           else { $s = @($times | Sort-Object); @{ server=$name; ms=[math]::Round($s[[int][math]::Floor(($s.Count - 1) / 2)],1) } } }"
     )
 }
 

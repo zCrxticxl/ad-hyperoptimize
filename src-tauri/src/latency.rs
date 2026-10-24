@@ -66,17 +66,22 @@ pub fn stall_probe(seconds: u32) -> Value {
     let over_250 = gaps.iter().filter(|g| **g > 250.0).count();
     let over_1000 = gaps.iter().filter(|g| **g > 1000.0).count();
 
+    // The rating follows the single worst gap of an unpinned thread, so the
+    // texts name likely causes without claiming a driver was proven guilty.
     let verdict = if max < 250.0 {
-        ("excellent", "No significant execution stalls. Drivers are well-behaved; suitable for real-time audio and competitive gaming.")
+        (
+            "excellent",
+            "No execution stall above 250 µs during the probe.",
+        )
     } else if max < 1000.0 {
         (
             "good",
-            "Minor stalls under 1ms, normal Windows background behavior, imperceptible in games.",
+            "Stalls under 1 ms, common Windows background behavior; usually imperceptible in games.",
         )
     } else if max < 4000.0 {
-        ("fair", "Stalls of 1-4ms detected. Can cause occasional frametime spikes or audio crackle under load. Run a deep trace to identify the driver.")
+        ("fair", "Stalls of 1-4 ms measured. Repeated stalls of this size can cause frametime spikes or audio crackle. On a loaded system they can also be ordinary preemption: repeat the probe idle, and run a deep trace to see the cause.")
     } else {
-        ("poor", "Stalls above 4ms detected, a driver is hogging DPC/ISR time. Typical culprits: Wi-Fi/LAN drivers, audio stacks, storage drivers, GPU driver during clock changes. Run a deep trace and check the worst DPC in WPA.")
+        ("poor", "Stalls above 4 ms measured. On an idle system this usually points to a long DPC/ISR (typical: Wi-Fi/LAN, audio, storage or GPU drivers); under load it can also be ordinary preemption of the probe thread. Repeat the probe idle, and run a deep trace to see which driver, if any, is responsible.")
     };
 
     json!({

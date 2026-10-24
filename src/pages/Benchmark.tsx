@@ -29,7 +29,8 @@ export default function Benchmark() {
       case "memory":
         return <>{t("benchCopyBandwidth")}: <b>{r.copyGBs} GB/s</b></>;
       case "disk":
-        return <>{t("benchWrite")}: <b>{r.seqWriteMBs} MB/s</b> · {t("benchRead")}: <b>{r.seqReadMBs} MB/s</b> <span className="muted">({r.note})</span></>;
+        // -1 = that half of the disk test could not run.
+        return <>{t("benchWrite")}: <b>{r.seqWriteMBs >= 0 ? `${r.seqWriteMBs} MB/s` : "-"}</b> · {t("benchRead")}: <b>{r.seqReadMBs >= 0 ? `${r.seqReadMBs} MB/s` : "-"}</b> <span className="muted">({r.note})</span></>;
     }
   };
 
