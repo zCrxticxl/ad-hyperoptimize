@@ -414,6 +414,11 @@ fn compute_profile(mut data: Value) -> Value {
             "Disabling compute preemption changes driver scheduling behavior that varies a lot by GPU generation. On older RX 400/500-series cards this can increase stutter instead of reducing it. Test before/after.");
     }
 
+    // ── Memory integrity: always a security trade-off ──────────────────────
+    risk!("hvci_off", "danger",
+        "Security Trade-off",
+        "Turning off Memory integrity removes the hypervisor check that blocks malicious or vulnerable kernel drivers. Only do this on a gaming PC, keep Windows and drivers updated, and turn it back on if a game, anti-cheat or work policy needs it.");
+
     // ── Network offloads, risk on low core counts ───────────────────────────
     if cpu_tier == "budget" {
         risk!("net_offload_disable", "warning",

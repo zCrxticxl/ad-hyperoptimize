@@ -57,7 +57,8 @@ export function OptCard({ item, admin, focused }: { item: HealthItem; admin: boo
 
   const run = async (kind: "apply" | "undo") => {
     if (busy) return;
-    if (kind === "apply" && !window.confirm(offerable ? t("hcConfirmApply") : t("hcConfirmNoBenefit"))) return;
+    const confirmText = item.id === "hvci_off" ? t("hcConfirmHvci") : offerable ? t("hcConfirmApply") : t("hcConfirmNoBenefit");
+    if (kind === "apply" && !window.confirm(confirmText)) return;
     setBusy(true);
     setMsg(null);
     try {

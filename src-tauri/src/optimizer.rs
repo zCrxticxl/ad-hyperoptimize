@@ -43,6 +43,9 @@ pub struct System {
     pub dx_settings: Option<String>,
     /// (BAR1 total MiB, framebuffer total MiB) from nvidia-smi.
     pub nvidia_bar: Option<(u64, u64)>,
+    pub hvci_running: bool,
+    pub hvci_reg_off: bool,
+    pub hvci_managed: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -116,6 +119,9 @@ impl System {
             dual_ccd_x3d: is_dual_ccd_x3d(&self.cpu_name),
             hybrid_cpu: is_hybrid_cpu(&self.cpu_name),
             system_free_pct: self.system_free_pct,
+            hvci_running: self.hvci_running,
+            hvci_reg_off: self.hvci_reg_off,
+            hvci_managed: self.hvci_managed,
         }
     }
 }
@@ -884,6 +890,12 @@ try { $v = Get-Volume -DriveLetter $env:SystemDrive.Substring(0,1) -ErrorAction 
       if ($v.Size -gt 0) { $o.systemFreePct = [math]::Round($v.SizeRemaining / $v.Size * 100, 1) } } catch {}
 try { $mp = Get-MpComputerStatus -ErrorAction Stop
       if ($mp.AMServiceEnabled) { $o.defenderRealtime = [bool]$mp.RealTimeProtectionEnabled } } catch {}
+try { $dg = Get-CimInstance -Namespace root\Microsoft\Windows\DeviceGuard Win32_DeviceGuard -ErrorAction Stop
+      $o.hvciRunning = @($dg.SecurityServicesRunning) -contains 2 } catch {}
+$hv = Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity' -ErrorAction SilentlyContinue
+$dgp = Get-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceGuard' -ErrorAction SilentlyContinue
+$o.hvciRegOff = [bool]($hv -and $null -ne $hv.Enabled -and [int]$hv.Enabled -eq 0)
+$o.hvciManaged = [bool](($hv -and [int]$hv.Locked -eq 1) -or ($dgp -and $null -ne $dgp.HypervisorEnforcedCodeIntegrity))
 $o | ConvertTo-Json -Compress -Depth 4
 "#;
 
@@ -914,6 +926,9 @@ pub fn detect() -> Result<System, String> {
         pagefile_disabled: v["pagefileAuto"].as_bool() == Some(false)
             && v["pagefiles"].as_u64() == Some(0),
         defender_realtime: v["defenderRealtime"].as_bool(),
+        hvci_running: v["hvciRunning"].as_bool().unwrap_or(false),
+        hvci_reg_off: v["hvciRegOff"].as_bool().unwrap_or(false),
+        hvci_managed: v["hvciManaged"].as_bool().unwrap_or(false),
         ram_modules: match &v["ram"] {
             Value::Array(a) => a.clone(),
             o @ Value::Object(_) => vec![o.clone()],
@@ -1291,6 +1306,46 @@ mod tests {
             equivalent_active: false,
         })
         .0
+    }
+
+    #[test]
+    fn hvci_is_offered_only_when_it_can_be_changed() {
+        let none = JournalState::default();
+        let running = Facts {
+            hvci_running: true,
+            ..desktop()
+        };
+        assert_eq!(
+            diag("hvci_off", "not_applied", none, &running),
+            Diagnosis::Available
+        );
+        // Turned off and restarted: no longer running, still a valid state.
+        let off = Facts {
+            hvci_reg_off: true,
+            ..desktop()
+        };
+        assert_eq!(
+            diag("hvci_off", "applied", none, &off),
+            Diagnosis::Configured
+        );
+        // Never on: nothing to turn off.
+        assert_eq!(
+            diag("hvci_off", "not_applied", none, &desktop()),
+            Diagnosis::NotApplicable
+        );
+        // UEFI lock or Group Policy: the registry value has no effect.
+        let managed = Facts {
+            hvci_running: true,
+            hvci_managed: true,
+            ..desktop()
+        };
+        assert_eq!(
+            diag("hvci_off", "not_applied", none, &managed),
+            Diagnosis::NotApplicable
+        );
+        // Never one-click and never recommended.
+        let m = meta("hvci_off").unwrap();
+        assert!(!m.one_click && !m.recommend);
     }
 
     #[test]

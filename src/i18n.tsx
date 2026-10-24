@@ -1726,6 +1726,7 @@ const de = {
   restartAdminDev: "Entwicklungsmodus: Die App kann sich hier nicht selbst neu starten. Terminal als Administrator öffnen und „npm run tauri dev“ erneut ausführen.",
   restartAdminDeclined: "Die Administrator-Anfrage wurde abgelehnt.",
   bootAlreadyDefault: "ist bereits der Windows-Standard – nichts rückgängig zu machen",
+  hcConfirmHvci: "Speicher-Integrität (HVCI) ausschalten?\n\nDas senkt die Sicherheit: Schadhafte oder anfällige Kernel-Treiber werden nicht mehr vom Hypervisor blockiert. Wirkt nach einem Neustart. Manche Anti-Cheats oder Firmenrichtlinien verlangen HVCI.\n\nVorher und nachher FPS messen; Rückgängig schaltet es wieder ein.",
 };
 
 // ── English ───────────────────────────────────────────────────────────────────
@@ -3425,6 +3426,7 @@ const en: typeof de = {
   restartAdminDev: "Development mode: the app cannot restart itself here. Open the terminal as administrator and run \"npm run tauri dev\" again.",
   restartAdminDeclined: "The administrator prompt was declined.",
   bootAlreadyDefault: "is already the Windows default – nothing to undo",
+  hcConfirmHvci: "Turn off Memory integrity (HVCI)?\n\nThis lowers security: malicious or vulnerable kernel drivers are no longer blocked by the hypervisor. Takes effect after a restart. Some anti-cheats or work policies require HVCI.\n\nMeasure FPS before and after; Undo turns it back on.",
 };
 
 export type UiText = typeof en;

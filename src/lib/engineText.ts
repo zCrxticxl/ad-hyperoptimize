@@ -5,6 +5,14 @@ import type { Lang } from "../i18n";
  * first, then patterns for formatted messages; anything unknown stays
  * English, so a missing entry never hides information. */
 const DE: Record<string, string> = {
+  "Turns off Memory integrity (HVCI). Independent tests measured a few percent more average FPS without it and much more in some CPU-bound games; many games show no difference. It weakens protection against kernel attacks.":
+    "Schaltet die Speicher-Integrität (HVCI) aus. Unabhängige Tests maßen ohne sie im Schnitt einige Prozent mehr FPS und in manchen CPU-lastigen Spielen deutlich mehr; viele Spiele zeigen keinen Unterschied. Schwächt den Schutz vor Angriffen auf den Kernel.",
+  "Only for gaming PCs where you accept the security trade-off; some anti-cheat or work policies require it on. Never applied automatically; measure FPS before and after.":
+    "Nur für Gaming-PCs, wenn du die Sicherheits-Abwägung in Kauf nimmst; manche Anti-Cheats oder Arbeitsrichtlinien verlangen sie eingeschaltet. Nie automatisch; FPS vorher und nachher messen.",
+  "Memory integrity is locked by UEFI or set by Group Policy; the app does not change it.":
+    "Die Speicher-Integrität ist per UEFI gesperrt oder per Gruppenrichtlinie gesetzt; die App ändert sie nicht.",
+  "Memory integrity is not on, so there is nothing to turn off.":
+    "Die Speicher-Integrität ist nicht eingeschaltet, es gibt also nichts auszuschalten.",
   "The NVIDIA Control Panel is not installed. Get it from the Microsoft Store (\"NVIDIA Control Panel\") or use the NVIDIA App.":
     "Die NVIDIA-Systemsteuerung ist nicht installiert. Im Microsoft Store („NVIDIA Control Panel“) holen oder die NVIDIA App verwenden.",
   "Windows blocks this setting for apps (UCPD protection), so nothing was changed. Set it with Group Policy instead: gpedit.msc > Computer Configuration > Administrative Templates > Windows Components > Widgets > Allow Widgets = Disabled.":

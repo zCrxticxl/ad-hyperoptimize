@@ -88,6 +88,9 @@ pub enum Req {
     NotHybridCpu,
     /// The system drive is low on free space (< 15 %).
     LowSystemDriveSpace,
+    /// Memory integrity (HVCI) is running or was turned off by its registry
+    /// value, and neither a UEFI lock nor a Group Policy controls it.
+    HvciChangeable,
 }
 
 pub struct OptMeta {
@@ -218,6 +221,13 @@ pub static REGISTRY: &[OptMeta] = &[
         ..m("hags_on", ConditionallyBeneficial, Performance, Gaming,
             "Lets the GPU schedule its own work. Required for DLSS Frame Generation; otherwise effects range from small gains to none or regressions depending on game and driver.",
             "Needs a GPU and driver that support it (WDDM 2.7+). Support cannot be confirmed before restart, so it is never applied automatically.")
+    },
+    OptMeta {
+        requires: &[Req::HvciChangeable],
+        reboot: Restart,
+        ..m("hvci_off", ConditionallyBeneficial, Performance, Advanced,
+            "Turns off Memory integrity (HVCI). Independent tests measured a few percent more average FPS without it and much more in some CPU-bound games; many games show no difference. It weakens protection against kernel attacks.",
+            "Only for gaming PCs where you accept the security trade-off; some anti-cheat or work policies require it on. Never applied automatically; measure FPS before and after.")
     },
     OptMeta {
         requires: &[Req::Desktop, Req::HighPerfPlanAvailable],
@@ -413,6 +423,12 @@ pub struct Facts {
     pub dual_ccd_x3d: bool,
     pub hybrid_cpu: bool,
     pub system_free_pct: Option<f64>,
+    /// Win32_DeviceGuard reports HVCI among the running security services.
+    pub hvci_running: bool,
+    /// Scenarios\HypervisorEnforcedCodeIntegrity\Enabled is 0.
+    pub hvci_reg_off: bool,
+    /// UEFI lock or DeviceGuard Group Policy: a registry change has no effect.
+    pub hvci_managed: bool,
 }
 
 /// Why a tweak does not apply to this system, or None when it does.
@@ -427,6 +443,7 @@ pub fn ineligible_reason(meta: &OptMeta, f: &Facts) -> Option<&'static str> {
             Req::NotDualCcdX3d => !f.dual_ccd_x3d,
             Req::NotHybridCpu => !f.hybrid_cpu,
             Req::LowSystemDriveSpace => f.system_free_pct.is_some_and(|p| p < 15.0),
+            Req::HvciChangeable => !f.hvci_managed && (f.hvci_running || f.hvci_reg_off),
         };
         (!ok).then_some(match r {
             Req::Desktop => "Not for laptops or battery-powered systems.",
@@ -438,6 +455,10 @@ pub fn ineligible_reason(meta: &OptMeta, f: &Facts) -> Option<&'static str> {
             Req::NoHdd => "A hard disk is present; prefetching still helps it.",
             Req::NotDualCcdX3d => "Not suitable for AMD dual-CCD X3D CPUs.",
             Req::NotHybridCpu => "Not suitable for CPUs with performance and efficiency cores.",
+            Req::HvciChangeable if f.hvci_managed => {
+                "Memory integrity is locked by UEFI or set by Group Policy; the app does not change it."
+            }
+            Req::HvciChangeable => "Memory integrity is not on, so there is nothing to turn off.",
             Req::LowSystemDriveSpace => "The system drive has enough free space.",
         })
     })
