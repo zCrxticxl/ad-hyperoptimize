@@ -15,7 +15,6 @@ fn bloat_catalog() -> HashMap<(String, String), &'static str> {
             "Updates the appcompat telemetry database, pure data collection for Microsoft."),
         ("\\microsoft\\windows\\application experience\\", "startupapptask",
             "Scans startup programs for Microsoft analysis after login."),
-        // Autochk
         // CEIP
         ("\\microsoft\\windows\\customer experience improvement program\\", "consolidator",
             "CEIP telemetry: Sends system usage data to Microsoft. Runs hourly."),
@@ -35,18 +34,12 @@ fn bloat_catalog() -> HashMap<(String, String), &'static str> {
         // NetTrace
         ("\\microsoft\\windows\\nettrace\\", "gathernetworkinfo",
             "Collects detailed network diagnostic data, background overhead with no discernible benefit."),
-        // Power Efficiency
-        // Family Safety
         // WER
         ("\\microsoft\\windows\\windows error reporting\\", "queuereporting",
             "Sends queued error reports to Microsoft. Unnecessary when Windows Error Reporting is disabled."),
-        // Windows Update
-        // Workplace Join
         // PushToInstall
         ("\\microsoft\\windows\\pushtoinstall\\", "logincheck",
             "Checks Push-to-Install Store tasks at login, irrelevant for non-enterprise."),
-        // MUI language packs
-        // Subscription / license
         // Device Census
         ("\\microsoft\\windows\\device information\\", "device",
             "Sends detailed device inventory data to Microsoft (Device Census)."),
@@ -57,7 +50,6 @@ fn bloat_catalog() -> HashMap<(String, String), &'static str> {
             "Feedback/telemetry client task (Siuf): uploads user feedback diagnostics in the background."),
         ("\\microsoft\\windows\\feedback\\siuf\\", "dmclientonscenariodownload",
             "Feedback/telemetry client task (Siuf, scenario download): downloads feedback-scenario payloads."),
-        // Clip
     ];
 
     entries
@@ -224,15 +216,38 @@ pub fn toggle(path: String, name: String, enable: bool) -> Result<Value, String>
             Err(format!("Scheduled task {name} did not change state"))
         }
     });
+    if let Err(error) = result {
+        // Typical: access denied for tasks owned by SYSTEM/TrustedInstaller.
+        // Unchanged state: close the entry (nothing to undo, nothing
+        // unfinished); otherwise restore the previous state.
+        let unchanged = crate::ps::run(&query)
+            .is_ok_and(|now| (now.trim() != "Disabled") == previously_enabled);
+        let closed = if unchanged {
+            crate::safety::with_journal(|entries| {
+                if let Some(entry) = entries.iter_mut().find(|entry| entry.id == entry_id) {
+                    entry.reverted = true;
+                }
+                Ok(())
+            })
+            .map(|_| ())
+        } else {
+            crate::tweaks::revert_entry(&entry_id).map(|_| ())
+        };
+        return Err(match closed {
+            Ok(()) => format!("Toggle fehlgeschlagen: {error}"),
+            Err(re) => format!(
+                "Toggle fehlgeschlagen: {error}; Wiederherstellung unvollständig ({re}); restore token: {entry_id}"
+            ),
+        });
+    }
     crate::safety::with_journal(|entries| {
         let entry = entries
             .iter_mut()
             .find(|entry| entry.id == entry_id)
             .ok_or("Scheduled task journal entry missing")?;
-        entry.completed = result.is_ok();
+        entry.completed = true;
         Ok(())
     })?;
-    result.map_err(|error| format!("Toggle fehlgeschlagen: {error}"))?;
     Ok(json!({ "name": name, "path": path, "enabled": enable, "entryId": entry_id }))
 }
 

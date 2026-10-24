@@ -49,6 +49,8 @@ Severity:
 | `security.rs` | 490 | reviewed |
 | `startup.rs` | 285 | reviewed |
 | `bootopt.rs` | 560 | reviewed |
+| `services.rs` | 435 | reviewed |
+| `schedtasks.rs` | 300 | reviewed |
 
 ## Findings
 
@@ -107,3 +109,6 @@ Severity:
 | 51 | `bootopt.rs` catalog | Low | `bcd_timeout_0` claimed "Saves 3-5 s on every boot" (invented number), and the description claimed the effect "when only one OS is present". With a single boot entry Windows shows no menu at all, so the timeout does nothing. `bcd_numproc_all` ("Parallelisierung der Treiberinitialisierung") and `bcd_standard_policy` ("Faster bootloader transition") also claimed unmeasured effects. The page shows `impact`. | fixed: texts say when it matters and what it costs (no menu choice at startup) |
 | 52 | `bootopt.rs:apply_tweak` | Low | A failed `bcdedit` or a failed read-back left the entry open as "did not finish", without rollback. | fixed: `revert_entry` restores the captured value (engine lock released first) |
 | 53 | `bootopt.rs:revert_tweak` (retired) | Info | Retired BCD tweaks are reset with fixed values (`nx OptIn`, delete `bootlog`/`quietboot`) even if an older journal entry with the exact original exists; that entry then stays open in the history. | open (low) |
+| 54 | `services.rs:PROTECTED_SERVICES` | Medium | Missing from the "never disable" list were services whose loss breaks elevation, sign-in or device handling: `Appinfo` (UAC), `PlugPlay`, `Power`, `SamSs`, `UserManager`, `SystemEventsBroker`, `EventSystem`, `KeyIso`, `TimeBrokerSvc`. With `Appinfo` disabled no program can start elevated any more, including this app to undo it. | fixed: added; test extended |
+| 55 | `services.rs:list` (origin) | Low | "Windows" vs "third party" assumed `C:\Windows`. On a different system drive every Windows service showed as third-party. | fixed: `ps::windows_dir()` |
+| 56 | `schedtasks.rs:toggle` | Low | A failed toggle (typically access denied for tasks owned by SYSTEM/TrustedInstaller) left an open entry that the health check reported as an unfinished change, although nothing changed. | fixed: unchanged → entry closed; changed → `revert_entry` |
