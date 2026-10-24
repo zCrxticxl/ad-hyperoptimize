@@ -1,6 +1,7 @@
 mod analysis;
 mod bench;
 mod bootopt;
+mod broker;
 mod cache;
 // Privilege inventory of all commands (broker phase 1); test-only until the
 // broker uses it at runtime.
@@ -1575,6 +1576,12 @@ fn ensure_admin() {
 }
 
 pub fn run() {
+    // Elevated broker launch (`--broker <pipe> <ui-pid> <nonce>`): serve the UI
+    // that started it and exit, no window. Off unless built with the feature.
+    #[cfg(all(windows, feature = "broker"))]
+    if let Some(args) = broker::args_from(std::env::args()) {
+        std::process::exit(broker::pipe::serve(&args));
+    }
     if should_auto_elevate() {
         ensure_admin();
     }

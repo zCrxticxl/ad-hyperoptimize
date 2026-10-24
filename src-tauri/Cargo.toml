@@ -28,6 +28,11 @@ rand = "0.8"
 # Remove once cookie ships a fix and tauri picks it up.
 time = "=0.3.41"
 
+[features]
+# Elevated helper process (docs/audit-2026-10/elevation-design.md, phase 2).
+# Off by default until the broker serves real requests.
+broker = []
+
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52"
 

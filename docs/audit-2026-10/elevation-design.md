@@ -1,6 +1,6 @@
 # Design: unelevated UI with an elevated broker
 
-Status: **decided; phase 1 done, phases 2–5 open.** The owner answered the open questions (section 8). Implementation starts after the Windows validation of the current branch.
+Status: **decided; phases 1–2 done, phases 3–5 open.** The owner answered the open questions (section 8). Implementation starts after the Windows validation of the current branch.
 
 ## 1. Current state
 
@@ -199,10 +199,38 @@ Each phase on its own branch, with the full gate (fmt, check, test, clippy) on W
   - `mutating_commands_are_not_reads`
 - **Behaviour change:** none apart from the removed commands, which nothing called.
 
-### Next: phase 2 (broker skeleton)
+### Phase 2: done (broker skeleton, behind the `broker` cargo feature)
 
-- `--broker` mode
-- named pipe with a DACL for the user's SID
-- PID and nonce checks; `hello` / `ping`
-- behind a `broker` cargo feature, so release builds stay unchanged
+- **`src-tauri/src/broker.rs`** (platform-independent):
+  - `--broker <pipe> <ui-pid> <nonce>` parsing: strict, any malformed value means no broker
+  - random pipe name and nonce
+  - typed `Request` enum (`hello`, `ping`) with `deny_unknown_fields` and a 1 MiB line limit
+  - session state machine: `hello` with protocol version and nonce first, constant-time nonce compare
+- **`src-tauri/src/broker/pipe.rs`** (Windows, plain Win32 FFI, no new dependency):
+  - **Pipe:** `FILE_FLAG_FIRST_PIPE_INSTANCE`, one instance, `PIPE_REJECT_REMOTE_CLIENTS`; protected DACL `D:P(A;;GA;;;<user SID>)(A;;GA;;;SY)`.
+  - **Broker side:** checks the client PID equals the UI PID and the image path equals its own; exits after 60 s without a client or 15 min idle.
+  - **Client side:** `SECURITY_IDENTIFICATION` (no impersonation); checks the server PID equals the process it launched.
+  - **Launch:** `ShellExecuteExW` with `runas` (UAC).
+- **`lib.rs`:** `--broker` is handled before anything else only when built with `--features broker`; default builds are unchanged.
+- **Tests:**
+  - Platform-independent: args, ids, request decoding, session.
+  - Windows (`broker::pipe`):
+    - round trip
+    - squatting the pipe name fails
+    - an unexpected client PID is rejected
+    - a wrong nonce is rejected
+    - the client rejects a foreign server
+    - DACL content
+- **Verification in the cloud session:**
+  - `cargo clippy --target x86_64-pc-windows-gnu --all-targets -D warnings`, with and without `--features broker`: clean.
+  - Windows test binary under Wine: 10/10 broker tests pass, also in parallel. Wine does not enforce DACLs like Windows, so this is not a substitute for a run on Windows.
 
+### Not yet tested
+
+- **The elevated launch end-to-end** (UAC prompt, `--broker` process, connect): there is no caller before phase 3.
+
+### Next: phase 3
+
+- First privileged requests through the broker, starting with `cmd_apply_tweak` / `cmd_revert_tweak` (typed by tweak id).
+- A UI action "unlock admin actions" that launches the broker.
+- Still behind the feature flag.
