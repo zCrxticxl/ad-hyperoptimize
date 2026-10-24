@@ -5,6 +5,7 @@ import { RiskBadge, RiskNotice } from "./HwWarnings";
 import { useLang, TKey } from "../i18n";
 import { localizeTweak } from "../localize";
 import { rescanHealth } from "../hooks/useHealthScan";
+import { refreshBroker, useBroker } from "../hooks/useBroker";
 import { HealthItem, OFFERABLE } from "../lib/health";
 import { engineText } from "../lib/engineText";
 
@@ -46,7 +47,9 @@ export function OptCard({ item, admin, focused }: { item: HealthItem; admin: boo
     !harmfulish &&
     item.status !== "unsupported" &&
     !["notApplicable", "drifted", "failed", "redundant", "configured", "retired", "retiredActive"].includes(item.diagnosis);
-  const adminBlocked = item.requiresAdmin && !admin;
+  const broker = useBroker();
+  // With the admin helper connected, Apply/Undo run elevated through it.
+  const adminBlocked = item.requiresAdmin && !admin && !broker.connected;
   // Drifted/failed items are no longer (fully) active but still hold an open
   // journal entry: Undo restores the captured originals and closes it, so
   // they must offer it too, or the card is a dead end.
@@ -68,6 +71,7 @@ export function OptCard({ item, admin, focused }: { item: HealthItem; admin: boo
       }
     } catch (e) {
       setMsg({ ok: false, text: String(e) });
+      refreshBroker(); // the helper may have ended (idle timeout)
     } finally {
       setBusy(false);
     }

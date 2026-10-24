@@ -4,12 +4,12 @@
 //! without a window, creates a named pipe only the signed-in user and SYSTEM
 //! may open, accepts exactly one client (the UI process that started it,
 //! checked by PID and image path) and answers newline-delimited JSON
-//! requests. Phase 2 only knows `hello` and `ping`; privileged requests are
-//! added in phase 3. Nothing uses the broker at runtime unless the `broker`
-//! cargo feature is enabled.
-// Phase 2 builds the pieces; the UI client is wired up in phase 3. Until
-// then parts are unused in every build configuration.
-#![allow(dead_code)]
+//! requests: `hello`, `ping` and, since phase 3, applying and reverting
+//! catalog tweaks by id. Nothing uses the broker at runtime unless the
+//! `broker` cargo feature is enabled.
+// Without the `broker` feature the UI never connects, so the client side is
+// compiled (and tested) but unused.
+#![cfg_attr(not(feature = "broker"), allow(dead_code))]
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -25,8 +25,41 @@ const PIPE_PREFIX: &str = r"\\.\pipe\adho-broker-";
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "camelCase", deny_unknown_fields)]
 pub enum Request {
-    Hello { protocol: u32, nonce: String },
+    Hello {
+        protocol: u32,
+        nonce: String,
+    },
     Ping {},
+    /// Catalog tweak by id (tweaks.rs); the broker runs the journaled engine.
+    ApplyTweak {
+        id: String,
+    },
+    RevertTweak {
+        id: String,
+    },
+}
+
+/// Tweak ids are short snake_case catalog keys; anything else is rejected
+/// before it reaches the engine.
+pub fn valid_tweak_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 64
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+}
+
+/// Runs an authenticated, non-handshake request (privileged work).
+pub type Executor = fn(&Request) -> Result<Value, String>;
+
+/// The broker's executor: the same engine functions the UI used to call.
+pub fn execute(req: &Request) -> Result<Value, String> {
+    match req {
+        Request::ApplyTweak { id } if valid_tweak_id(id) => crate::tweaks::apply(id),
+        Request::RevertTweak { id } if valid_tweak_id(id) => crate::tweaks::revert(id),
+        Request::ApplyTweak { .. } | Request::RevertTweak { .. } => Err("invalid tweak id".into()),
+        Request::Hello { .. } | Request::Ping {} => Err("not an executable request".into()),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -115,6 +148,7 @@ pub fn encode<T: Serialize>(msg: &T) -> String {
 pub struct Session {
     nonce: String,
     authenticated: bool,
+    exec: Executor,
 }
 
 /// What the connection does after answering.
@@ -126,9 +160,14 @@ pub enum Next {
 
 impl Session {
     pub fn new(nonce: &str) -> Self {
+        Self::with_executor(nonce, execute)
+    }
+
+    pub fn with_executor(nonce: &str, exec: Executor) -> Self {
         Self {
             nonce: nonce.to_string(),
             authenticated: false,
+            exec,
         }
     }
 
@@ -159,6 +198,99 @@ impl Session {
             (false, _) => (Response::err("hello required first"), Next::Close),
             (true, Request::Hello { .. }) => (Response::err("already authenticated"), Next::Close),
             (true, Request::Ping {}) => (Response::ok(json!("pong")), Next::Continue),
+            (true, req) => match (self.exec)(&req) {
+                Ok(v) => (Response::ok(v), Next::Continue),
+                // An engine error is an answer, not a protocol violation.
+                Err(e) => (Response::err(e), Next::Continue),
+            },
+        }
+    }
+}
+
+// ── UI side: the connection to the broker ──────────────────────────────────
+
+#[cfg(windows)]
+static CLIENT: std::sync::Mutex<Option<pipe::Client>> = std::sync::Mutex::new(None);
+
+/// Whether this build can use a broker at all.
+pub const AVAILABLE: bool = cfg!(all(windows, feature = "broker"));
+
+/// Whether an authenticated broker connection is open.
+pub fn connected() -> bool {
+    #[cfg(windows)]
+    {
+        CLIENT.lock().map(|c| c.is_some()).unwrap_or(false)
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
+/// Starts the broker (UAC prompt) and connects; a no-op when connected.
+pub fn unlock() -> Result<Value, String> {
+    #[cfg(all(windows, feature = "broker"))]
+    {
+        let mut guard = CLIENT
+            .lock()
+            .map_err(|_| "broker state poisoned".to_string())?;
+        if guard.is_none() {
+            *guard = Some(pipe::launch_and_connect()?);
+        }
+        Ok(json!({ "connected": true }))
+    }
+    #[cfg(not(all(windows, feature = "broker")))]
+    {
+        Err("This build has no admin helper (built without the broker feature).".into())
+    }
+}
+
+/// Sends `req` to the broker when connected. `None` means "no broker": the
+/// caller runs the work in-process exactly as before. A broken connection
+/// (broker idle timeout, crash) is dropped and reported, never retried
+/// in-process, because the UI may not have the rights.
+pub fn route(req: Request) -> Option<Result<Value, String>> {
+    #[cfg(windows)]
+    {
+        let mut guard = CLIENT.lock().ok()?;
+        let client = guard.as_mut()?;
+        let result = client.request(&req);
+        if let Err(e) = &result {
+            if e.starts_with("broker ") || e.starts_with("the broker") {
+                *guard = None;
+                return Some(Err(format!(
+                    "The admin session ended ({e}). Unlock admin actions again."
+                )));
+            }
+        }
+        Some(result)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = req;
+        None
+    }
+}
+
+/// `--broker-selftest`: unlock, ping, print the result. Exit code 0 = ok.
+#[cfg(windows)]
+pub fn selftest() -> i32 {
+    let result = unlock().and_then(|_| match route(Request::Ping {}) {
+        Some(r) => r,
+        None => Err("not connected".into()),
+    });
+    match result {
+        Ok(v) if v == json!("pong") => {
+            println!("broker selftest: ok (helper started, identity checked, ping answered)");
+            0
+        }
+        Ok(v) => {
+            println!("broker selftest: unexpected reply {v}");
+            1
+        }
+        Err(e) => {
+            println!("broker selftest: failed: {e}");
+            1
         }
     }
 }
@@ -215,6 +347,59 @@ mod tests {
         assert!(decode_request(r#"{"op":"runScript","script":"calc"}"#).is_err());
         assert!(decode_request("not json").is_err());
         assert!(decode_request(&"x".repeat(MAX_LINE + 1)).is_err());
+    }
+
+    #[test]
+    fn tweak_ids_are_validated_before_the_engine() {
+        assert!(valid_tweak_id("game_mode_on"));
+        assert!(!valid_tweak_id(""));
+        assert!(!valid_tweak_id("Game_Mode"));
+        assert!(!valid_tweak_id("x; calc"));
+        assert!(!valid_tweak_id("../journal"));
+        assert!(!valid_tweak_id(&"a".repeat(65)));
+        assert_eq!(
+            execute(&Request::ApplyTweak {
+                id: "x;calc".into()
+            }),
+            Err("invalid tweak id".to_string())
+        );
+        assert!(decode_request(r#"{"op":"applyTweak","id":"game_mode_on"}"#).is_ok());
+        assert!(decode_request(r#"{"op":"applyTweak","id":"a","script":"x"}"#).is_err());
+    }
+
+    #[test]
+    fn authenticated_requests_reach_the_executor_and_errors_keep_the_session() {
+        fn fake(req: &Request) -> Result<Value, String> {
+            match req {
+                Request::ApplyTweak { id } if id == "ok_id" => Ok(json!({ "status": "applied" })),
+                _ => Err("engine refused".into()),
+            }
+        }
+        let nonce = "ef".repeat(32);
+        let mut s = Session::with_executor(&nonce, fake);
+        // Not before hello.
+        let (r, next) = s.handle_line(&encode(&Request::ApplyTweak { id: "ok_id".into() }));
+        assert!(!r.ok);
+        assert_eq!(next, Next::Close);
+
+        let mut s = Session::with_executor(&nonce, fake);
+        s.handle_line(&encode(&Request::Hello {
+            protocol: PROTOCOL,
+            nonce: nonce.clone(),
+        }));
+        let (r, next) = s.handle_line(&encode(&Request::ApplyTweak { id: "ok_id".into() }));
+        assert!(r.ok);
+        assert_eq!(r.value["status"], "applied");
+        assert_eq!(next, Next::Continue);
+        let (r, next) = s.handle_line(&encode(&Request::RevertTweak { id: "other".into() }));
+        assert_eq!(r.error.as_deref(), Some("engine refused"));
+        assert_eq!(next, Next::Continue);
+    }
+
+    #[test]
+    fn without_a_connection_work_stays_in_process() {
+        assert!(!connected());
+        assert!(route(Request::Ping {}).is_none());
     }
 
     #[test]

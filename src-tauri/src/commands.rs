@@ -57,6 +57,12 @@ pub static COMMANDS: &[(&str, Class, &str)] = &[
         "allowlisted ms-settings pages",
     ),
     // ── tweak engine / health check ──
+    ("cmd_broker_status", Read, "app state"),
+    (
+        "cmd_broker_unlock",
+        User,
+        "starts the admin helper; Windows asks via UAC",
+    ),
     (
         "cmd_list_tweaks",
         Read,
@@ -65,12 +71,12 @@ pub static COMMANDS: &[(&str, Class, &str)] = &[
     (
         "cmd_apply_tweak",
         Privileged,
-        "mixed HKCU/HKLM/services/powercfg; journal",
+        "mixed HKCU/HKLM/services/powercfg; journal. Routed to the broker when connected (phase 3)",
     ),
     (
         "cmd_revert_tweak",
         Privileged,
-        "journal undo / force-revert",
+        "journal undo / force-revert. Routed to the broker when connected (phase 3)",
     ),
     ("cmd_history", Read, "journal (readable by decision)"),
     ("cmd_revert_entry", Privileged, "journal undo"),

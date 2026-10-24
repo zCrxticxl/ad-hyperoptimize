@@ -42,6 +42,7 @@ import SoftwareInstaller from "./pages/SoftwareInstaller";
 import PcConfigurator from "./pages/PcConfigurator";
 import Settings from "./pages/Settings";
 import Changelog, { CURRENT_VERSION } from "./pages/Changelog";
+import { unlockBroker, useBroker } from "./hooks/useBroker";
 
 /**
  * `basic: true` marks a tool as safe and self-explanatory enough for Beginner
@@ -187,6 +188,9 @@ function AppInner() {
   const nav = buildNav(t);
   const [route, setRoute] = useState<Route>({ tool: "dashboard" });
   const [admin, setAdmin] = useState<boolean | null>(null);
+  const broker = useBroker();
+  const [unlocking, setUnlocking] = useState(false);
+  const [brokerErr, setBrokerErr] = useState("");
   const [mode, setModeState] = useState<Mode>(() => {
     try { return (localStorage.getItem(MODE_KEY) as Mode) ?? "beginner"; } catch { return "beginner"; }
   });
@@ -386,6 +390,13 @@ function AppInner() {
             <button className={mode === "expert" ? "on" : ""} aria-pressed={mode === "expert"} onClick={() => setMode("expert")}>{t("expert")}</button>
           </div>
           <span className="admin-chip" title={admin ? t("adminBadge") : t("adminHint")}><span className={`status-dot ${admin ? "is-ready" : ""}`} />{admin === null ? "…" : admin ? t("adminBadge") : t("userBadge")}</span>
+          {admin === false && broker.available && (broker.connected
+            ? <span className="admin-chip" title={t("brokerActiveHint")}><span className="status-dot is-ready" />{t("brokerActive")}</span>
+            : <button className="btn small" disabled={unlocking} title={t("brokerUnlockHint")}
+                onClick={async () => { setUnlocking(true); setBrokerErr(""); try { await unlockBroker(); } catch (e) { setBrokerErr(String(e)); } finally { setUnlocking(false); } }}>
+                {unlocking ? "…" : t("brokerUnlock")}
+              </button>)}
+          {brokerErr && <span className="muted" style={{ color: "var(--red)", fontSize: 11 }} title={brokerErr}>{t("brokerUnlockFailed")}</span>}
         </div>
       </header>
 

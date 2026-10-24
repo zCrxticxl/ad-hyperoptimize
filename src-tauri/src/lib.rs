@@ -132,18 +132,39 @@ async fn cmd_list_tweaks() -> Value {
         .unwrap_or_default()
 }
 
+/// Admin helper status: whether this build has one and whether it is
+/// connected (docs/audit-2026-10/elevation-design.md, phase 3).
+#[tauri::command(async)]
+fn cmd_broker_status() -> Value {
+    serde_json::json!({ "available": broker::AVAILABLE, "connected": broker::connected() })
+}
+
+/// Starts the elevated helper (UAC prompt) and connects to it.
+#[tauri::command(async)]
+async fn cmd_broker_unlock() -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(broker::unlock)
+        .await
+        .map_err(|_| "broker task panicked".to_string())?
+}
+
 #[tauri::command(async)]
 async fn cmd_apply_tweak(id: String) -> Result<Value, String> {
-    tauri::async_runtime::spawn_blocking(move || tweaks::apply(&id))
-        .await
-        .map_err(|_| "apply task panicked".to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        broker::route(broker::Request::ApplyTweak { id: id.clone() })
+            .unwrap_or_else(|| tweaks::apply(&id))
+    })
+    .await
+    .map_err(|_| "apply task panicked".to_string())?
 }
 
 #[tauri::command(async)]
 async fn cmd_revert_tweak(id: String) -> Result<Value, String> {
-    tauri::async_runtime::spawn_blocking(move || tweaks::revert(&id))
-        .await
-        .map_err(|_| "revert task panicked".to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        broker::route(broker::Request::RevertTweak { id: id.clone() })
+            .unwrap_or_else(|| tweaks::revert(&id))
+    })
+    .await
+    .map_err(|_| "revert task panicked".to_string())?
 }
 
 #[tauri::command(async)]
@@ -1582,6 +1603,12 @@ pub fn run() {
     if let Some(args) = broker::args_from(std::env::args()) {
         std::process::exit(broker::pipe::serve(&args));
     }
+    // `--broker-selftest`: launch the helper (UAC), ping it, report, exit.
+    // End-to-end check of phase 3 without the UI; debug builds have a console.
+    #[cfg(all(windows, feature = "broker"))]
+    if std::env::args().any(|a| a == "--broker-selftest") {
+        std::process::exit(broker::selftest());
+    }
     if should_auto_elevate() {
         ensure_admin();
     }
@@ -1607,6 +1634,8 @@ pub fn run() {
             cmd_stop_monitor,
             // tweaks
             cmd_list_tweaks,
+            cmd_broker_status,
+            cmd_broker_unlock,
             cmd_apply_tweak,
             cmd_revert_tweak,
             cmd_history,

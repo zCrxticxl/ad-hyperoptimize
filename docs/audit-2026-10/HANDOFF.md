@@ -75,6 +75,9 @@ Earlier note on the cloud session, kept for context. The second cleanup pass (`8
 
 ## Environment notes for a cloud (Linux) session
 
+- Since `e7adecf` the repo has no `src-tauri/icons/icon.png`. Tauri needs it for **Linux** builds only (Windows uses `icon.ico`). In a Linux session restore it locally without committing it: `git show e7adecf^:src-tauri/icons/icon.png > src-tauri/icons/icon.png`.
+- `cargo build --target x86_64-pc-windows-gnu` fails to link the `cdylib` (MinGW export limit). To build the exe for Wine, temporarily set `crate-type = ["rlib"]` in `src-tauri/Cargo.toml` and restore it afterwards (never commit that).
+
 - **Frontend:** `npm ci && npm run build` works anywhere.
 - **Rust:** the backend targets Windows. Most system code is behind `#[cfg(windows)]`. On Linux:
   - `cargo check`/`cargo test` need the Tauri Linux build dependencies (webkit2gtk-4.1, libgtk-3, libsoup-3, librsvg2, etc.).
@@ -107,7 +110,7 @@ Earlier note on the cloud session, kept for context. The second cleanup pass (`8
 4. **CI and supply chain:**
    - Pin GitHub Actions to commit SHAs.
    - Bump `time` (RUSTSEC-2026-0009) and check the new `cargo audit` job.
-5. **Structural security (HIGH):** the whole WebView runs elevated, so all 163 commands are reachable from the renderer. The design is written: `docs/audit-2026-10/elevation-design.md` (recommended: on-demand elevated helper `--broker` over an ACL-protected named pipe, typed allowlist, five migration phases). Owner decisions are recorded in section 8 of that document (option B, UAC once per session, journal readable without admin, drop unused commands). Phases 1 (inventory, unused commands removed) and 2 (broker skeleton behind the `broker` cargo feature) are done; see section 9 of that document. Next: phase 3, first privileged requests through the broker. The cloud session can now cross-check Windows builds: `rustup target add x86_64-pc-windows-gnu`, `apt-get install gcc-mingw-w64-x86-64 wine64`, then `cargo clippy --target x86_64-pc-windows-gnu --all-targets -- -D warnings` and `cargo test --target x86_64-pc-windows-gnu --lib --no-run` + `wine <test exe>`.
+5. **Structural security (HIGH):** the whole WebView runs elevated, so all 163 commands are reachable from the renderer. The design is written: `docs/audit-2026-10/elevation-design.md` (recommended: on-demand elevated helper `--broker` over an ACL-protected named pipe, typed allowlist, five migration phases). Owner decisions are recorded in section 8 of that document (option B, UAC once per session, journal readable without admin, drop unused commands). Phases 1 (inventory, unused commands removed) and 2 (broker skeleton behind the `broker` cargo feature) are done; phase 3 has started: tweak Apply/Undo go through the broker when it is connected, the header has "Unlock admin actions", and `--broker-selftest` checks the launch end to end. See section 9 of that document, including how to test on Windows. Next: route the remaining privileged commands module by module. The cloud session can now cross-check Windows builds: `rustup target add x86_64-pc-windows-gnu`, `apt-get install gcc-mingw-w64-x86-64 wine64`, then `cargo clippy --target x86_64-pc-windows-gnu --all-targets -- -D warnings` and `cargo test --target x86_64-pc-windows-gnu --lib --no-run` + `wine <test exe>`.
 6. **Windows validation** (owner or Windows VM): run the matrix from `REPORT.md` section G and the "Not tested" list in `optimization-engine.md`.
    - Apply/undo via Optimize My PC.
    - Reset all.

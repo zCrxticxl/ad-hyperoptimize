@@ -1,6 +1,6 @@
 # Design: unelevated UI with an elevated broker
 
-Status: **decided; phases 1–2 done, phases 3–5 open.** The owner answered the open questions (section 8). Implementation starts after the Windows validation of the current branch.
+Status: **decided; phases 1–2 done, phase 3 started (tweaks routed), phases 4–5 open.** The owner answered the open questions (section 8). Implementation starts after the Windows validation of the current branch.
 
 ## 1. Current state
 
@@ -225,12 +225,49 @@ Each phase on its own branch, with the full gate (fmt, check, test, clippy) on W
   - `cargo clippy --target x86_64-pc-windows-gnu --all-targets -D warnings`, with and without `--features broker`: clean.
   - Windows test binary under Wine: 10/10 broker tests pass, also in parallel. Wine does not enforce DACLs like Windows, so this is not a substitute for a run on Windows.
 
-### Not yet tested
+### Phase 3: first step done (still behind the `broker` feature)
 
-- **The elevated launch end-to-end** (UAC prompt, `--broker` process, connect): there is no caller before phase 3.
+- **New requests:** `applyTweak { id }` / `revertTweak { id }`.
+  - The id is checked (`[a-z0-9_]`, ≤ 64 chars) before the engine.
+  - The broker runs the same journaled `tweaks::apply` / `tweaks::revert` as before.
+  - Engine errors are answers; protocol violations close the connection.
+- **UI process:**
+  - `cmd_apply_tweak` / `cmd_revert_tweak` go through the broker when it is connected, otherwise in-process exactly as before.
+  - A broken connection (idle timeout, crash) is reported and dropped, never silently retried in-process.
+- **New commands** (classified in `commands.rs`):
+  - `cmd_broker_status` (Read)
+  - `cmd_broker_unlock` (User: starts the helper; Windows asks via UAC)
+- **UI:**
+  - The header shows "Unlock admin actions" when the app runs without admin rights and the build has the helper; afterwards "Admin actions active".
+  - The Optimize cards allow Apply/Undo of admin tweaks while the helper is connected.
+- **`--broker-selftest`** (feature builds only): launches the helper, pings it, prints the result, exit code 0 on success.
+- **Tests:**
+  - id validation
+  - requests reach the executor only after `hello`; engine errors keep the session
+  - without a connection the work stays in-process
+- **Verification in the cloud session:**
+  - clippy for Windows with and without the feature: clean
+  - Windows test binary under Wine: 18/18 broker and inventory tests
+  - `ad-hyperoptimize.exe --broker-selftest` (Windows build, Wine): "ok". Wine has no UAC, so the elevation prompt itself is untested.
 
-### Next: phase 3
+### How to test phase 3 on Windows
 
-- First privileged requests through the broker, starting with `cmd_apply_tweak` / `cmd_revert_tweak` (typed by tweak id).
-- A UI action "unlock admin actions" that launches the broker.
-- Still behind the feature flag.
+```powershell
+cargo build --manifest-path src-tauri/Cargo.toml --features broker
+.\src-tauri\target\debug\ad-hyperoptimize.exe --broker-selftest    # UAC prompt, then "broker selftest: ok"
+npm run tauri dev -- --features broker                                # debug build runs without admin
+```
+
+In the app:
+1. The header shows "Unlock admin actions". Click it and approve UAC; it changes to "Admin actions active".
+2. Optimize: Apply and Undo an admin tweak (e.g. Hibernation), then rescan.
+3. Task Manager shows a second `ad-hyperoptimize.exe` running elevated; it ends with the app or after 15 min idle.
+
+### Next in phase 3
+
+Route the remaining privileged commands, module by module:
+- Optimize My PC / reset retired
+- privacy, debloater
+- services, power plans
+- boot, security
+- …
