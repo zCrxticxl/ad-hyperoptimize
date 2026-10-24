@@ -22,3 +22,6 @@ secrets.*
 
 # oh-my-claudecode runtime state
 .omc/
+
+# Machine-specific build settings (local paths); never commit
+src-tauri/.cargo/config.toml
