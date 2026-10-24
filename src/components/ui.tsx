@@ -116,3 +116,29 @@ export class ToolErrorBoundary extends React.Component<
     return this.props.children;
   }
 }
+
+/** The one on/off control of the app. On (green) always means the setting
+ * named in the row is active; off (grey) means it is not. `partial` shows a
+ * half-applied state in orange; clicking it switches off (undo). */
+export const Switch: React.FC<{
+  on: boolean;
+  onChange: (next: boolean) => void;
+  disabled?: boolean;
+  busy?: boolean;
+  partial?: boolean;
+  label: string;
+  title?: string;
+}> = ({ on, onChange, disabled, busy, partial, label, title }) => (
+  <button
+    type="button"
+    role="switch"
+    aria-checked={partial ? "mixed" : on}
+    aria-label={label}
+    title={title || label}
+    className={`switch${on ? " on" : ""}${partial ? " partial" : ""}${busy ? " busy" : ""}`}
+    disabled={disabled || busy}
+    onClick={() => onChange(!on)}
+  >
+    <span className="switch-knob">{busy && <span className="spinner switch-spin" />}</span>
+  </button>
+);

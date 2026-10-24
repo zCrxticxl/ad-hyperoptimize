@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { api } from "../api";
-import { Badge, Spinner } from "./ui";
+import { Badge, Switch } from "./ui";
 import { RiskBadge, RiskNotice } from "./HwWarnings";
 import { useLang, TKey } from "../i18n";
 import { localizeTweak } from "../localize";
@@ -91,17 +91,18 @@ export function OptCard({ item, admin, focused }: { item: HealthItem; admin: boo
           <button className="btn small ghost" onClick={() => setOpen(!open)} aria-expanded={open}>
             {open ? "▲" : "▼"}
           </button>
-          {undoable && (
-            <button className="btn small ghost" disabled={busy || adminBlocked} onClick={() => run("undo")}
-              title={adminBlocked ? t("hcAdminNeeded") : ""}>
-              {busy ? <Spinner /> : t("hcUndo")}
-            </button>
-          )}
-          {canApply && (
-            <button className={`btn small ${offerable ? "" : "ghost"}`} disabled={busy || adminBlocked} onClick={() => run("apply")}
-              title={adminBlocked ? t("hcAdminNeeded") : ""}>
-              {busy ? <Spinner /> : t("hcApply")}
-            </button>
+          {(undoable || canApply) && (
+            // Drifted/failed: no longer fully active but an open entry
+            // remains, shown as partial so switching off runs the undo.
+            <Switch
+              on={applied || undoable}
+              partial={item.status === "partial" || (!applied && undoable)}
+              label={loc.name}
+              title={adminBlocked ? t("hcAdminNeeded") : applied || undoable ? t("hcUndo") : t("hcApply")}
+              busy={busy}
+              disabled={adminBlocked || (applied || undoable ? !undoable : !canApply)}
+              onChange={(next) => run(next ? "apply" : "undo")}
+            />
           )}
         </span>
       </div>

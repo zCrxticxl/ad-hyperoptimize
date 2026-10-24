@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { api } from "../api";
-import { Card, Spinner, Badge } from "../components/ui";
+import { Card, Spinner, Badge, Switch } from "../components/ui";
 import { useLang } from "../i18n";
 import { useFeatureFocus } from "../hooks/useFeatureFocus";
 
@@ -76,14 +76,14 @@ export default function Startup({ admin, focusId }: { admin: boolean; focusId?: 
                       {SCOPE_LABEL[it.scope] ?? it.scope}
                       {needsAdmin && <Badge cls="st-unknown"> admin</Badge>}
                     </td>
-                    <td style={{ width: 130 }}>
-                      <button
-                        className={`btn small ${it.enabled ? "ghost" : ""}`}
+                    <td style={{ width: 70 }}>
+                      <Switch
+                        on={it.enabled}
+                        label={it.name}
+                        busy={busy === it.scope + it.name}
                         disabled={busy !== null || (needsAdmin && !admin)}
-                        onClick={() => toggle(it)}
-                      >
-                        {busy === it.scope + it.name ? <Spinner /> : it.enabled ? t("disable") : t("enable")}
-                      </button>
+                        onChange={() => toggle(it)}
+                      />
                     </td>
                   </tr>
                 );

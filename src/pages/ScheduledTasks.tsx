@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo } from "react";
 import { api } from "../api";
-import { Card, Spinner } from "../components/ui";
+import { Card, Spinner, Switch } from "../components/ui";
 import { useLang } from "../i18n";
 import { useFeatureFocus } from "../hooks/useFeatureFocus";
 
@@ -208,7 +208,6 @@ export default function ScheduledTasks({ admin, focusId }: { admin: boolean; foc
                   {th("created", t("schedCreated"))}
                   {th("lastrun", t("schedLastRun"))}
                   <th scope="col">{t("status")}</th>
-                  <th scope="col"></th>
                 </tr>
               </thead>
               <tbody>
@@ -285,32 +284,22 @@ export default function ScheduledTasks({ admin, focusId }: { admin: boolean; foc
                       <td className="muted" style={{ whiteSpace: "nowrap", fontSize: 12 }} title={task.lastRun ?? ""}>
                         {task.lastRun ? fmtDateTime(task.lastRun) : "—"}
                       </td>
-                      <td style={{ whiteSpace: "nowrap" }}>
-                        <span
-                          style={{
-                            fontSize: 12,
-                            color: task.enabled ? "var(--green)" : "var(--muted)",
-                          }}
-                        >
-                          {task.enabled ? t("schedActiveStatus") : t("schedDisabledStatus")}
-                        </span>
-                      </td>
-                      <td style={{ width: 130 }}>
-                        <button
-                          className={`btn small ${task.enabled ? "ghost" : ""}`}
-                          disabled={!!busy || isBusy || !admin}
+                      <td style={{ width: 70 }}>
+                        <Switch
+                          on={task.enabled}
+                          label={task.name}
+                          busy={isBusy}
+                          disabled={!!busy || !admin}
                           title={!admin ? t("schedAdminTitle") : ""}
-                          onClick={() => toggle(task)}
-                        >
-                          {isBusy ? <Spinner /> : task.enabled ? t("disable") : t("enable")}
-                        </button>
+                          onChange={() => toggle(task)}
+                        />
                       </td>
                     </tr>
                   );
                 })}
                 {tasks.length === 0 && (
                   <tr>
-                    <td colSpan={tab === "bloat" ? 7 : 6} className="muted">
+                    <td colSpan={tab === "bloat" ? 6 : 5} className="muted">
                       {t("schedEmpty")}
                     </td>
                   </tr>

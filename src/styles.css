@@ -575,3 +575,23 @@ pre, code, .svc-desc { user-select: text; -webkit-user-select: text; }
 .section-label { color: var(--muted); text-transform: uppercase; font-size: 12px; letter-spacing: .5px; margin: 0 0 8px; }
 .input { padding: 8px 11px; border: 1px solid var(--border); border-radius: 9px; background: var(--input-bg); color: var(--text); font: inherit; font-size: 13px; }
 .input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* Unified on/off switch: green = on, grey = off, orange = partial */
+.switch {
+  position: relative; flex-shrink: 0; width: 40px; height: 22px; padding: 0;
+  border-radius: 999px; border: 1px solid var(--border); background: var(--card2);
+  cursor: pointer; transition: background .15s, border-color .15s;
+}
+.switch .switch-knob {
+  position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%;
+  background: var(--muted); transition: transform .15s, background .15s;
+  display: grid; place-items: center;
+}
+.switch.on { background: rgba(66, 212, 155, .25); border-color: var(--green); }
+.switch.on .switch-knob { transform: translateX(18px); background: var(--green); }
+.switch.partial { background: rgba(255, 140, 66, .2); border-color: var(--orange); }
+.switch.partial .switch-knob { background: var(--orange); }
+.switch:disabled { cursor: not-allowed; opacity: .45; }
+.switch.busy:disabled { opacity: 1; cursor: progress; }
+.switch:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.switch .switch-spin { width: 10px; height: 10px; border-width: 2px; }

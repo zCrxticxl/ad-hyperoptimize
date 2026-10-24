@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
-import { Card, Spinner, Badge } from "../components/ui";
+import { Card, Spinner, Badge, Switch } from "../components/ui";
 import { useLang } from "../i18n";
 
 type BootEvent = {
@@ -190,21 +190,17 @@ function TweakRow({ tweak, admin, busy, onApply, onRevert }: {
       <div className="tweak-head">
         <span className="tweak-name" style={{ color: tweak.applied ? "var(--green)" : undefined }}>{tweak.name}</span>
         <Badge cls={RISK_CLS[tweak.risk]}>{tweak.risk}</Badge>
-        <Badge cls={tweak.applied ? "st-applied" : "st-unknown"}>
-          {tweak.applied ? t("active") : t("inactive")}
-        </Badge>
         {tweak.retired && <Badge cls="st-unknown">{t("bootRetired")}</Badge>}
         <button className="btn small ghost" onClick={() => setOpen(o => !o)}>{open ? "▲" : "▼"}</button>
-        {tweak.applied ? (
-          <button className="btn small ghost" disabled={busy || (!admin && needsAdmin)} onClick={onRevert}
-            title={!admin && needsAdmin ? t("bootAdminNeeded") : ""}>
-            {busy ? <Spinner /> : t("bootUndo")}
-          </button>
-        ) : tweak.retired ? null : (
-          <button className="btn small" disabled={busy || (!admin && needsAdmin)} onClick={onApply}
-            title={!admin && needsAdmin ? t("bootAdminNeeded") : ""}>
-            {busy ? <Spinner /> : t("bootApply")}
-          </button>
+        {(tweak.applied || !tweak.retired) && (
+          <Switch
+            on={tweak.applied}
+            label={tweak.name}
+            busy={busy}
+            disabled={!admin && needsAdmin}
+            title={!admin && needsAdmin ? t("bootAdminNeeded") : ""}
+            onChange={(next) => (next ? onApply() : onRevert())}
+          />
         )}
       </div>
       {open && (
