@@ -234,26 +234,45 @@ pub fn append_entry(entry: JournalEntry) -> Result<String, String> {
     })
 }
 
+/// File-name prefix of the `.reg` backups of one key.
+fn backup_prefix(root: &str, path: &str) -> String {
+    format!("{root}_{}_", path.replace(['\\', '/'], "_"))
+}
+
+/// True for `<prefix><YYYYMMDD-HHMMSS>.reg` of exactly this key. A plain
+/// prefix match also hit backups of subkeys (`Key\Sub` → `Key_Sub_…`), and
+/// force-revert then imported the wrong key.
+fn is_backup_of(file_name: &str, root: &str, path: &str) -> bool {
+    file_name
+        .strip_prefix(&backup_prefix(root, path))
+        .and_then(|rest| rest.strip_suffix(".reg"))
+        .is_some_and(|ts| {
+            let b = ts.as_bytes();
+            b.len() == 15
+                && b[8] == b'-'
+                && b.iter()
+                    .enumerate()
+                    .all(|(i, c)| i == 8 || c.is_ascii_digit())
+        })
+}
+
 /// Newest `.reg` backup for a registry key, or None. Used by the force-revert
 /// path to restore prior state instead of blindly deleting values.
 pub fn latest_backup_for(root: &str, path: &str) -> Option<String> {
-    let safe = path.replace(['\\', '/'], "_");
-    let prefix = format!("{root}_{safe}_");
     let mut best: Option<(std::time::SystemTime, String)> = None;
     for entry in fs::read_dir(state_dir().ok()?.join("backups"))
         .ok()?
         .flatten()
     {
         let name = entry.file_name().to_string_lossy().into_owned();
-        if name.starts_with(&prefix) && name.ends_with(".reg") {
-            let modified = entry.metadata().and_then(|m| m.modified()).ok()?;
-            let better = match &best {
-                Some((t, _)) => modified > *t,
-                None => true,
-            };
-            if better {
-                best = Some((modified, entry.path().to_string_lossy().into_owned()));
-            }
+        if !is_backup_of(&name, root, path) {
+            continue;
+        }
+        let Ok(modified) = entry.metadata().and_then(|m| m.modified()) else {
+            continue;
+        };
+        if best.as_ref().map_or(true, |(t, _)| modified > *t) {
+            best = Some((modified, entry.path().to_string_lossy().into_owned()));
         }
     }
     best.map(|(_, p)| p)
@@ -262,10 +281,9 @@ pub fn latest_backup_for(root: &str, path: &str) -> Option<String> {
 /// Export a registry key with reg.exe before touching it. Returns backup path.
 pub fn backup_registry_key(root: &str, path: &str) -> Result<String, String> {
     let ts = chrono::Local::now().format("%Y%m%d-%H%M%S");
-    let safe = path.replace(['\\', '/'], "_");
     let dir = state_dir()?.join("backups");
     fs::create_dir_all(&dir).map_err(|e| format!("creating backup folder: {e}"))?;
-    let file = dir.join(format!("{root}_{safe}_{ts}.reg"));
+    let file = dir.join(format!("{}{ts}.reg", backup_prefix(root, path)));
     let full = format!("{root}\\{path}");
     ps::exec("reg.exe", &["export", &full, &file.to_string_lossy(), "/y"])?;
     Ok(file.to_string_lossy().into_owned())
@@ -396,6 +414,28 @@ pub fn launch_rstrui() -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::{classify_restore_point, RestorePointObservation, RestorePointOutcome};
+
+    #[test]
+    fn backups_match_their_own_key_only() {
+        let key = r"SOFTWARE\Policies\Microsoft\Windows\Windows Search";
+        let own = "HKLM_SOFTWARE_Policies_Microsoft_Windows_Windows Search_20261024-101500.reg";
+        assert!(super::is_backup_of(own, "HKLM", key));
+        // Subkey backup shares the prefix.
+        assert!(!super::is_backup_of(
+            "HKLM_SOFTWARE_Policies_Microsoft_Windows_Windows Search_Sub_20261024-101500.reg",
+            "HKLM",
+            key
+        ));
+        assert!(!super::is_backup_of(own, "HKCU", key));
+        assert!(!super::is_backup_of(
+            "HKLM_SOFTWARE_Policies_Microsoft_Windows_Windows Search_20261024-101500.txt",
+            "HKLM",
+            key
+        ));
+        // The name written by backup_registry_key is recognised.
+        let written = format!("{}20261024-101500.reg", super::backup_prefix("HKLM", key));
+        assert!(super::is_backup_of(&written, "HKLM", key));
+    }
 
     #[test]
     fn classifies_created_restore_point_when_matching_sequence_changes() {

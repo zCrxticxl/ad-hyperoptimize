@@ -33,6 +33,7 @@ Severity:
 | `lib.rs` | 1873 | reviewed |
 | `tweaks.rs` | 2490 | reviewed |
 | `statestore.rs` | 870 | reviewed |
+| `safety.rs` | 500 | reviewed |
 
 ## Findings
 
@@ -54,3 +55,5 @@ Severity:
 | 14 | `statestore.rs:trusted_bcdedit/_defender/_sched_task/_service_start` | High | **The command check accepted valid shapes regardless of the entry.** `bcdedit /set {current} <any lowercase element> <alnum>` passed, so planted `testsigning on`, `nointegritychecks on` or `hypervisorlaunchtype off` were carried over as trusted. The same applied to `Set-MpPreference -DisableRealtimeMonitoring $true` / `-MAPSReporting 0`, `Disable-ScheduledTask` on any task, and `Start-Service` for any of the four privacy services. The next Undo ran them elevated. | fixed: BCD only on the object + element of the entry's `bcd:<id>` tweak, never test signing on or `nx AlwaysOff`. Defender only reverts that turn protection back on, under its own tweak id. Scheduled task only `Enable-ScheduledTask` of the task named in `task:<path><name>`. `Start-Service` only for the service of the entry's `privacy:<id>`. Legacy entries with an older shape (e.g. `bootmenupolicy` on `{current}`) are now untrusted: manual undo, fails closed. |
 | 15 | `statestore.rs:migrate_debloater` | Medium | The file content was validated, then the *path* was copied again with `fs::copy`. The legacy folder is user-writable, so a symlink swapped in between check and copy made the elevated process copy any admin-only file into `%ProgramData%\ADHyperOptimize\debloater`, which Authenticated Users can read. | fixed: the validated bytes are written |
 | 16 | `statestore.rs:ensure_secure_dir` | Info | Checked: a pre-created or weak folder is moved aside; a new folder is hardened and must still be empty and not a reparse point; `%ProgramData%` comes from HKLM, not from the environment. A user holding a handle can block the rename, which only stops the app (no escalation). | ok |
+| 17 | `safety.rs:latest_backup_for` | Low | The prefix match `<root>_<path>_` also hit backups of subkeys (`Key\Sub` → `Key_Sub_<ts>.reg`). Force-revert could then import the wrong key; the value check afterwards caught only the case where the tweak value stayed. An unreadable directory entry (`?` in the loop) also discarded every backup. | fixed: exact `<prefix><YYYYMMDD-HHMMSS>.reg` match, unreadable entries are skipped; test `backups_match_their_own_key_only` |
+| 18 | `safety.rs:backup_registry_key` | Info | Backup names have one-second resolution. A second backup of the same key within the same second overwrites the first (`/y`). Apply calls are serialized and take longer than that in practice. | accepted |
