@@ -47,7 +47,9 @@ The last full gate on Windows 11 25H2 passed (up to `a82a380`):
 - `cargo test --locked`: 135 passed, 4 ignored
 - `cargo clippy --locked --all-targets -D warnings`
 
-The second cleanup pass (`8309a36` … `f1b2290`) was made in a cloud (Linux) session and is **not yet verified on Windows**:
+**Full gate on Windows 11 25H2 at `ffa1321` (owner, 2026-10-24): passed.** `npm ci`, `npm run build`, `cargo fmt --check`, `cargo check --locked`, `cargo test --locked` (159 passed, 4 ignored), `cargo clippy --locked --all-targets -D warnings`, and the read-only system tests (`real_health_scan`, `read_only_scans…`). In the app: System Check, Optimize (Ultimate plan = configured, Game Mode undo → re-apply), retired reset (Cortana) confirmed. Still open in the app: Privacy Center reset of CEIP/Maps (`ffa1321`), Optimize My PC, FPS import with real captures. `npm ci` reports 4 vulnerabilities (1 moderate, 3 high), see item 4.
+
+Earlier note on the cloud session, kept for context. The second cleanup pass (`8309a36` … `f1b2290`) was made in a cloud (Linux) session:
 - `npm ci && npm run build`: passed.
 - `cargo fmt --check`: passed.
 - `cargo check` / `cargo test`: the crate does not compile on Linux as committed (already true at `a82a380`): `privacy.rs`, `perftweaks.rs` and `services.rs` call `tweaks::reg_read`, which is `#[cfg(windows)]`. With a local, uncommitted non-Windows stub for `reg_read`, `cargo check` passed and `cargo test` passed 140, 1 ignored (the platform-independent tests only).
