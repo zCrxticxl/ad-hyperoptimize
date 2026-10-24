@@ -22,9 +22,11 @@ mod gameprofile;
 mod gamestorage;
 mod gputweaks;
 mod healthcheck;
+mod hwcheck;
 mod hwmonitor;
 mod hwprofile;
 mod latency;
+mod leftovers;
 mod monitor;
 mod optimizer;
 mod optregistry;
@@ -500,6 +502,65 @@ async fn cmd_pregame_resume() -> Result<Value, String> {
         return Err("Administrator rights required".into());
     }
     tauri::async_runtime::spawn_blocking(pregame::resume)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+// ---- deep check: hardware misconfiguration, leftovers, interrupts ----
+#[tauri::command(async)]
+async fn cmd_hwcheck() -> Value {
+    tauri::async_runtime::spawn_blocking(hwcheck::check)
+        .await
+        .unwrap_or_default()
+}
+
+#[tauri::command(async)]
+async fn cmd_gpu_link_live() -> Value {
+    tauri::async_runtime::spawn_blocking(hwcheck::gpu_link_live)
+        .await
+        .unwrap_or_default()
+}
+
+#[tauri::command(async)]
+async fn cmd_power_fix(alias: String) -> Result<Value, String> {
+    if !ps::is_admin() {
+        return Err("Administrator rights required".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || hwcheck::power_fix(alias))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command(async)]
+async fn cmd_leftovers_scan() -> Value {
+    tauri::async_runtime::spawn_blocking(leftovers::scan)
+        .await
+        .unwrap_or_default()
+}
+
+#[tauri::command(async)]
+async fn cmd_leftover_reset(id: String) -> Result<Value, String> {
+    if !ps::is_admin() {
+        return Err("Administrator rights required".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || leftovers::reset(id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command(async)]
+async fn cmd_irq_list() -> Value {
+    tauri::async_runtime::spawn_blocking(perftweaks::irq_list)
+        .await
+        .unwrap_or_default()
+}
+
+#[tauri::command(async)]
+async fn cmd_irq_set(reg_path: String, core: Option<u32>) -> Result<String, String> {
+    if !ps::is_admin() {
+        return Err("Administrator rights required".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || perftweaks::irq_set(reg_path, core))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -1987,6 +2048,13 @@ pub fn run() {
             cmd_pregame_scan,
             cmd_pregame_pause,
             cmd_pregame_resume,
+            cmd_hwcheck,
+            cmd_gpu_link_live,
+            cmd_power_fix,
+            cmd_leftovers_scan,
+            cmd_leftover_reset,
+            cmd_irq_list,
+            cmd_irq_set,
             cmd_stall_probe,
             cmd_wpr_start,
             cmd_wpr_stop,

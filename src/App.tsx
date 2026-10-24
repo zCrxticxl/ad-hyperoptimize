@@ -9,6 +9,7 @@ import Hardware from "./pages/Hardware";
 import Monitor from "./pages/Monitor";
 import Latency from "./pages/Latency";
 import GameDiag from "./pages/GameDiag";
+import DeepCheck from "./pages/DeepCheck";
 import Optimize from "./pages/Optimize";
 import Cleanup from "./pages/Cleanup";
 import Security from "./pages/Security";
@@ -68,6 +69,7 @@ export const buildNav: NavBuilder = (t) => [
     { id: "powerplan", icon: "🔌", label: t("navPowerPlan"), desc: t("toolDescPowerPlan"), basic: true, keywords: "power energy energie plan cpu" },
     { id: "gputweaks", icon: "🖼️", label: t("navGpuTweaks"), desc: t("toolDescGpuTweaks"), basic: true, keywords: "gpu graphics grafik nvidia amd" },
     { id: "perftweaks", icon: "⚙️", label: t("navPerfTweaks"), desc: t("toolDescPerfTweaks"), keywords: "advanced tweaks timer mmcss" },
+    { id: "deepcheck", icon: "🔬", label: t("navDeepCheck"), desc: t("toolDescDeepCheck"), basic: true, keywords: "dual channel ram pcie lanes nvme power plan usb leftovers altlasten hpet spectre interrupt affinity" },
     { id: "latency", icon: "📉", label: t("navLatency"), desc: t("toolDescLatency"), keywords: "latency dpc ping input lag" },
     { id: "nvcontrol", icon: "🎛️", label: t("navNvControl"), desc: t("toolDescNvControl"), keywords: "nvidia driver control panel" },
     { id: "bootopt", icon: "🥾", label: t("navBootOpt"), desc: t("toolDescBootOpt"), keywords: "boot startup time bootzeit" },
@@ -154,6 +156,7 @@ function renderTool(page: string, mode: Mode, admin: boolean | null, go: (id: st
     case "monitor": return <Monitor />;
     case "latency": return <Latency />;
     case "gamediag": return <GameDiag admin={!!admin} />;
+    case "deepcheck": return <DeepCheck admin={!!admin} mode={mode} />;
     case "processes": return <Processes />;
     case "startup": return <Startup admin={!!admin} focusId={target} />;
     case "schedtasks": return <ScheduledTasks admin={!!admin} focusId={target} />;

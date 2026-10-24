@@ -248,6 +248,29 @@ pub static COMMANDS: &[(&str, Class, &str)] = &[
         Privileged,
         "starts WSearch, starts OneDrive as the user",
     ),
+    ("cmd_hwcheck", Read, "WMI, PnP properties, powercfg query"),
+    ("cmd_gpu_link_live", Read, "nvidia-smi query"),
+    (
+        "cmd_power_fix",
+        Privileged,
+        "powercfg value on the active scheme (journaled)",
+    ),
+    (
+        "cmd_leftovers_scan",
+        ReadAdmin,
+        "HKLM values, BCD store (bcdedit needs admin), services",
+    ),
+    (
+        "cmd_leftover_reset",
+        Privileged,
+        "HKLM, BCD or service start type (journaled)",
+    ),
+    ("cmd_irq_list", Read, "PnP devices, HKLM Enum (readable)"),
+    (
+        "cmd_irq_set",
+        Privileged,
+        "HKLM Enum Affinity Policy (journaled)",
+    ),
     (
         "cmd_stall_probe",
         Read,

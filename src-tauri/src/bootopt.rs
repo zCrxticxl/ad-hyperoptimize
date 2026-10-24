@@ -233,7 +233,7 @@ fn parse_bcd_elements(out: &str) -> std::collections::HashMap<String, String> {
 /// (English/German) and on/off map to "yes"/"no"; everything else is
 /// lowercased. Returns None for values that are unsafe to pass back to
 /// bcdedit (anything but ASCII alphanumerics).
-fn normalize_bcd_value(v: &str) -> Option<String> {
+pub(crate) fn normalize_bcd_value(v: &str) -> Option<String> {
     let t = v.trim().to_ascii_lowercase();
     let t = match t.as_str() {
         "yes" | "ja" | "on" | "true" => "yes".to_string(),
@@ -309,7 +309,9 @@ fn restore_args(target: &str, element: &str, prev: Option<&str>) -> Result<Vec<S
     }
 }
 
-fn read_elements(target: &str) -> Result<std::collections::HashMap<String, String>, String> {
+pub(crate) fn read_elements(
+    target: &str,
+) -> Result<std::collections::HashMap<String, String>, String> {
     ps::exec("bcdedit.exe", &["/enum", target, "/v"]).map(|o| parse_bcd_elements(&o))
 }
 

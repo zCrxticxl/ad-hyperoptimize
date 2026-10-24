@@ -267,7 +267,7 @@ if (Get-ScheduledTask -TaskPath '\ADHyperOptimize\' -TaskName 'TimerResolution' 
 use crate::safety::{ChangeItem, JournalEntry};
 
 /// Open (applied, not undone) entry of `tweak_id`.
-fn open_entry(tweak_id: &str) -> Option<JournalEntry> {
+pub(crate) fn open_entry(tweak_id: &str) -> Option<JournalEntry> {
     crate::safety::load_journal()
         .unwrap_or_default()
         .into_iter()
@@ -277,7 +277,11 @@ fn open_entry(tweak_id: &str) -> Option<JournalEntry> {
 
 /// Journal `items` write-ahead, apply them in order and mark the entry
 /// complete. On a failure the applied part is rolled back.
-fn apply_journaled(tweak_id: &str, name: &str, items: Vec<ChangeItem>) -> Result<String, String> {
+pub(crate) fn apply_journaled(
+    tweak_id: &str,
+    name: &str,
+    items: Vec<ChangeItem>,
+) -> Result<String, String> {
     let entry_id = crate::safety::append_entry(JournalEntry {
         id: format!("perf-{}", chrono::Local::now().format("%Y%m%d%H%M%S%6f")),
         tweak_id: tweak_id.into(),
@@ -323,7 +327,7 @@ fn apply_journaled(tweak_id: &str, name: &str, items: Vec<ChangeItem>) -> Result
 
 /// A PowerShell expression as a journal command line (run by
 /// `tweaks::run_cmdline` through `ps::run`, never re-split).
-fn ps_line(script: &str) -> String {
+pub(crate) fn ps_line(script: &str) -> String {
     format!("powershell -Command {script}")
 }
 
@@ -354,6 +358,154 @@ pub fn undo(entry_id: String) -> Result<Value, String> {
         return Err("unknown entry".into());
     }
     crate::tweaks::revert_entry(&entry_id)
+}
+
+// ── Interrupt affinity ───────────────────────────────────────────────────────
+
+// Per-device "Affinity Policy" (documented Interrupt Affinity Policy keys):
+// DevicePolicy 4 = IrqPolicySpecifiedProcessors with the processor mask in
+// AssignmentSetOverride (KAFFINITY, 8 bytes on x64). Takes effect after the
+// device restarts (reboot). Systems with more than 64 logical processors use
+// processor groups and are not supported here.
+const IRQ_SUBKEY: &str = r"Device Parameters\Interrupt Management\Affinity Policy";
+
+const IRQ_LIST_PS: &str = r#"
+$cpus = [Environment]::ProcessorCount
+$devs = @(Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue |
+    Where-Object { $_.InstanceId -like 'PCI\*' -and $_.Class -in @('Display','Net','USB') } |
+    ForEach-Object {
+        $inst = "HKLM:\SYSTEM\CurrentControlSet\Enum\$($_.InstanceId)"
+        $ap = Get-ItemProperty (Join-Path $inst 'Device Parameters\Interrupt Management\Affinity Policy') -ErrorAction SilentlyContinue
+        $mask = $null
+        if ($ap -and $ap.AssignmentSetOverride) { $mask = ($ap.AssignmentSetOverride | ForEach-Object { $_.ToString('x2') }) -join '' }
+        [PSCustomObject]@{
+            name = $_.FriendlyName
+            type = switch ($_.Class) { 'Display' { 'GPU' } 'Net' { 'NIC' } default { 'USB' } }
+            regPath = $inst
+            policy = if ($ap) { $ap.DevicePolicy } else { $null }
+            mask = $mask
+        } })
+@{ cpus = $cpus; devices = $devs } | ConvertTo-Json -Depth 3 -Compress
+"#;
+
+/// Little-endian KAFFINITY hex for one logical processor.
+pub fn affinity_hex(core: u32) -> String {
+    (1u64 << core)
+        .to_le_bytes()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+/// Logical processors set in a little-endian mask hex string.
+pub fn cores_of_mask(hex: &str) -> Vec<u32> {
+    let bytes: Vec<u8> = (0..hex.len() / 2)
+        .filter_map(|i| u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).ok())
+        .collect();
+    let mut cores = Vec::new();
+    for (i, b) in bytes.iter().enumerate() {
+        for bit in 0..8 {
+            if b & (1 << bit) != 0 {
+                cores.push((i * 8 + bit) as u32);
+            }
+        }
+    }
+    cores
+}
+
+pub fn irq_list() -> Value {
+    let v = ps::run_json(IRQ_LIST_PS).unwrap_or(Value::Null);
+    let devices: Vec<Value> = match &v["devices"] {
+        Value::Array(a) => a.clone(),
+        o @ Value::Object(_) => vec![o.clone()],
+        _ => vec![],
+    }
+    .into_iter()
+    .map(|mut d| {
+        let inst = d["regPath"]
+            .as_str()
+            .unwrap_or_default()
+            .trim_start_matches(r"HKLM:\")
+            .to_string();
+        d["cores"] = json!(d["mask"].as_str().map(cores_of_mask));
+        d["openEntry"] = json!(open_entry(&format!("perftweaks:irq:{inst}")).map(|e| e.id));
+        d
+    })
+    .collect();
+    json!({ "cpus": v["cpus"], "devices": devices })
+}
+
+/// Pins a device's interrupts to one logical processor (`core`), or with
+/// `None` undoes the app's earlier change. Journaled; reboot required.
+pub fn irq_set(reg_path: String, core: Option<u32>) -> Result<String, String> {
+    if !reg_path.starts_with(r"HKLM:\SYSTEM\CurrentControlSet\Enum\PCI\")
+        || !crate::ps::is_safe_ident(&reg_path)
+        || reg_path.contains(['*', '?', '[', ']'])
+        || reg_path.split('\\').any(|seg| seg == ".." || seg == ".")
+    {
+        return Err("Invalid device path".into());
+    }
+    let list = ps::run_json(IRQ_LIST_PS).map_err(|e| format!("Cannot verify device list: {e}"))?;
+    let known = match &list["devices"] {
+        Value::Array(a) => a.iter().any(|d| {
+            d["regPath"]
+                .as_str()
+                .is_some_and(|p| p.eq_ignore_ascii_case(&reg_path))
+        }),
+        o @ Value::Object(_) => o["regPath"]
+            .as_str()
+            .is_some_and(|p| p.eq_ignore_ascii_case(&reg_path)),
+        _ => false,
+    };
+    if !known {
+        return Err("Only a present GPU, network or USB controller can be changed".into());
+    }
+    let cpus = list["cpus"].as_u64().unwrap_or(0) as u32;
+    let instance = &reg_path[r"HKLM:\".len()..];
+    let tweak_id = format!("perftweaks:irq:{instance}");
+    let _engine = crate::tweaks::engine_guard()?;
+    if let Some(open) = open_entry(&tweak_id) {
+        drop(_engine);
+        if core.is_none() {
+            crate::tweaks::revert_entry(&open.id)?;
+            return Ok("Interrupt affinity restored, reboot required".into());
+        }
+        return Err("An affinity change for this device is still open; undo it first".into());
+    }
+    let core = core.ok_or("Nothing to undo for this device")?;
+    if cpus == 0 || cpus > 64 {
+        return Err("Only systems with 1 to 64 logical processors are supported".into());
+    }
+    if core >= cpus {
+        return Err(format!("Processor {core} does not exist (0..{})", cpus - 1));
+    }
+    let key = format!(r"{instance}\{IRQ_SUBKEY}");
+    let policy_prev = crate::tweaks::reg_read("HKLM", &key, "DevicePolicy")?;
+    let mask_prev = crate::tweaks::reg_read("HKLM", &key, "AssignmentSetOverride")?;
+    apply_journaled(
+        &tweak_id,
+        &format!("Interrupts to CPU {core} ({instance})"),
+        vec![
+            ChangeItem::Registry {
+                root: "HKLM".into(),
+                path: key.clone(),
+                name: "AssignmentSetOverride".into(),
+                prev: mask_prev,
+                new: crate::safety::RegVal::Raw {
+                    ty: "REG_BINARY".into(),
+                    hex: affinity_hex(core),
+                },
+            },
+            ChangeItem::Registry {
+                root: "HKLM".into(),
+                path: key,
+                name: "DevicePolicy".into(),
+                prev: policy_prev,
+                new: crate::safety::RegVal::Dword(4),
+            },
+        ],
+    )?;
+    Ok(format!("Interrupts pinned to CPU {core}, reboot required"))
 }
 
 // ── MSI Mode ─────────────────────────────────────────────────────────────────
@@ -917,6 +1069,14 @@ pub fn pagefile_disable() -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn affinity_masks() {
+        assert_eq!(super::affinity_hex(0), "0100000000000000");
+        assert_eq!(super::affinity_hex(9), "0002000000000000");
+        assert_eq!(super::cores_of_mask("0002000000000000"), vec![9]);
+        assert_eq!(super::cores_of_mask("0300"), vec![0, 1]);
+    }
+
     use super::*;
 
     #[test]

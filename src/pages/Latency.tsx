@@ -3,6 +3,7 @@ import { api } from "../api";
 import { Card, ActionBtn, Bar } from "../components/ui";
 import { HwWarnings } from "../components/HwWarnings";
 import { useLang } from "../i18n";
+import { DriverLatencyTable } from "../components/diag/DriverLatencyTable";
 
 const RATING_COLOR: Record<string, string> = {
   excellent: "var(--green)",
@@ -110,7 +111,8 @@ export default function Latency() {
         {traceResult && (
           <div className="mt">
             <div style={{ color: "var(--green)" }}>✔ {t("latTraceSaved")}</div>
-            <div className="mono muted">{traceResult.etlPath}</div>
+            <DriverLatencyTable analysis={traceResult.analysis} />
+            <div className="mono muted mt">{traceResult.etlPath}</div>
             <div className="tweak-detail mt">{traceResult.next}</div>
             <button className="btn ghost small mt" onClick={() => api.openPath(traceResult.etlPath.replace(/\\[^\\]+$/, ""))}>
               {t("latOpenTraceFolder")}
