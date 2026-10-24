@@ -48,6 +48,8 @@ export default function RestorePointManager({ admin }: { admin: boolean }) {
       const arr = Array.isArray(r) ? r : r?.error ? [] : [r];
       setPoints(arr.sort((a: RP, b: RP) => b.SequenceNumber - a.SequenceNumber));
       if (r?.error) setLog(`${t("error")}: ${r.error}`);
+    } catch (error) {
+      setLog(`${t("error")}: ${String(error)}`);
     } finally { setLoading(false); }
   };
 

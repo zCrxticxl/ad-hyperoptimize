@@ -30,6 +30,7 @@ export type HwProfile = {
   ram: {
     totalMb: number;
     speedMhz: number;
+    ramType?: "DDR4" | "DDR5";
     sticks: number;
     tier: "low" | "ok" | "good";
   };

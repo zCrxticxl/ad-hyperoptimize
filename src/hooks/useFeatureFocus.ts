@@ -12,7 +12,9 @@ export function useFeatureFocus(focusId: string | undefined, ready: boolean) {
     if (!focusId || done.current || !ready) return;
     done.current = true;
     requestAnimationFrame(() => {
-      const el = document.querySelector(`[data-focus-id="${focusId}"]`);
+      // Ids come from backend catalogs and search; escape them so a quote or
+      // bracket cannot break (or widen) the attribute selector.
+      const el = document.querySelector(`[data-focus-id="${CSS.escape(focusId)}"]`);
       el?.scrollIntoView({ behavior: "smooth", block: "center" });
       el?.classList.add("feature-focus");
       setTimeout(() => el?.classList.remove("feature-focus"), 2200);

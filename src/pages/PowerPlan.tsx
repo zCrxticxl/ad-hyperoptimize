@@ -18,8 +18,8 @@ const PLAN_RISK_ID: Record<string, string> = {
   "a1841308-3541-4fab-bc81-f71556f20b4a": "power_plan_power_saver",
   "e9a42b02-d5df-448d-aa00-03f14749eb61": "power_plan_ultimate",
 };
-function riskIdForPlan(guid: string): string {
-  return PLAN_RISK_ID[guid.toLowerCase()] ?? "power_plan_custom_unknown";
+function riskIdForPlan(guid: string, isUltimate: boolean): string {
+  return isUltimate ? "power_plan_ultimate" : PLAN_RISK_ID[guid.toLowerCase()] ?? "power_plan_custom_unknown";
 }
 
 export default function PowerPlan({ admin }: { admin: boolean }) {
@@ -41,7 +41,12 @@ export default function PowerPlan({ admin }: { admin: boolean }) {
   };
 
   const load = async () => {
-    try { setData(await api.powerplanList()); }
+    try {
+      const result = await api.powerplanList();
+      if (result.error) throw new Error(String(result.error));
+      setErr("");
+      setData(result);
+    }
     catch (e: any) { setErr(String(e)); }
   };
   useEffect(() => { load(); }, []);
@@ -108,10 +113,10 @@ export default function PowerPlan({ admin }: { admin: boolean }) {
                     {p.active && <span style={{ color: "var(--green)", fontWeight: 700 }}>●</span>}
                     <b style={{ color: p.active ? "var(--accent)" : "var(--fg)" }}>{p.name}</b>
                     {p.active && <span style={{ fontSize: 11, color: "var(--green)" }}>{t("pwrPlanActive")}</span>}
-                    <RiskBadge id={riskIdForPlan(p.guid)} />
+                    <RiskBadge id={riskIdForPlan(p.guid, p.isUltimate)} />
                   </div>
                   <div className="muted" style={{ fontSize: 12 }}>
-                    {PLAN_DESC[p.guid.toLowerCase()] ?? t("pwrDescCustom")}
+                    {p.isUltimate ? t("pwrDescUltimate") : PLAN_DESC[p.guid.toLowerCase()] ?? t("pwrDescCustom")}
                   </div>
                   <div className="mono muted" style={{ fontSize: 10, marginTop: 2 }}>{p.guid}</div>
                 </div>
@@ -120,7 +125,7 @@ export default function PowerPlan({ admin }: { admin: boolean }) {
                     <button
                       className="btn small"
                       onClick={() => {
-                        if (p.guid.toLowerCase() === ULTIMATE_GUID && ultimateRisk &&
+                        if (p.isUltimate && ultimateRisk &&
                             !window.confirm(`${ultimateRisk.title}\n\n${ultimateRisk.message}\n\n${t("pwrContinueAnyway")}`)) return;
                         act(p.guid, () => api.powerplanSet(p.guid));
                       }}
@@ -132,7 +137,7 @@ export default function PowerPlan({ admin }: { admin: boolean }) {
                   {!["381b4222-f694-41f0-9685-ff5bb260df2e",
                      "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c",
                      "a1841308-3541-4fab-bc81-f71556f20b4a",
-                     "e9a42b02-d5df-448d-aa00-03f14749eb61"].includes(p.guid.toLowerCase()) && (
+                     "e9a42b02-d5df-448d-aa00-03f14749eb61"].includes(p.guid.toLowerCase()) && !p.isUltimate && (
                     <button
                       className="btn small ghost danger"
                       onClick={async () => {

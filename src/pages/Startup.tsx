@@ -19,7 +19,12 @@ export default function Startup({ admin, focusId }: { admin: boolean; focusId?: 
     folder_common: t("scopeFolderCommon"),
   };
 
-  const load = () => api.startupList().then((r) => setItems(r.items)).catch((e) => { setErr(String(e)); setItems([]); });
+  const load = () => api.startupList()
+    .then((result) => {
+      setItems(result.items);
+      setErr((result.errors ?? []).join("; "));
+    })
+    .catch((error) => { setErr(String(error)); setItems([]); });
   useEffect(() => {
     load();
   }, []);

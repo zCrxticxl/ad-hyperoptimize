@@ -4,6 +4,24 @@ All notable changes to AD HyperOptimize are documented here. The in-app
 changelog is generated from this file, and each GitHub release uses the matching
 section below as its release notes.
 
+## Unreleased
+
+Collected on branch `audit/2026-10-overhaul`; moves into a version section at release time (see docs/RELEASING.md).
+
+### Highlights
+- System Health Check: reads hardware and Windows settings and judges every optimization for this PC; gaming setup checks for refresh rate, XMP/EXPO, windowed-game optimizations, VRR and Resizable BAR.
+- Optimize My PC replaces the Auto-Optimizer: preview, approval, apply, and every change read back from Windows before it is reported as done.
+- Optimize shows only what fits this PC; tweaks without measurable benefit are retired and can be reset to their original values with one click.
+- New navigation: a sidebar with 8 sections, every tool as a tab.
+
+### Security
+- PowerShell quoting closed against Unicode quote characters; wildcard-safe uninstaller leftovers with backups; junction-safe temp cleanup; open-path never launches programs.
+- Undo history and backups now live in an admin-only folder; old data is migrated and validated.
+
+### Honesty
+- No tweak is presented as a proven FPS gain; myths and Windows defaults are labelled as such and retired.
+- Clippy is enforced in CI (closes #2).
+
 ## v1.6.4 — Services overview, uninstaller privilege hardening
 
 ### Services Manager

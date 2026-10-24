@@ -6,22 +6,23 @@ import * as pl from "./locales/pl";
 import * as ru from "./locales/ru";
 import * as tr from "./locales/tr";
 import * as sv from "./locales/sv";
+import * as de from "./locales/deTweaks";
 
 type TweakOverlay = { name?: string; description?: string; rationale?: string; impact?: string };
 type TextOverlay = { title?: string; message?: string };
 
 const TWEAKS: Partial<Record<Lang, Record<string, TweakOverlay>>> = {
-  es: es.tweaks, fr: fr.tweaks, pt: pt.tweaks, pl: pl.tweaks, ru: ru.tweaks, tr: tr.tweaks, sv: sv.tweaks,
+  de: de.tweaks, es: es.tweaks, fr: fr.tweaks, pt: pt.tweaks, pl: pl.tweaks, ru: ru.tweaks, tr: tr.tweaks, sv: sv.tweaks,
 };
 const WARNINGS: Partial<Record<Lang, Record<string, TextOverlay>>> = {
-  es: es.warnings, fr: fr.warnings, pt: pt.warnings, pl: pl.warnings, ru: ru.warnings, tr: tr.warnings, sv: sv.warnings,
+  de: de.warnings, es: es.warnings, fr: fr.warnings, pt: pt.warnings, pl: pl.warnings, ru: ru.warnings, tr: tr.warnings, sv: sv.warnings,
 };
 const RISKS: Partial<Record<Lang, Record<string, TextOverlay>>> = {
-  es: es.risks, fr: fr.risks, pt: pt.risks, pl: pl.risks, ru: ru.risks, tr: tr.risks, sv: sv.risks,
+  de: de.risks, es: es.risks, fr: fr.risks, pt: pt.risks, pl: pl.risks, ru: ru.risks, tr: tr.risks, sv: sv.risks,
 };
 
 // Tweak catalog entries (tweaks.rs + gputweaks.rs), keyed by tweak id.
-// `de`/`en` pass through untouched (no overlay exists for those langs).
+// `en` passes through untouched (the catalog is English).
 export function localizeTweak<T extends { id: string; name: string; description: string; rationale?: string; impact?: string }>(
   t: T,
   lang: Lang
@@ -127,4 +128,13 @@ export function localizeSummary(findings: Finding[], t: (key: any) => string): s
     title: top.title,
     recommendation: top.recommendation,
   });
+}
+
+type CatalogText = { name: string; description: string };
+
+/** Privacy Center / Debloater items in German; other languages keep the
+ * backend text. */
+export function localizeCatalog(kind: "privacy" | "debloater", id: string, name: string, description: string, lang: Lang): CatalogText {
+  const overlay = lang === "de" ? de[kind][id] : undefined;
+  return { name: overlay?.name ?? name, description: overlay?.description ?? description };
 }

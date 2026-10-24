@@ -4,41 +4,93 @@
 
 # ⚡ AD HyperOptimize
 
-**Windows optimization that tells the truth.**
-No registry-cleaner snake oil. Only documented, measurable tweaks, journaled, backed up and revertible with one click.
+**A Windows gaming optimizer that tells you what actually helps on *your* PC, and what doesn't.**
+
+It reads your hardware and Windows settings and recommends only changes that apply to your system. Before reporting a change as done, it confirms it in Windows. Every change can be undone to its exact previous value.
 
 [![Stars](https://img.shields.io/github/stars/zCrxticxl/ad-hyperoptimize?style=for-the-badge&logo=github&color=7c5cff&labelColor=0b0d14)](https://github.com/zCrxticxl/ad-hyperoptimize/stargazers)
-[![License](https://img.shields.io/github/license/zCrxticxl/ad-hyperoptimize?style=for-the-badge&color=38bdf8&labelColor=0b0d14)](LICENSE)
+[![License: source-available, non-commercial](https://img.shields.io/badge/license-source--available%2C%20non--commercial-38bdf8?style=for-the-badge&labelColor=0b0d14)](#license)
 [![Last commit](https://img.shields.io/github/last-commit/zCrxticxl/ad-hyperoptimize?style=for-the-badge&color=4ade80&labelColor=0b0d14)](https://github.com/zCrxticxl/ad-hyperoptimize/commits)
 [![Discord](https://img.shields.io/badge/Discord-join-5865F2?style=for-the-badge&logo=discord&logoColor=white&labelColor=0b0d14)](https://discord.gg/vFaKsVuxKP)
-
-<a href="https://www.buymeacoffee.com/zCrxticxl"><img src="https://img.buymeacoffee.com/button-api/?text=donation for the work :)&emoji=&slug=zCrxticxl&button_colour=FF5F5F&font_colour=ffffff&font_family=Cookie&outline_colour=000000&coffee_colour=FFDD00" alt="Buy me a coffee" /></a>
 
 ![Windows 10/11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?style=flat-square&logo=windows11&logoColor=white)
 ![Tauri 2](https://img.shields.io/badge/Tauri-2-FFC131?style=flat-square&logo=tauri&logoColor=black)
 ![Rust](https://img.shields.io/badge/Rust-backend-F74C00?style=flat-square&logo=rust&logoColor=white)
 ![React](https://img.shields.io/badge/React%2018-TypeScript-61DAFB?style=flat-square&logo=react&logoColor=black)
 
-<img src="assets/screenshot-home.png" alt="AD HyperOptimize home: pick a category instead of a wall of tools" width="90%"/>
+<img src="assets/screenshot-health-check.png" alt="System Health Check: system overview, optimization status, gaming setup checks and recommendations" width="90%"/>
 
-<sup>The v1.6 dashboard. Pick a category; every tool explains itself.</sup>
+<sub>The System Health Check on a real PC: detected hardware, what is already correct, and what is worth changing.</sub>
 
-<table>
-<tr>
-<td width="50%"><img src="assets/screenshot-dashboard.png" alt="System dashboard with health score, findings and hardware profile"/></td>
-<td width="50%"><img src="assets/screenshot-optimize.png" alt="Safe Optimization Engine with per-tweak risk, hardware check and one-click undo"/></td>
-</tr>
-<tr>
-<td width="50%"><img src="assets/screenshot-performance.png" alt="Performance category with its tools"/></td>
-<td width="50%"><sub>Health score and findings, the journaled tweak engine with per-tweak risk and undo, and category navigation. Every screenshot is the real app, not a mockup.</sub></td>
-</tr>
-</table>
+<a href="https://www.buymeacoffee.com/zCrxticxl"><img src="https://img.buymeacoffee.com/button-api/?text=donation for the work :)&emoji=&slug=zCrxticxl&button_colour=FF5F5F&font_colour=ffffff&font_family=Cookie&outline_colour=000000&coffee_colour=FFDD00" alt="Buy me a coffee" /></a>
 
 </div>
 
-## License, security & commercial use
+## Why this one is different
 
-This project is source-available under the included non-commercial license. Personal and other non-commercial use is allowed; commercial use, redistribution in paid offerings, and enterprise deployment need a separate agreement. See [COMMERCIAL-LICENSING.md](COMMERCIAL-LICENSING.md). Security reports are handled under [SECURITY.md](SECURITY.md); please do not report vulnerabilities publicly.
+Most "optimizers" apply the same internet tweak list to every PC and report success when a command ran. AD HyperOptimize does the opposite:
+
+| Typical optimizer | AD HyperOptimize |
+|---|---|
+| Same tweak list for every PC | Checks your CPU, GPU, RAM, storage, power plan and Windows version, then offers only what applies |
+| "+30 % FPS" claims | **No invented numbers.** Each optimization says what it changes and when it can help. Nothing is labelled a proven FPS gain unless it was measured. |
+| Keeps myths alive (Nagle, QoS 20 %, IRPStackSize, …) | Myths and settings that only restate Windows defaults are **retired**. If one is still active from earlier, *Reset all* restores your original values. |
+| "Done!" after a command ran | Each change is read back from Windows. Each result is reported as *verified*, *needs restart*, *already optimized*, *skipped*, *failed* or *could not be verified*. |
+| No way back | Previous values are captured before every change. Undo restores exactly those values, not a guessed default. |
+| Phones home | **No telemetry.** Nothing is sent anywhere. The only network access is the signed self-updater. |
+
+## What it does
+
+### Check
+- **System Health Check.** Reads the Windows build and support status, the CPU and its traits (hybrid P/E cores, dual-CCD X3D), the GPU and driver date, RAM, storage, free space, power plan, page file and Defender state. Each optimization gets a verdict for this exact PC: correctly configured, recommended, optional, not applicable, or needs review.
+- **Gaming setup checks.** These cover things that demonstrably matter and that no registry tweak can fix:
+  - monitor running below its maximum refresh rate
+  - RAM not running at its rated XMP/EXPO speed
+  - *Optimizations for windowed games* and VRR settings
+  - Resizable BAR on NVIDIA
+- **Findings.** Covers disk space, SMART, drivers, startup load, temperatures and event logs. The findings score is defined as "100 minus weighted findings". It is not a performance score.
+
+### Optimize
+- **Optimize My PC.** You get a preview of the proposed changes and approve them. Each change is applied, then confirmed in Windows. Only low-risk changes are included, such as turning Game Mode back on, stopping background game capture, or restoring TCP auto-tuning or RSS if they were disabled. If nothing is needed, it says so.
+- **Optimize.** Shows only the optimizations that fit your PC, grouped as *Recommended*, *Gaming* and *System*. Everything else stays available under *Advanced* with its honest classification.
+- **Power plans, GPU tweaks, Game Booster, Latency analysis** (DPC/ISR counters, WPR traces), **Boot options** and **Profiles**, all with exact undo.
+
+<table>
+<tr>
+<td width="50%"><img src="assets/screenshot-optimize-my-pc.png" alt="Optimize My PC: preview, approval, verified result"/></td>
+<td width="50%"><img src="assets/screenshot-optimize.png" alt="Optimize: only what fits this PC, with classification, state and undo"/></td>
+</tr>
+</table>
+
+### Measure
+- **In-game FPS comparison.** Import frame-time captures from **PresentMon, CapFrameX or NVIDIA FrameView** before and after a change. The app compares average FPS, 1 % and 0.1 % lows, taking run-to-run variation into account. It does not capture frames itself, and it tells you when the difference is within noise or there are too few runs.
+- **Benchmarks** for CPU, memory and disk, with history. **Live monitor** and **sensors** (temperatures, SMART).
+
+### Clean up and control
+- **Cleanup** (whitelisted temp/cache folders), **Uninstaller** with backed-up leftover removal, **Disk analyzer**, **Debloater**, **Registry cleaner** with real `.reg` backups, **Context menu cleaner**.
+- **Startup**, **Services** (core Windows services are protected from being disabled), **Scheduled tasks**, **Processes**, **Drivers**, **Updates**.
+- **Privacy Center** (telemetry, advertising ID, activity history, …) and **Security Center** (Defender, firewall, unsigned drivers, hosts file). Nothing changes without an explicit click. Turning off Defender always asks for confirmation.
+
+**Navigation:** a sidebar with 8 sections, every tool as a tab, and a global search that also finds individual settings (e.g. "HAGS"). There are Beginner and Expert modes and 9 languages.
+
+## Safety model
+
+```
+preview → your approval → capture previous values (+ .reg backup) → write-ahead journal → apply → read back from Windows
+                                                                               └── failure? roll back ──┘
+```
+
+1. **Write-ahead journal.** Previous values are recorded before anything changes, and a failed apply rolls back automatically.
+2. **Exact undo.** Registry values, service start types, power plans and boot settings are restored to what they were, never to an assumed default.
+3. **Protected state.** The undo journal and backups are stored in an admin-only folder (`%ProgramData%\ADHyperOptimize`), so other programs cannot plant commands there for the next Undo.
+4. **Restore points** are offered before larger changes.
+5. **Runs elevated** because most system settings need administrator rights. The interface cannot open files or launch programs; links open only in the browser or Explorer.
+
+## Get it
+
+Download the latest installer (`.exe` or `.msi`) from [**Releases**](https://github.com/zCrxticxl/ad-hyperoptimize/releases).
+
+Every release includes `SHA256SUMS.txt` for verifying the download. If an installer is not code-signed, Windows SmartScreen may warn on first start ("More info" → "Run anyway"). See [CODE_SIGNING.md](CODE_SIGNING.md).
 
 ### Update signature verification
 
@@ -48,192 +100,69 @@ The built-in updater verifies every package against a minisign key embedded in t
 75A816CD47EDE457
 ```
 
-If this fingerprint ever changes in a release, treat it as a supply-chain warning and verify through a second channel (GitHub release notes, project website) before updating.
+If this fingerprint ever changes in a release, treat it as a supply-chain warning and verify through a second channel before updating.
 
----
-
-## Why another optimizer?
-
-Because most Windows "optimizers" are placebo generators. AD HyperOptimize takes the opposite approach:
-
-| 🚫 Typical optimizer | ✅ AD HyperOptimize |
-|---|---|
-| "Cleans" the registry | Only documented, measurable tweaks (MMCSS, Game DVR, power plans, telemetry policy…) |
-| Changes things silently | Per-tweak confirm with **what / why / impact / risk / reversibility** |
-| No way back | Write-ahead journal + `.reg` backups + **exact captured-state undo**, tweaks restore to their prior value, not a guess |
-| Phones home | **Zero telemetry.** Nothing is sent online |
-
-## ✨ Features
-
-**Overview**
-- 🩺 **Health Score**, rule-based findings engine scans WMI, SMART, boot, event logs, DNS & network and turns it into one score with concrete findings
-- ⚡ **Auto-Optimizer**, applies the recommended low-risk tweaks in one click, with a real risk label per item and a confirmation step
-- 🩺 **Health Check**, SFC / DISM / component scans with honest result states
-
-**Performance**
-- 🎮 **Optimize**, the journaled tweak engine: every tweak shows risk, hardware check, impact, reversibility; undo is one click (HAGS, power plans, Game DVR, MMCSS…)
-- 🎮 **Game Booster / Quick Boost**, priority/affinity + power plan + HAGS snapshot with an independent per-run restore token
-- 🔌 **Power Plans**, set / create / delete / unlock Ultimate, per-scheme
-- ⚙️ **Perf Tweaks**, timer resolution, MSI mode, network adapter tweaks, RAM standby flush, pagefile
-- 📉 **Latency Analyzer**, DPC/ISR counters, stall probe, and full **WPR** deep-trace recording
-- 🖼️ **GPU Tweaks**, NVIDIA/AMD driver-key tweaks with hardware-aware risk gating
-- 🎛️ **NVIDIA Settings**, direct control-panel value tweaks
-- 📁 **Profiles**, curated tweak bundles (with optional before/after benchmark)
-- 🕹️ **Game Profiles**, per-game presets + auto power-plan switcher
-
-**Cleanup**
-- 🧹 **Cleanup**, whitelisted cache/temp roots only; locked files skipped, never forced
-- 🗑️ **Uninstaller**, remove apps and scan/clean leftovers (validated paths only)
-- 💾 **Disk Analyzer**, largest files, duplicates (SHA-256), old temp files, auto-organize
-- 📦 **Debloater**, telemetry/ads/UX registry tweaks + preinstalled UWP removal, with exact capture/restore
-- 🗂️ **Registry Cleaner**, dead-entry scan with real `.reg` backups and a **Restore…** panel
-- 🖱️ **Context-Menu Cleaner**, remove bloat entries from the Explorer context menu
-
-**Protection**
-- 🛟 **Restore Points**, create / list / delete, or launch the system tool
-- 🕵️ **Privacy Center**, telemetry, advertising ID, activity history, location… with per-item undo
-- 🔒 **Security Center**, audits Defender, firewall, unsigned drivers, autoruns and the hosts file, and offers **explicit, opt-in** controls to change them. Nothing changes without a click.
-
-**System**
-- 🧩 **Hardware**, specs, boot-time analysis, SMART disk health
-- 📈 **Live Monitor**, 1-second CPU / RAM / network / disk metrics
-- 🌡️ **HW Monitor**, CPU/GPU temperatures (nvidia-smi), S.M.A.R.T., fans (10 s refresh)
-- 📑 **Process Manager**, list / kill / priority / affinity / persistent priorities
-- 🚦 **Startup**, run-key + folder entries, reversible toggles
-- 🔧 **Services**, bloat-aware service audit, startup type + start/stop
-- ⏰ **Scheduled Tasks**, disable/enable bloat tasks; sortable by name, creation date and last run, with third-party tasks (anything outside `\Microsoft\`) detected, filterable and shown with author + executable
-- 💿 **Drivers**, list, age/unsigned flags, winget + Windows Update installs
-- 🥾 **Boot Optimizer**, bcdedit tweaks with exact undo
-- 🔄 **Updates**, winget app updates + Windows Update driver installs, plus the built-in app self-updater: checks on page open, one-click download & install
-- 📥 **Software Installer**, curated winget catalog with live per-app status
-- 🛠️ **PC Configurator**, hardware bottleneck analysis + build/upgrade guidance
-- 📜 **Changelog**, in-app release notes, a "What's new" bar on the home screen, and a changelog link in Settings — all generated automatically from `CHANGELOG.md`
-- ⚙️ **Settings**, language, Beginner/Expert mode, clear scan cache
-
-**Analysis**
-- 🏁 **Benchmarks**, CPU / memory / disk with history
-- 📄 **Reports**, dark-mode HTML + JSON exports and the full change journal
-
-**Navigation & search**
-- 🔍 **Feature search**, type a tweak, service, task or tool name (e.g. "HAGS", "DiagTrack") and jump straight to it, highlighted. Searches across every toggleable feature.
-- 🕘 **Recently used**, quick access to your last tools on the home screen
-- ⌨️ **Keyboard**, `/` focuses the search, `Esc` clears it
-- 🔰 **Beginner ⇄ Expert mode**, same engine, two levels of detail
-- 🌍 **9 languages**, Deutsch, English, Español, Français, Português, Polski, Русский, Türkçe, Svenska — switchable instantly, missing strings fall back to English
-
-## 🛟 Safety model (the important part)
-
-Every tweak goes through the same pipeline:
-
-```
-confirm → (recommended: restore point) → .reg backup → write-ahead journal → apply → verify
-                                                          └── failure? auto-rollback ──┘
-```
-
-1. **Write-ahead journaling**, previous values are captured to `journal.json` *before* anything is mutated. Failed applies roll back automatically.
-2. **Registry backups**, every touched key exported via `reg.exe` first.
-3. **Exact captured-state undo**, where a change can be snapshotted, the prior state (registry value, service start type, power plan, toast setting) is captured to a state file and restored exactly on undo, never a guessed default. This powers the Debloater, Game Boost and Quick Boost.
-4. **Restore points**, one click, surfaced before medium-risk tweaks.
-5. **Runs elevated**, most system tweaks need administrator rights, so the app requests elevation at launch (UAC). The webview is granted no direct filesystem/HTTP plugin access; opening files/URLs goes only through a validated `cmd_open_path`, and network is limited to the built-in updater.
-
-## 📥 Get it
-
-Grab the latest installer (`.exe` / `.msi`) from [**Releases**](https://github.com/zCrxticxl/ad-hyperoptimize/releases), or build from source below.
-
-> Releases include `SHA256SUMS.txt` for installer verification. Windows Authenticode signing activates automatically once the repository's signing secrets and timestamp URL are configured; until then, unsigned builds can trigger SmartScreen ("More info" → "Run anyway"). See [CODE_SIGNING.md](CODE_SIGNING.md).
-
-## 🔨 Build from source
+## Build from source
 
 <details>
-<summary><b>Prerequisites & build steps</b></summary>
+<summary><b>Prerequisites and build steps</b></summary>
 
 1. [Rust](https://rustup.rs) (MSVC toolchain: `rustup default stable-msvc`)
 2. [Node.js 20+](https://nodejs.org)
 3. Visual Studio Build Tools, "Desktop development with C++"
-4. WebView2 runtime (preinstalled on Win 10/11)
+4. WebView2 runtime (preinstalled on Windows 10/11)
 
 ```powershell
 git clone https://github.com/zCrxticxl/ad-hyperoptimize.git
 cd ad-hyperoptimize
-npm install
+npm ci
 
-npm run tauri dev     # dev with hot reload
+npm run tauri dev     # development with hot reload
 npm run tauri build   # NSIS .exe + .msi in src-tauri/target/release/bundle/
 ```
 
-</details>
+Quality gate (the same as CI):
 
-## 🏗️ Architecture
+```powershell
+npm run build
+cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+cargo test --manifest-path src-tauri/Cargo.toml --locked
+cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings
+```
+
+</details>
 
 <details>
-<summary><b>Module map</b></summary>
+<summary><b>Architecture</b></summary>
 
-```
-src/                      # React + TS frontend
-├── App.tsx               # Shell: topbar + category launcher, search, mode, recents
-├── api.ts                # Typed invoke() wrappers + metrics event stream
-├── pages/                # 37 tool pages (Dashboard, Optimize, Security, Debloater, …)
-└── components/           # ui primitives, HwWarnings, Onboarding
+- `src/`: React + TypeScript frontend. `App.tsx` (sidebar shell and search), `api.ts` (typed Tauri commands), `pages/` (one file per tool).
+- `src-tauri/src/`: Rust backend. The key modules:
 
-src-tauri/src/
-├── ps.rs                 # PowerShell/exec bridge (timeouts, no console flashes)
-├── lib.rs                # Tauri commands, admin-relaunch, command wiring
-├── scan.rs               # WMI/SMART/boot/event/DNS/network analysis
-├── monitor.rs            # 1s real-time metrics thread → "metrics" events
-├── analysis.rs           # Rule-based findings engine + health score
-├── tweaks.rs             # Declarative tweak catalog + apply/revert engine
-├── safety.rs             # Restore points, .reg backups, write-ahead journal
-├── cache.rs              # Persistent scan cache
-├── cleanup.rs            # Whitelisted-roots cache/temp cleaner
-├── security.rs           # Defender/firewall/drivers/autoruns/hosts
-├── regclean.rs           # Registry orphan scan + .reg backup/restore
-├── debloater.rs          # Registry tweaks (capture/restore) + UWP removal
-├── gameboost.rs          # Game/Quick Boost with per-run restore token
-├── gameprofile.rs        # Per-game presets + auto power-plan switcher
-├── gputweaks.rs          # GPU driver-key tweaks
-├── bootopt.rs            # bcdedit tweaks
-├── perftweaks.rs         # timer / MSI / network / RAM / pagefile
-├── powerplan.rs          # power plan list/set/create/delete
-├── latency.rs            # DPC/ISR counters + WPR recording
-├── bench.rs              # CPU/memory/disk benchmarks + history
-├── hwmonitor.rs          # temps / S.M.A.R.T. / fans
-├── hwprofile.rs          # hardware detection + warnings
-├── diskanalyzer.rs       # largest/duplicates/temp-age/organize
-├── procmgr.rs            # process kill/priority/affinity
-├── startup.rs            # startup entries
-├── services.rs           # services + bloat audit
-├── schedtasks.rs         # scheduled tasks
-├── drivers.rs            # driver list + winget/pnputil/WU
-├── updates.rs            # winget app + WU driver updates
-├── softwareinstaller.rs  # curated winget catalog
-├── uninstaller.rs        # uninstall + validated leftover clean
-├── ctxmenu.rs            # context-menu cleaner
-├── privacy.rs            # privacy/telemetry tweaks
-├── autoopt.rs            # auto-optimizer
-├── healthcheck.rs        # SFC/DISM runner
-├── profiles.rs           # tweak bundles
-├── report.rs             # Dark HTML + JSON reports
-└── procmgr.rs / gamedb.rs / hardware helpers…
-```
+  | Module | Role |
+  |---|---|
+  | `tweaks.rs` | Tweak catalog, live state detection, apply/undo |
+  | `optregistry.rs` | Evidence class, applicability rules and retirement for every tweak |
+  | `optimizer.rs` | System Health Check, Optimize My PC, verification, gaming setup checks |
+  | `safety.rs`, `statestore.rs` | Journal, backups, restore points, protected state folder |
+  | `ps.rs` | PowerShell bridge (strict quoting, timeouts) |
+  | `frametime.rs` | Frame-time CSV import and before/after comparison |
 
-**Extending the catalog:** add one `Tweak {}` block in `tweaks.rs`, status detection, backup, journaling, confirm UI and undo come free.
+**Adding an optimization:** add a `Tweak {}` entry in `tweaks.rs` and an entry in `optregistry.rs` with its evidence class, purpose and applicability rules. A test fails if either is missing.
+
+Release process: [docs/RELEASING.md](docs/RELEASING.md). Audit and engine documentation: [docs/audit-2026-10/](docs/audit-2026-10/).
 
 </details>
 
-## 🗺️ Roadmap
+## License
 
-- [x] **ETW / DPC latency tracing**, per-core DPC/ISR counters + full `wpr.exe` deep-trace recording (`latency.rs`)
-- [x] **Code-signed releases**, conditional Authenticode signing in the release workflow
-- [ ] Crash-dump parsing (currently only lists `Minidump` files)
-- [ ] GPU vendor APIs (NVML / ADL), today via `nvidia-smi` CLI + WMI
-- [ ] In-game overlay (transparent Tauri window fed by the metrics stream)
+AD HyperOptimize is **source-available under a non-commercial license**, which GitHub shows as license "other". Personal and other non-commercial use is allowed. Commercial use, redistribution in paid offerings, and enterprise deployment need a separate agreement; see [COMMERCIAL-LICENSING.md](COMMERCIAL-LICENSING.md) and [LICENSE-noncommercial](LICENSE-noncommercial).
 
-## 🤝 Community & support
+Security issues: please report them privately as described in [SECURITY.md](SECURITY.md).
 
-Questions, bug reports, tweak suggestions → [**Discord**](https://discord.gg/vFaKsVuxKP) or [open an issue](https://github.com/zCrxticxl/ad-hyperoptimize/issues).
+## Community & support
 
-If this saved your frametimes, a ⭐ keeps the project visible.
+Questions, bug reports, suggestions: [**Discord**](https://discord.gg/vFaKsVuxKP) or [open an issue](https://github.com/zCrxticxl/ad-hyperoptimize/issues).
 
 <div align="center">
-<sub>Built with 🦀 + ⚡ by <a href="https://github.com/zCrxticxl">Adrian (zCrxticxl)</a>, also check <a href="https://github.com/zCrxticxl/adhyper-linux">adhyper-linux</a> and <a href="https://github.com/zCrxticxl/adrice">adrice</a></sub>
+<sub>Built with 🦀 + ⚡ by <a href="https://github.com/zCrxticxl">Adrian (zCrxticxl)</a>. Also see <a href="https://github.com/zCrxticxl/adhyper-linux">adhyper-linux</a> and <a href="https://github.com/zCrxticxl/adrice">adrice</a>.</sub>
 </div>

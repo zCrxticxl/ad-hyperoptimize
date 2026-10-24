@@ -12,6 +12,8 @@ export const api = {
   startMonitor: () => invoke("cmd_start_monitor"),
   stopMonitor: () => invoke("cmd_stop_monitor"),
   listTweaks: () => invoke<any[]>("cmd_list_tweaks"),
+  brokerStatus: () => invoke<{ available: boolean; connected: boolean }>("cmd_broker_status"),
+  brokerUnlock: () => invoke<any>("cmd_broker_unlock"),
   applyTweak: (id: string) => invoke<any>("cmd_apply_tweak", { id }),
   revertTweak: (id: string) => invoke<any>("cmd_revert_tweak", { id }),
   history: () => invoke<any[]>("cmd_history"),
@@ -45,17 +47,15 @@ export const api = {
   msiSet: (regPath: string, enabled: boolean) => invoke<string>("cmd_msi_set", { regPath, enabled }),
   netAdapters: () => invoke<any>("cmd_net_adapters"),
   netTweak: (adapter: string, keyword: string, value: number) => invoke<string>("cmd_net_tweak", { adapter, keyword, value }),
-  netTweakAllGaming: () => invoke<string>("cmd_net_tweak_all_gaming"),
   netResetAll: () => invoke<string>("cmd_net_reset_all"),
   ramInfo: () => invoke<any>("cmd_ram_info"),
-  ramFlushStandby: () => invoke<string>("cmd_ram_flush_standby"),
   pagefileInfo: () => invoke<any>("cmd_pagefile_info"),
   pagefileSetAuto: () => invoke<string>("cmd_pagefile_set_auto"),
   pagefileSetCustom: (path: string, initMb: number, maxMb: number) => invoke<string>("cmd_pagefile_set_custom", { path, initMb, maxMb }),
   pagefileDisable: () => invoke<string>("cmd_pagefile_disable"),
+  perfOpenEntries: () => invoke<{ entries: { id: string; name: string; time: string }[] }>("cmd_perf_open_entries"),
+  perfUndo: (entryId: string) => invoke<any>("cmd_perf_undo", { entryId }),
   // hw monitor
-  hwTemps: () => invoke<any>("cmd_hw_temps"),
-  hwSmart: () => invoke<any>("cmd_hw_smart"),
   hwFull: () => invoke<any>("cmd_hw_full"),
   hwProfile: () => invoke<any>("cmd_hw_profile"),
   swCatalog: () => invoke<any>("cmd_sw_catalog"),
@@ -79,12 +79,10 @@ export const api = {
   // game booster
   gameboostBackgroundProcs: () => invoke<any>("cmd_gameboost_background_procs"),
   gameboostRunningGames: () => invoke<any>("cmd_gameboost_running_games"),
-  gameboostBoostProcess: (pid: number) => invoke<string>("cmd_gameboost_boost_process", { pid }),
   gameboostKillBackground: (pids: number[]) => invoke<string>("cmd_gameboost_kill_background", { pids }),
   gameboostStart: (pid: number) => invoke<string>("cmd_gameboost_start", { pid }),
   gameboostStop: () => invoke<string>("cmd_gameboost_stop"),
-  gameboostGetStatus: () => invoke<number | null>("cmd_gameboost_get_status"),
-  gameboostGpuPerf: (enable: boolean) => invoke<string>("cmd_gameboost_gpu_perf", { enable }),
+  gameboostGetStatus: () => invoke<{ pid: number | null; active: boolean }>("cmd_gameboost_get_status"),
   quickBoostStart: (processName: string) => invoke<any>("cmd_gameboost_quick_boost", { processName }),
   quickBoostRevert: (restoreToken: string) => invoke<any>("cmd_gameboost_quick_boost_revert", { restoreToken }),
   // hosts
@@ -100,6 +98,11 @@ export const api = {
   securityRemoveDriver:  (deviceId: string) => invoke<string>("cmd_security_remove_driver",  { deviceId }),
   runBenchmark: (kind: string) => invoke<any>("cmd_run_benchmark", { kind }),
   benchHistory: () => invoke<any[]>("cmd_bench_history"),
+  fpsImport: (csv: string, fileName: string, game: string, state: "before" | "after", note: string) =>
+    invoke<any>("cmd_fps_import", { csv, fileName, game, state, note }),
+  fpsRuns: () => invoke<any>("cmd_fps_runs"),
+  fpsDelete: (id: string) => invoke<any>("cmd_fps_delete", { id }),
+  fpsCompare: (game: string) => invoke<any>("cmd_fps_compare", { game }),
   profileList: () => invoke<any[]>("cmd_profile_list"),
   profileApply: (id: string, withBench: boolean) =>
     invoke<any>("cmd_profile_apply", { id, withBench }),
@@ -129,8 +132,7 @@ export const api = {
   gpuTweakApply: (id: string, driverKey: string) => invoke<any>("cmd_gpu_tweak_apply", { id, driverKey }),
   gpuTweakRevert: (id: string, driverKey: string) => invoke<any>("cmd_gpu_tweak_revert", { id, driverKey }),
   // nvidia control panel
-  nvGetSettings: () => invoke<any>("cmd_nv_get_settings"),
-  nvSetSetting: (setting: string, value: string) => invoke<any>("cmd_nv_set_setting", { setting, value }),
+  nvStatus: () => invoke<any>("cmd_nv_status"),
   nvOpenPanel: () => invoke<string>("cmd_nv_open_panel"),
   regcleanScan: () => invoke<any>("cmd_regclean_scan"),
   regcleanClean: (entries: any[]) => invoke<any>("cmd_regclean_clean", { entries }),
@@ -152,8 +154,11 @@ export const api = {
   diskTempAge: () => invoke<any>("cmd_disk_temp_age"),
   diskDelete: (paths: string[]) => invoke<any>("cmd_disk_delete", { paths }),
   diskMove: (paths: string[], destDir: string) => invoke<any>("cmd_disk_move", { paths, destDir }),
-  diskOrganizePreview: (folder: string, recurse: boolean) => invoke<any>("cmd_disk_organize_preview", { folder, recurse }),
-  diskOrganizeApply: (items: any[]) => invoke<any>("cmd_disk_organize_apply", { items }),
+  organizerFolders: () => invoke<any>("cmd_organizer_folders"),
+  organizerPreview: (folder: string, byMonth: boolean) => invoke<any>("cmd_organizer_preview", { folder, byMonth }),
+  organizerApply: (folder: string, byMonth: boolean, srcs: string[]) => invoke<any>("cmd_organizer_apply", { folder, byMonth, srcs }),
+  organizerRuns: () => invoke<any>("cmd_organizer_runs"),
+  organizerUndo: (runId: string) => invoke<any>("cmd_organizer_undo", { runId }),
   schedTasksList: () => invoke<any>("cmd_schedtasks_list"),
   schedTaskToggle: (path: string, name: string, enable: boolean) =>
     invoke<any>("cmd_schedtask_toggle", { path, name, enable }),
@@ -175,9 +180,10 @@ export const api = {
   deleteRestorePoint: (sequenceNumber: number) => invoke<string>("cmd_delete_restore_point", { sequenceNumber }),
   launchRstrui: () => invoke<string>("cmd_launch_rstrui"),
   // auto optimizer
-  autooptScan: () => invoke<any>("cmd_autoopt_scan"),
-  autooptScore: () => invoke<any>("cmd_autoopt_score"),
-  autooptApply: (items: any[]) => invoke<any>("cmd_autoopt_apply", { items }),
+  healthScan: () => invoke<any>("cmd_health_scan"),
+  optimizeApply: (ids: string[], restorePoint: boolean) => invoke<any>("cmd_optimize_apply", { ids, restorePoint }),
+  resetRetired: () => invoke<any>("cmd_reset_retired"),
+  openWindowsSettings: (page: string) => invoke<void>("cmd_open_windows_settings", { page }),
 };
 
 export type Metrics = {
@@ -198,16 +204,16 @@ export function onMetrics(cb: (m: Metrics) => void): Promise<UnlistenFn> {
   return listen<Metrics>("metrics", (e) => cb(e.payload));
 }
 
-export const fmtAge = (iso: string) => {
-  if (!iso) return "never";
-  const t = new Date(iso).getTime();
-  if (isNaN(t)) return "never";
+/** "5 minutes ago" in the UI language (Intl, so every locale is covered). */
+export const fmtAge = (iso: string, lang = "en") => {
+  const t = iso ? new Date(iso).getTime() : NaN;
+  if (isNaN(t)) return "–";
+  const rtf = new Intl.RelativeTimeFormat(lang, { numeric: "auto" });
   const mins = Math.floor((Date.now() - t) / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins} min ago`;
+  if (mins < 60) return rtf.format(-mins, "minute");
   const h = Math.floor(mins / 60);
-  if (h < 24) return `${h} h ago`;
-  return `${Math.floor(h / 24)} d ago`;
+  if (h < 24) return rtf.format(-h, "hour");
+  return rtf.format(-Math.floor(h / 24), "day");
 };
 
 export const fmtBytes = (b: number) => {

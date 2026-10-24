@@ -69,8 +69,11 @@ pub fn disk() -> Value {
     const SZ: usize = 256 * 1024 * 1024;
     const CHUNK: usize = 4 * 1024 * 1024;
     // Unique per process/run: concurrent benchmarks overwrote each other.
-    let path = std::env::temp_dir().join(format!("pcopt_bench_{}_{}.tmp",
-        std::process::id(), chrono::Local::now().format("%Y%m%d%H%M%S%6f")));
+    let path = std::env::temp_dir().join(format!(
+        "pcopt_bench_{}_{}.tmp",
+        std::process::id(),
+        chrono::Local::now().format("%Y%m%d%H%M%S%6f")
+    ));
     let data = vec![0x7Eu8; CHUNK];
 
     let write_mbs = (|| -> Result<f64, std::io::Error> {
@@ -136,9 +139,11 @@ pub fn run(kind: &str) -> Result<Value, String> {
         },
     };
     hist.push(result.clone());
-    if let Err(e) = fs::write(
-        history_path(),
-        serde_json::to_string_pretty(&hist).unwrap_or_default(),
+    if let Err(e) = crate::safety::write_user_file(
+        &history_path(),
+        serde_json::to_string_pretty(&hist)
+            .unwrap_or_default()
+            .as_bytes(),
     ) {
         result["historyError"] = json!(format!("result not saved to history: {e}"));
     }

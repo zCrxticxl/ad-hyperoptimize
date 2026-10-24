@@ -10,7 +10,11 @@ export default function CtxMenuCleaner({ admin }: { admin: boolean }) {
   const [log, setLog]       = useState("");
   const [bulkBusy, setBulkBusy] = useState(false);
 
-  const load = async () => setData(await api.ctxmenuList());
+  // A failed list must not leave the page on an endless spinner.
+  const load = async () => {
+    try { setData(await api.ctxmenuList()); }
+    catch (e: any) { setData({ entries: [] }); setLog(String(e)); }
+  };
   useEffect(() => { load(); }, []);
 
   const toggle = async (entry: any, enable: boolean) => {
@@ -87,6 +91,7 @@ export default function CtxMenuCleaner({ admin }: { admin: boolean }) {
                     </span>
                     <b style={{ fontSize: 13 }}>{e.name}</b>
                     {e.admin && <span className="muted" style={{ fontSize: 10 }}>[{t("ctxmenuAdminTag")}]</span>}
+                    {e.bulk && <span className="muted" style={{ fontSize: 10 }}>[{t("ctxmenuBulkTag")}]</span>}
                     {!e.present && <span className="muted" style={{ fontSize: 10 }}>[{t("ctxmenuNotInstalledTag")}]</span>}
                   </div>
                   <div className="muted" style={{ fontSize: 12 }}>{e.desc}</div>

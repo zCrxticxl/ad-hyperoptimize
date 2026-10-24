@@ -1,7 +1,7 @@
 //! GPU-specific tweak catalog.
 //! Detects primary discrete GPU (NVIDIA / AMD), maps it to the Windows
 //! display-adapter class key, then reads/writes driver-level registry values.
-//! All apply/revert pairs are hardcoded so no journal is needed.
+//! Previous registry and service state is journaled for exact rollback.
 
 use serde_json::{json, Value};
 
@@ -11,9 +11,8 @@ use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ};
 use winreg::RegKey;
 
 #[cfg(windows)]
-use crate::safety::{self, ChangeItem, JournalEntry, RegVal};
-#[cfg(windows)]
-use crate::tweaks;
+use crate::safety::{ChangeItem, JournalEntry, RegVal};
+use crate::{safety, tweaks};
 
 const GPU_CLASS: &str =
     "SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e968-e325-11ce-bfc1-08002be10318}";
@@ -115,10 +114,17 @@ Get-ChildItem $base -ErrorAction SilentlyContinue | ForEach-Object {
         $all += [PSCustomObject]@{ Index=$_.PSChildName; Name=$p.DriverDesc.Trim() }
     }
 }
-$gpu = $all | Where-Object { $_.Name -match 'NVIDIA|GeForce|Quadro' } | Select-Object -First 1
-if (-not $gpu) { $gpu = $all | Where-Object { $_.Name -match 'AMD|Radeon' } | Select-Object -First 1 }
-if (-not $gpu) { $gpu = $all | Where-Object { $_.Name -match 'Intel.*Arc' } | Select-Object -First 1 }
-if (-not $gpu) { $gpu = $all | Where-Object { $_.Name -notmatch 'Microsoft|Basic Display|Remote Desktop' } | Select-Object -First 1 }
+$gpu = $null
+$ambiguous = $false
+foreach ($pattern in @('NVIDIA|GeForce|Quadro', 'AMD|Radeon', 'Intel.*Arc')) {
+    $matches = @($all | Where-Object { $_.Name -match $pattern })
+    if ($matches.Count -gt 1) { $ambiguous = $true; break }
+    if ($matches.Count -eq 1) { $gpu = $matches[0]; break }
+}
+if (-not $gpu -and -not $ambiguous) {
+    $matches = @($all | Where-Object { $_.Name -notmatch 'Microsoft|Basic Display|Remote Desktop' })
+    if ($matches.Count -eq 1) { $gpu = $matches[0] }
+}
 if ($gpu) { $gpu | ConvertTo-Json -Compress } else { '{"Index":"","Name":"Unknown"}' }
 "#;
 
@@ -192,8 +198,8 @@ fn catalog() -> Vec<GpuTweak> {
             name: "Maximum Performance (Disable PowerMizer)",
             category: "Clock & Power",
             vendor: "nvidia",
-            description: "Disables PowerMizer, NVIDIA otherwise aggressively lowers GPU clocks at idle and under load.",
-            impact: "GPU stays at maximum clocks permanently; power saving fully disabled. Not recommended for laptops on battery.",
+            description: "LEGACY, no effect: writes the old PowerMizer registry values. Current NVIDIA drivers do not read them; power management lives in the driver profile (NVIDIA Control Panel > Power management mode).",
+            impact: "No effect on current drivers. Hidden for new applies; shown only so an earlier apply can be undone. Use the NVIDIA Control Panel instead.",
             risk: "Low",
             reboot: false,
             actions: vec![
@@ -208,7 +214,7 @@ fn catalog() -> Vec<GpuTweak> {
             category: "Clock & Power",
             vendor: "nvidia",
             description: "Stops dynamic switching between GPU performance states (P0-P8).",
-            impact: "Smoother frametimes, eliminates clock dips from mid-frame P-state transitions. Slightly higher idle power draw.",
+            impact: "May smooth frametimes by avoiding clock dips from P-state transitions; not measured by this app. Higher idle power draw.",
             risk: "Medium",
             reboot: true,
             actions: vec![
@@ -232,12 +238,12 @@ fn catalog() -> Vec<GpuTweak> {
         },
         GpuTweak {
             id: "nv_telemetry_svc_off",
-            name: "Disable NVIDIA Telemetry Container Service",
+            name: "Set NVIDIA LocalSystem Container to Manual",
             category: "Privacy",
             vendor: "nvidia",
-            description: "Sets NvContainerLocalSystem to Manual, prevents the NVIDIA telemetry container from auto-starting.",
-            impact: "No NVIDIA telemetry process on boot. GeForce Experience and drivers continue to work normally.",
-            risk: "Low",
+            description: "Sets NvContainerLocalSystem (the NVIDIA App / GeForce Experience LocalSystem container, not a dedicated telemetry service) to Manual so it does not auto-start.",
+            impact: "Breaks the NVIDIA App / GeForce Experience overlay, Instant Replay / ShadowPlay recording, and in-app driver updates until set back to Automatic. Display driver and games keep working. No measurable FPS change.",
+            risk: "Medium",
             reboot: false,
             actions: vec![
                 TweakAction::Svc { name: "NvContainerLocalSystem", apply: "Manual", revert: "Automatic" },
@@ -248,8 +254,8 @@ fn catalog() -> Vec<GpuTweak> {
             name: "Enable NVIDIA Threaded Optimization",
             category: "Rendering",
             vendor: "nvidia",
-            description: "Forces ThreadedOptimization globally, allows the NVIDIA driver to use multi-threading for OpenGL/D3D calls.",
-            impact: "Higher CPU-GPU throughput in many titles. Explicitly setting this prevents per-app overrides.",
+            description: "LEGACY, no effect: writes an old NVTweak registry value. Current NVIDIA drivers read Threaded Optimization only from the driver profile (NVIDIA Control Panel > Manage 3D settings).",
+            impact: "No effect on current drivers. Hidden for new applies; shown only so an earlier apply can be undone.",
             risk: "Low",
             reboot: false,
             actions: vec![
@@ -269,10 +275,10 @@ fn catalog() -> Vec<GpuTweak> {
             name: "Disable ULPS (Ultra Low Power State)",
             category: "Clock & Power",
             vendor: "amd",
-            description: "Disables Ultra Low Power State, AMD GPUs otherwise enter a deep sleep that requires a wake-up cycle.",
-            impact: "Eliminates the most common AMD micro-stutters on the first frame after idle. No measurable power increase during gaming.",
-            risk: "Low",
-            reboot: false,
+            description: "Disables Ultra Low Power State, which lets idle secondary GPUs (CrossFire / hybrid laptops) power down. REBOOT REQUIRED.",
+            impact: "Can fix wake-up stutter or black screens on multi-GPU / hybrid systems. Higher idle power draw and heat (the GPU no longer powers fully down), noticeable on laptops. Little to no effect on single-GPU desktops.",
+            risk: "Medium",
+            reboot: true,
             actions: vec![
                 TweakAction::DriverReg { name: "EnableUlps",   apply: 0, revert: 1 },
                 TweakAction::DriverReg { name: "EnableUlpsNV", apply: 0, revert: 1 },
@@ -284,7 +290,7 @@ fn catalog() -> Vec<GpuTweak> {
             category: "Clock & Power",
             vendor: "amd",
             description: "Prevents the shader clock from entering deep sleep during short inter-frame gaps.",
-            impact: "More consistent shader performance; fewer latency spikes between frames.",
+            impact: "May keep shader performance more consistent between frames; not measured by this app. Higher idle power draw.",
             risk: "Low",
             reboot: false,
             actions: vec![
@@ -296,9 +302,9 @@ fn catalog() -> Vec<GpuTweak> {
             name: "Disable Compute Preemption",
             category: "Rendering",
             vendor: "amd",
-            description: "Disables preemptive interruption of compute workloads, reduces driver overhead.",
-            impact: "Lower driver latency for compute tasks; less frametime variance in DX12/Vulkan titles.",
-            risk: "Medium",
+            description: "EXPERT ONLY: disables compute preemption in the AMD kernel driver. Long-running compute work can then no longer be interrupted by Windows' GPU scheduler.",
+            impact: "No documented gaming benefit. A long compute dispatch can exceed the Windows TDR timeout, causing driver resets, black screens or full system hangs. Apply only for a specific, verified problem; undo immediately if anything misbehaves.",
+            risk: "High",
             reboot: true,
             actions: vec![
                 TweakAction::DriverReg { name: "KMD_EnableComputePreemption", apply: 0, revert: 1 },
@@ -310,7 +316,7 @@ fn catalog() -> Vec<GpuTweak> {
             category: "Clock & Power",
             vendor: "amd",
             description: "Keeps the GPU DMA engine permanently active instead of gating it during inactivity.",
-            impact: "Reduces latency on GPU driver DMA transfers; noticeable with fast texture uploads and asset streaming.",
+            impact: "May reduce latency of GPU DMA transfers during asset streaming; not measured by this app. Higher idle power draw.",
             risk: "Low",
             reboot: false,
             actions: vec![
@@ -323,7 +329,7 @@ fn catalog() -> Vec<GpuTweak> {
             category: "Rendering",
             vendor: "amd",
             description: "Enables AMD Texture Cache Prefetching for RX GPUs.",
-            impact: "Higher texture throughput in open-world games with heavy asset streaming.",
+            impact: "May raise texture throughput in games with heavy asset streaming; not measured by this app.",
             risk: "Low",
             reboot: false,
             actions: vec![
@@ -337,8 +343,8 @@ fn catalog() -> Vec<GpuTweak> {
             name:        "Max Pre-Rendered Frames = 1",
             category:    "Low Latency",
             vendor:      "nvidia",
-            description: "Limits NVIDIA frame queue to 1 pre-rendered frame (default: 3). Reduces buffering between CPU and GPU, less input lag, especially at high FPS.",
-            impact:      "3-10 ms lower input lag. May cause minor stutter if CPU is the bottleneck.",
+            description: "LEGACY, no effect: writes the old Prerenderlimit NVTweak value. Current NVIDIA drivers take Max Pre-Rendered Frames / Low Latency Mode only from the driver profile (NVIDIA Control Panel).",
+            impact:      "No effect on current drivers. Hidden for new applies; shown only so an earlier apply can be undone. Use Low Latency Mode in the NVIDIA Control Panel or Reflex in-game.",
             risk:        "Low",
             reboot:      false,
             actions: vec![
@@ -356,8 +362,8 @@ fn catalog() -> Vec<GpuTweak> {
             name:        "NVIDIA Low Latency Ultra Mode",
             category:    "Low Latency",
             vendor:      "nvidia",
-            description: "Sets NVIDIA frame submission to Ultra Low Latency (RTHM_MODE=2). GPU renders frames just-in-time, minimises the CPU→GPU pipeline delay.",
-            impact:      "Lowest possible input lag in GPU-bound games. Best effect at 60-144 Hz with VSYNC off.",
+            description: "LEGACY, no effect: writes NVPCFLatencyPolicy / RTHM_MODE registry values that current NVIDIA drivers do not read. Ultra Low Latency is a driver-profile setting (NVIDIA Control Panel > Low Latency Mode).",
+            impact:      "No effect on current drivers. Hidden for new applies; shown only so an earlier apply can be undone.",
             risk:        "Low",
             reboot:      false,
             actions: vec![
@@ -379,7 +385,7 @@ fn catalog() -> Vec<GpuTweak> {
             category:    "Rendering",
             vendor:      "any",
             description: "Removes the default 10 GB cap on the DirectX shader cache. Larger cache = fewer in-game shader compilation stalls (the \"stutters\" on first visit to an area).",
-            impact:      "Eliminates shader compilation stutter in DX11/DX12 games after first run. Uses more disk space.",
+            impact:      "Can reduce shader-compilation stutter once the default cache would be full; no effect while it is not. Uses more disk space.",
             risk:        "Low",
             reboot:      false,
             actions: vec![
@@ -517,11 +523,34 @@ fn apply_action(_action: &TweakAction, _driver_key: &str, _applying: bool) -> Re
 
 // ── Public API ──────────────────────────────────────────────────────────────
 
+/// No verified effect or no safe restore path: never listed, never applied.
+fn is_blocked(id: &str) -> bool {
+    matches!(id, "amd_rx_tex_cache" | "dx_shader_cache_unlimited")
+}
+
+/// Registry values current NVIDIA drivers no longer read (these settings live
+/// in the driver's DRS profile). New applies are refused; an earlier,
+/// journaled apply stays listed so it can still be undone.
+fn is_legacy_noop(id: &str) -> bool {
+    matches!(
+        id,
+        "nv_threaded_opt" | "nv_prerender_limit_1" | "nv_low_latency_ultra" | "nv_power_max_perf"
+    )
+}
+
 pub fn scan() -> serde_json::Value {
     let (vendor, gpu_name, driver_key) = detect_gpu();
     let tweaks_data = catalog();
+    let journal = safety::load_journal().unwrap_or_default();
     let tweaks: Vec<serde_json::Value> = tweaks_data
         .iter()
+        .filter(|tw| !is_blocked(tw.id))
+        .filter(|tw| {
+            !is_legacy_noop(tw.id)
+                || journal.iter().any(|entry| {
+                    entry.tweak_id == format!("gpu:{}", tw.id) && entry.completed && !entry.reverted
+                })
+        })
         .map(|tw| {
             let vendor_str = format!("{:?}", vendor).to_lowercase();
             let applicable = tw.vendor == "any" || tw.vendor == vendor_str;
@@ -535,6 +564,9 @@ pub fn scan() -> serde_json::Value {
             } else {
                 "unknown"
             };
+            let can_revert = journal.iter().any(|entry| {
+                entry.tweak_id == format!("gpu:{}", tw.id) && entry.completed && !entry.reverted
+            });
             serde_json::json!({
                 "id":              tw.id,
                 "name":            tw.name,
@@ -547,6 +579,8 @@ pub fn scan() -> serde_json::Value {
                 "status":          status,
                 "applicable":      applicable,
                 "driverKeyMissing": driver_key_missing,
+                "canRevert": can_revert,
+                "deprecated": is_legacy_noop(tw.id),
             })
         })
         .collect();
@@ -560,30 +594,143 @@ pub fn scan() -> serde_json::Value {
 }
 
 pub fn do_tweak(id: String, driver_key: String, applying: bool) -> Result<String, String> {
+    if is_blocked(&id) {
+        return Err("GPU tweak has no verified effect or safe restore path".into());
+    }
+    if applying && is_legacy_noop(&id) {
+        return Err(
+            "Current NVIDIA drivers ignore this registry value (the setting lives in the driver \
+             profile); use the NVIDIA Control Panel instead"
+                .into(),
+        );
+    }
     let tweaks = catalog();
-    for tw in &tweaks {
-        if tw.id == id {
-            // driver_key arrives from the renderer; it must stay inside the
-            // display-adapter class key or arbitrary HKLM keys could be
-            // created by reg_write_dword.
-            let needs_driver_key = tw
-                .actions
-                .iter()
-                .any(|a| matches!(a, TweakAction::DriverReg { .. }));
-            if needs_driver_key && !is_valid_driver_key(&driver_key) {
-                return Err("Invalid GPU driver registry key".into());
+    let tw = tweaks
+        .iter()
+        .find(|tw| tw.id == id)
+        .ok_or_else(|| format!("Unknown GPU tweak: {id}"))?;
+    let (vendor, _, actual_driver_key) = detect_gpu();
+    if tw.vendor != "any" && tw.vendor != vendor.as_str() {
+        return Err("GPU tweak does not match the detected graphics adapter".into());
+    }
+    let needs_driver_key = tw
+        .actions
+        .iter()
+        .any(|a| matches!(a, TweakAction::DriverReg { .. }));
+    if needs_driver_key && (!is_valid_driver_key(&driver_key) || driver_key != actual_driver_key) {
+        return Err("GPU driver registry key does not match the detected adapter".into());
+    }
+    let tweak_id = format!("gpu:{id}");
+    if !applying {
+        let entry = safety::load_journal()?
+            .into_iter()
+            .rev()
+            .find(|entry| entry.tweak_id == tweak_id && entry.completed && !entry.reverted)
+            .ok_or("No saved GPU state to restore")?;
+        tweaks::revert_entry(&entry.id)?;
+        return Ok(format!("Restored previous state for {}", tw.name));
+    }
+    #[cfg(windows)]
+    {
+        let _engine = tweaks::engine_guard()?;
+        // Re-applying while an earlier apply is still open would capture the
+        // tweak's own values as "previous"; keep the original capture.
+        if let Some(open) = tweaks::open_entry_id(&safety::load_journal()?, &tweak_id) {
+            if matches!(detect_status(tw, &actual_driver_key), "applied" | "partial") {
+                return Ok(format!(
+                    "{} is already applied (restore token: {open})",
+                    tw.name
+                ));
             }
-            for action in &tw.actions {
-                apply_action(action, &driver_key, applying)?;
-            }
-            return Ok(format!(
-                "{} {}",
-                if applying { "Applied" } else { "Reverted" },
+            // E.g. a driver reinstall reset the values: claiming success would
+            // be false, and re-capturing would lose the original values.
+            return Err(format!(
+                "{} was applied earlier but is no longer in effect (e.g. after a driver \
+                 reinstall). Undo the earlier change first, then apply again.",
                 tw.name
             ));
         }
+        let mut items = Vec::new();
+        for action in &tw.actions {
+            match action {
+                TweakAction::DriverReg { name, apply, .. } => items.push(ChangeItem::Registry {
+                    root: "HKLM".into(),
+                    path: actual_driver_key.clone(),
+                    name: (*name).into(),
+                    prev: tweaks::reg_read("HKLM", &actual_driver_key, name)?,
+                    new: RegVal::Dword(*apply),
+                }),
+                TweakAction::FixedReg {
+                    root,
+                    path,
+                    name,
+                    apply,
+                    ..
+                } => items.push(ChangeItem::Registry {
+                    root: (*root).into(),
+                    path: (*path).into(),
+                    name: (*name).into(),
+                    prev: tweaks::reg_read(root, path, name)?,
+                    new: RegVal::Dword(*apply),
+                }),
+                TweakAction::Svc { name, apply, .. } => {
+                    let prev = svc_start_type(name);
+                    if prev.is_empty() {
+                        return Err(format!("Service {name} was not found"));
+                    }
+                    items.push(ChangeItem::ServiceStartup {
+                        service: (*name).into(),
+                        prev,
+                        new: (*apply).into(),
+                    });
+                }
+                TweakAction::Ps { .. } => return Err("GPU command has no safe restore path".into()),
+            }
+        }
+        let entry_id = safety::append_entry(JournalEntry {
+            id: format!("gpu-{id}-{}", chrono::Local::now().format("%Y%m%d%H%M%S")),
+            tweak_id,
+            tweak_name: tw.name.into(),
+            origin: None,
+            time: chrono::Local::now().to_rfc3339(),
+            items: items.clone(),
+            reverted: false,
+            backup_files: vec![],
+            completed: false,
+            attempted: 0,
+            reverted_items: 0,
+            untrusted: false,
+        })?;
+        for idx in 0..items.len() {
+            safety::with_journal(|journal| {
+                let entry = journal
+                    .iter_mut()
+                    .find(|entry| entry.id == entry_id)
+                    .ok_or("journal entry missing")?;
+                entry.attempted = idx + 1;
+                Ok(())
+            })?;
+            if let Err(e) = apply_action(&tw.actions[idx], &actual_driver_key, true) {
+                return match tweaks::rollback_entry_items(&entry_id, &items[..=idx]) {
+                    Ok(()) => Err(format!("GPU tweak failed ({e}); previous state restored")),
+                    Err(re) => Err(format!("GPU tweak failed ({e}); rollback incomplete ({re}); restore token: {entry_id}")),
+                };
+            }
+        }
+        safety::with_journal(|journal| {
+            let entry = journal
+                .iter_mut()
+                .find(|entry| entry.id == entry_id)
+                .ok_or("journal entry missing")?;
+            entry.completed = true;
+            Ok(())
+        })?;
+        Ok(format!("Applied {} (restore token: {entry_id})", tw.name))
     }
-    Err(format!("Unknown GPU tweak: {id}"))
+    #[cfg(not(windows))]
+    {
+        Err("Windows only".into())
+    }
 }
 
 /// The driver class key is HKLM\SYSTEM\CurrentControlSet\Control\Class\
@@ -602,15 +749,147 @@ fn is_valid_driver_key(key: &str) -> bool {
     key.split('\\').all(|c| !matches!(c, "" | "." | ".."))
 }
 
+/// True when GPU tweak `id` writes this registry value (migration check).
+pub(crate) fn declares_registry(id: &str, root: &str, path: &str, name: &str) -> bool {
+    let eq = |a: &str, b: &str| a.eq_ignore_ascii_case(b);
+    catalog()
+        .iter()
+        .filter(|tw| tw.id == id)
+        .flat_map(|tw| tw.actions.iter())
+        .any(|a| match a {
+            TweakAction::DriverReg { name: n, .. } => {
+                eq(root, "HKLM") && is_valid_driver_key(path) && eq(name, n)
+            }
+            TweakAction::FixedReg {
+                root: r,
+                path: p,
+                name: n,
+                ..
+            } => eq(root, r) && eq(path, p) && eq(name, n),
+            _ => false,
+        })
+}
+
+/// True when GPU tweak `id` changes this service's startup type.
+pub(crate) fn declares_service(id: &str, service: &str) -> bool {
+    catalog()
+        .iter()
+        .filter(|tw| tw.id == id)
+        .flat_map(|tw| tw.actions.iter())
+        .any(|a| matches!(a, TweakAction::Svc { name, .. } if name.eq_ignore_ascii_case(service)))
+}
+
+/// True for the values the NVIDIA Control Panel page writes.
+pub(crate) fn nv_panel_declares(root: &str, path: &str, name: &str) -> bool {
+    root.eq_ignore_ascii_case("HKCU")
+        && path.eq_ignore_ascii_case(NV_TWEAK_HKCU)
+        && ["Prerenderlimit", "NVPCFLatencyPolicy", "Enabled"]
+            .iter()
+            .any(|n| n.eq_ignore_ascii_case(name))
+}
+
+// ── NVIDIA Control Panel ───────────────────────────────────────────────────
+// Earlier versions wrote PowerMizer*, Prerenderlimit, NVPCFLatencyPolicy /
+// RTHM_MODE and NVTweak\Enabled from a "Global 3D settings" page. Current
+// drivers read these settings only from their own profile database (DRS),
+// so those writes changed nothing (the GPU catalog marks the same values as
+// legacy no-ops). New writes are no longer offered; entries applied earlier
+// stay listed here so they can still be undone through the journal.
+
+const NV_TWEAK_HKCU: &str = "Software\\NVIDIA Corporation\\Global\\NVTweak";
+
+/// NVIDIA GPU present, plus the still-open entries of the retired page.
+pub fn nv_status() -> Value {
+    let (vendor, name, _) = detect_gpu();
+    let open: Vec<Value> = safety::load_journal()
+        .unwrap_or_default()
+        .iter()
+        .filter(|e| e.tweak_id.starts_with("nvCtrlPanel:") && e.completed && !e.reverted)
+        .map(|e| json!({ "id": e.id, "name": e.tweak_name, "time": e.time }))
+        .collect();
+    json!({
+        "supported": vendor == Vendor::Nvidia,
+        "name": name,
+        "openEntries": open,
+    })
+}
+
+/// Launch NVIDIA's own Control Panel app, for the settings (anisotropic
+/// filtering, antialiasing, vertical sync, digital vibrance, per-app
+/// profiles, …) that live only in NVIDIA's proprietary DRS database.
+pub fn nv_open_panel() -> Result<String, String> {
+    // Through explorer.exe, like cmd_open_path: the running shell starts the
+    // panel with the user's token, not this process's admin token. The
+    // classic panel's folder comes from HKLM, not from %ProgramFiles%.
+    #[cfg(windows)]
+    {
+        let classic = winreg::RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE)
+            .open_subkey(r"SOFTWARE\Microsoft\Windows\CurrentVersion")
+            .and_then(|k| k.get_value::<String, _>("ProgramFilesDir"))
+            .ok()
+            .filter(|p| !p.contains('%'))
+            .map(|p| {
+                std::path::Path::new(&p)
+                    .join(r"NVIDIA Corporation\Control Panel Client\nvcplui.exe")
+            })
+            .filter(|p| p.is_file());
+        let target = match classic {
+            Some(exe) => exe.to_string_lossy().into_owned(),
+            None => {
+                r"shell:AppsFolder\NVIDIACorp.NVIDIAControlPanel_56jybvy8c3kt8!NVIDIAControlPanel"
+                    .to_string()
+            }
+        };
+        std::process::Command::new(
+            std::path::Path::new(&crate::ps::windows_dir()).join("explorer.exe"),
+        )
+        .arg(&target)
+        .spawn()
+        .map(|_| "opened".to_string())
+        .map_err(|e| format!("explorer: {e}"))
+    }
+    #[cfg(not(windows))]
+    Err("Windows only".into())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{is_valid_driver_key, GPU_CLASS};
+    use super::{catalog, is_blocked, is_legacy_noop, is_valid_driver_key, GPU_CLASS};
+
+    #[test]
+    fn legacy_nvidia_registry_tweaks_are_flagged_but_kept_for_undo() {
+        for id in [
+            "nv_threaded_opt",
+            "nv_prerender_limit_1",
+            "nv_low_latency_ultra",
+            "nv_power_max_perf",
+        ] {
+            assert!(is_legacy_noop(id), "{id}");
+            assert!(!is_blocked(id), "{id} must keep its revert path");
+            assert!(catalog().iter().any(|t| t.id == id), "{id} missing");
+        }
+        assert!(!is_legacy_noop("nv_dynamic_pstate_off"));
+        assert!(is_blocked("amd_rx_tex_cache"));
+    }
+
+    #[test]
+    fn risky_amd_tweaks_are_labelled_honestly() {
+        let cat = catalog();
+        let ulps = cat.iter().find(|t| t.id == "amd_ulps_off").unwrap();
+        assert!(ulps.reboot);
+        assert!(!ulps.impact.contains("No measurable power increase"));
+        let pre = cat
+            .iter()
+            .find(|t| t.id == "amd_compute_preemption_off")
+            .unwrap();
+        assert_eq!(pre.risk, "High");
+    }
 
     #[test]
     fn driver_key_validation() {
         assert!(is_valid_driver_key(&format!("{GPU_CLASS}\\0000")));
         assert!(is_valid_driver_key(&format!("{GPU_CLASS}\\0001\\Extra")));
-        assert!(!is_valid_driver_key(&format!("{GPU_CLASS}")));
+        assert!(!is_valid_driver_key(GPU_CLASS));
         assert!(!is_valid_driver_key(&format!("{GPU_CLASS}\\")));
         assert!(!is_valid_driver_key("SYSTEM\\CurrentControlSet\\Control\\Class\\{00000000-0000-0000-0000-000000000000}\\0000"));
         assert!(!is_valid_driver_key(&format!(
@@ -621,191 +900,4 @@ mod tests {
         )));
         assert!(!is_valid_driver_key(""));
     }
-}
-
-// ── NVIDIA Control Panel, editable global 3D settings ──────────────────────
-// Mirrors a subset of "Manage 3D Settings → Global Settings" from NVIDIA's
-// own Control Panel: the handful of options that are genuinely backed by a
-// plain registry DWORD. NVIDIA stores most other global settings (texture
-// filtering quality, antialiasing, vertical sync, digital vibrance, per-app
-// profiles, …) only in its own undocumented driver settings database (DRS),
-// which has no public Windows registry or API surface, those are left to
-// `nv_open_panel()`, which launches NVIDIA's real app instead of faking a
-// control that wouldn't actually do anything.
-//
-// Every change here is captured as a `ChangeItem::Registry` (prev value read
-// live, before writing) and written to the same write-ahead journal as every
-// other tweak in this app, so it shows up in Reports.tsx and is undone with
-// `tweaks::revert_entry`, identical plumbing to Quick Boost.
-
-#[cfg(windows)]
-const NV_TWEAK_HKCU: &str = "Software\\NVIDIA Corporation\\Global\\NVTweak";
-
-#[cfg(windows)]
-pub fn nv_get_settings() -> Value {
-    let (vendor, name, driver_key) = detect_gpu();
-    if vendor != Vendor::Nvidia {
-        return json!({ "supported": false, "name": name });
-    }
-
-    let power_mode = if reg_read_dword("HKLM", &driver_key, "PowerMizerEnable") == Some(0) {
-        "preferMaxPerformance"
-    } else {
-        "adaptive"
-    };
-
-    let max_prerendered = reg_read_dword("HKCU", NV_TWEAK_HKCU, "Prerenderlimit")
-        .unwrap_or(3)
-        .to_string();
-
-    let low_latency = match reg_read_dword("HKCU", NV_TWEAK_HKCU, "NVPCFLatencyPolicy") {
-        Some(2) => "ultra",
-        Some(1) => "on",
-        _ => "off",
-    };
-
-    let threaded_opt = match reg_read_dword("HKCU", NV_TWEAK_HKCU, "Enabled") {
-        Some(0xFF) => "on",
-        _ => "off",
-    };
-
-    json!({
-        "supported": true,
-        "name": name,
-        "driverKeyMissing": driver_key.is_empty(),
-        "powerManagementMode": power_mode,
-        "maxPreRenderedFrames": max_prerendered,
-        "lowLatencyMode": low_latency,
-        "threadedOptimization": threaded_opt,
-    })
-}
-
-#[cfg(not(windows))]
-pub fn nv_get_settings() -> Value {
-    json!({ "supported": false })
-}
-
-#[cfg(windows)]
-pub fn nv_set_setting(setting: String, value: String) -> Result<Value, String> {
-    let (vendor, _name, driver_key) = detect_gpu();
-    if vendor != Vendor::Nvidia {
-        return Err("No NVIDIA GPU detected".into());
-    }
-
-    // (root, path, name, new dword value)
-    let targets: Vec<(&'static str, String, &'static str, u32)> = match setting.as_str() {
-        "powerManagementMode" => {
-            if driver_key.is_empty() {
-                return Err("NVIDIA driver registry key not found".into());
-            }
-            match value.as_str() {
-                "adaptive" => vec![
-                    ("HKLM", driver_key.clone(), "PowerMizerEnable", 1),
-                    ("HKLM", driver_key.clone(), "PowerMizerLevel", 2),
-                    ("HKLM", driver_key.clone(), "PowerMizerLevelAC", 2),
-                ],
-                "preferMaxPerformance" => vec![
-                    ("HKLM", driver_key.clone(), "PowerMizerEnable", 0),
-                    ("HKLM", driver_key.clone(), "PowerMizerLevel", 1),
-                    ("HKLM", driver_key.clone(), "PowerMizerLevelAC", 1),
-                ],
-                _ => return Err(format!("unknown value '{value}' for powerManagementMode")),
-            }
-        }
-        "maxPreRenderedFrames" => {
-            let n: u32 = value
-                .parse()
-                .map_err(|_| format!("invalid value '{value}'"))?;
-            if !(1..=4).contains(&n) {
-                return Err("value must be 1-4".into());
-            }
-            vec![("HKCU", NV_TWEAK_HKCU.to_string(), "Prerenderlimit", n)]
-        }
-        "lowLatencyMode" => {
-            if driver_key.is_empty() {
-                return Err("NVIDIA driver registry key not found".into());
-            }
-            let n: u32 = match value.as_str() {
-                "off" => 0,
-                "on" => 1,
-                "ultra" => 2,
-                _ => return Err(format!("unknown value '{value}' for lowLatencyMode")),
-            };
-            vec![
-                ("HKCU", NV_TWEAK_HKCU.to_string(), "NVPCFLatencyPolicy", n),
-                ("HKLM", driver_key.clone(), "RTHM_MODE", n),
-            ]
-        }
-        "threadedOptimization" => {
-            let n: u32 = match value.as_str() {
-                "off" => 0,
-                "on" => 0xFF,
-                _ => return Err(format!("unknown value '{value}' for threadedOptimization")),
-            };
-            vec![("HKCU", NV_TWEAK_HKCU.to_string(), "Enabled", n)]
-        }
-        _ => return Err(format!("unknown setting '{setting}'")),
-    };
-
-    let items: Vec<ChangeItem> = targets
-        .iter()
-        .map(|(root, path, name, new)| ChangeItem::Registry {
-            root: root.to_string(),
-            path: path.clone(),
-            name: name.to_string(),
-            prev: reg_read_dword(root, path, name).map(RegVal::Dword),
-            new: RegVal::Dword(*new),
-        })
-        .collect();
-
-    let entry_id = format!(
-        "nvCtrlPanel-{setting}-{}",
-        chrono::Local::now().format("%Y%m%d%H%M%S")
-    );
-    let entry_id = safety::append_entry(JournalEntry {
-        id: entry_id,
-        tweak_id: format!("nvCtrlPanel:{setting}"),
-        tweak_name: format!("NVIDIA Control Panel, {setting} = {value}"),
-        time: chrono::Local::now().to_rfc3339(),
-        items: items.clone(),
-        reverted: false,
-        backup_files: vec![],
-        completed: true,
-        attempted: usize::MAX,
-        reverted_items: 0,
-    })?;
-
-    for (idx, item) in items.iter().enumerate() {
-        if let Err(e) = tweaks::apply_item(item) {
-            for d in items[..=idx].iter().rev() {
-                let _ = tweaks::revert_item(d);
-            }
-            return Err(format!("failed to apply ({e}); changes rolled back"));
-        }
-    }
-
-    Ok(json!({ "restoreToken": entry_id, "setting": setting, "value": value }))
-}
-
-#[cfg(not(windows))]
-pub fn nv_set_setting(_setting: String, _value: String) -> Result<Value, String> {
-    Err("Windows only".into())
-}
-
-/// Launch NVIDIA's own Control Panel app, for the settings (anisotropic
-/// filtering, antialiasing, vertical sync, digital vibrance, per-app
-/// profiles, …) that live only in NVIDIA's proprietary DRS database.
-pub fn nv_open_panel() -> Result<String, String> {
-    crate::ps::run(
-        r#"
-$exe = Get-ChildItem 'C:\Program Files\NVIDIA Corporation\Control Panel Client\nvcplui.exe' -ErrorAction SilentlyContinue
-if ($exe) {
-    Start-Process $exe.FullName
-} else {
-    Start-Process 'shell:AppsFolder\NVIDIACorp.NVIDIAControlPanel_56jybvy8c3kt8!NVIDIAControlPanel' -ErrorAction SilentlyContinue
-}
-'opened'
-"#,
-    )
-    .map(|_| "Opened NVIDIA Control Panel".to_string())
 }

@@ -24,7 +24,75 @@ const CMD_TIMEOUT_LONG: Duration = Duration::from_secs(20 * 60);
 #[cfg_attr(not(windows), allow(unused_variables))]
 fn configure(cmd: &mut Command) {
     #[cfg(windows)]
-    cmd.creation_flags(CREATE_NO_WINDOW);
+    {
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        // The elevated process inherits the environment of whoever started
+        // it. Children get a fixed one for every variable that decides which
+        // program or module runs (PATH, PSModulePath, SystemRoot, ...), so a
+        // tampered environment cannot make an admin child load foreign code.
+        cmd.envs(trusted_env(&windows_dir()));
+    }
+}
+
+/// Windows directory from the API, never from `%SystemRoot%`/`%windir%`.
+#[cfg(windows)]
+pub fn windows_dir() -> String {
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetWindowsDirectoryW(buf: *mut u16, size: u32) -> u32;
+    }
+    static DIR: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| {
+        let mut buf = [0u16; 260];
+        // SAFETY: the buffer length is passed; the return value is the number
+        // of characters written (0 on failure, > len if too small).
+        let n = unsafe { GetWindowsDirectoryW(buf.as_mut_ptr(), buf.len() as u32) } as usize;
+        if n == 0 || n >= buf.len() {
+            r"C:\Windows".to_string()
+        } else {
+            String::from_utf16_lossy(&buf[..n])
+        }
+    })
+    .clone()
+}
+
+#[cfg(not(windows))]
+pub fn windows_dir() -> String {
+    r"C:\Windows".to_string()
+}
+
+/// `<windows>\System32` (64-bit process: the native system directory).
+pub fn system_dir() -> String {
+    format!(r"{}\System32", windows_dir())
+}
+
+/// Absolute path of Windows PowerShell 5.1.
+pub fn powershell_exe() -> String {
+    format!(r"{}\WindowsPowerShell\v1.0\powershell.exe", system_dir())
+}
+
+/// The environment variables every child process gets, derived only from
+/// the real Windows directory.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn trusted_env(windows: &str) -> Vec<(&'static str, String)> {
+    let sys = format!(r"{windows}\System32");
+    let drive = windows.get(..2).unwrap_or("C:").to_string();
+    vec![
+        ("SystemRoot", windows.to_string()),
+        ("windir", windows.to_string()),
+        ("SystemDrive", drive),
+        ("ComSpec", format!(r"{sys}\cmd.exe")),
+        (
+            "PATH",
+            format!(r"{sys};{windows};{sys}\Wbem;{sys}\WindowsPowerShell\v1.0"),
+        ),
+        // Only the modules shipped with Windows; user and third-party module
+        // folders are not searched.
+        (
+            "PSModulePath",
+            format!(r"{sys}\WindowsPowerShell\v1.0\Modules"),
+        ),
+    ]
 }
 
 /// Wait for `child` until `timeout` elapses; kill it (with its whole process
@@ -132,7 +200,7 @@ fn run_checked(
 
 /// Run a PowerShell script, return stdout. Errors carry stderr.
 pub fn run(script: &str) -> Result<String, String> {
-    let mut cmd = Command::new("powershell.exe");
+    let mut cmd = Command::new(powershell_exe());
     cmd.args([
         "-NoProfile",
         "-NonInteractive",
@@ -148,7 +216,7 @@ pub fn run(script: &str) -> Result<String, String> {
 /// Like [`run`], but with the long timeout for operations that legitimately
 /// take minutes (winget install/upgrade, WU driver install, DISM/SFC checks).
 pub fn run_long(script: &str) -> Result<String, String> {
-    let mut cmd = Command::new("powershell.exe");
+    let mut cmd = Command::new(powershell_exe());
     cmd.args([
         "-NoProfile",
         "-NonInteractive",
@@ -202,7 +270,7 @@ fn run_json_with(script: &str, timeout: Duration) -> Result<serde_json::Value, S
 }
 
 fn run_with(script: &str, timeout: Duration) -> Result<String, String> {
-    let mut cmd = Command::new("powershell.exe");
+    let mut cmd = Command::new(powershell_exe());
     cmd.args([
         "-NoProfile",
         "-NonInteractive",
@@ -268,11 +336,45 @@ pub fn is_admin() -> bool {
 /// single or double quotes (`'`, `"`, `$`, backtick), plus control chars,
 /// so a validated value is safe to embed in either quoting style. All other
 /// Unicode (umlauts, CJK, …) is allowed, PS strings are UTF-16.
+///
+/// PowerShell also treats the typographic quotes U+2018..=U+201B as single
+/// quotes and U+201C..=U+201E as double quotes, so the whole U+2018..=U+201F
+/// block is rejected too (`'a’; calc; ‘b'` would otherwise break out of a
+/// single-quoted literal).
 pub fn is_safe_ident(s: &str) -> bool {
     !s.is_empty()
         && s.len() <= 256
-        && s.chars()
-            .all(|c| !c.is_control() && !matches!(c, '\'' | '"' | '$' | '`'))
+        && s.chars().all(|c| {
+            !c.is_control() && !matches!(c, '\'' | '"' | '$' | '`' | '\u{2018}'..='\u{201F}')
+        })
+}
+
+/// True for every code point PowerShell's tokenizer accepts as a single-quote
+/// delimiter: ASCII `'` plus U+2018, U+2019, U+201A and U+201B.
+fn is_ps_single_quote(c: char) -> bool {
+    matches!(c, '\'' | '\u{2018}' | '\u{2019}' | '\u{201A}' | '\u{201B}')
+}
+
+/// Quote `s` as a PowerShell single-quoted string literal. Inside a
+/// single-quoted literal the only special characters are the quote
+/// delimiters; each one (ASCII or typographic) is doubled, which PowerShell
+/// reads back as that one literal character. Nothing inside a single-quoted
+/// literal is expanded (`$`, backtick and `$(…)` stay inert).
+pub fn quote_single(s: &str) -> String {
+    format!("'{}'", escape_single(s))
+}
+
+/// The inside of a PowerShell single-quoted string: every character PowerShell
+/// accepts as a single quote (ASCII and U+2018..U+201B) is doubled.
+pub fn escape_single(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        if is_ps_single_quote(c) {
+            out.push(c);
+        }
+        out.push(c);
+    }
+    out
 }
 
 /// Like [`is_safe_ident`], but additionally rejects `\`/`/` so the value can
@@ -280,6 +382,63 @@ pub fn is_safe_ident(s: &str) -> bool {
 /// hierarchy.
 pub fn is_safe_regkey_name(s: &str) -> bool {
     is_safe_ident(s) && !s.contains(['\\', '/'])
+}
+
+/// Absolute path of winget.exe for elevated use. Bare `winget.exe` resolves
+/// through PATH to the App Execution Alias in the user-writable
+/// `%LOCALAPPDATA%\Microsoft\WindowsApps`, so the elevated process could be
+/// made to run a planted binary. The DesktopAppInstaller package's own
+/// install folder under `%ProgramFiles%\WindowsApps` is TrustedInstaller
+/// owned. Resolved once per process; falls back to the bare name only when
+/// the package location cannot be determined (winget then behaves exactly
+/// as before).
+pub fn winget_exe() -> String {
+    static WINGET: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    WINGET
+        .get_or_init(|| resolve_winget().unwrap_or_else(|| "winget.exe".into()))
+        .clone()
+}
+
+#[cfg(windows)]
+fn resolve_winget() -> Option<String> {
+    let pf = std::env::var("ProgramFiles").ok()?;
+    for all in ["", " -AllUsers"] {
+        let Ok(out) = run(&format!(
+            "(Get-AppxPackage{all} -Name Microsoft.DesktopAppInstaller -ErrorAction SilentlyContinue | \
+             Sort-Object Version -Descending | Select-Object -First 1).InstallLocation"
+        )) else {
+            continue;
+        };
+        if let Some(exe) = winget_exe_in(out.trim(), &pf) {
+            if std::path::Path::new(&exe).is_file() {
+                return Some(exe);
+            }
+        }
+    }
+    None
+}
+
+#[cfg(not(windows))]
+fn resolve_winget() -> Option<String> {
+    None
+}
+
+/// `<location>\winget.exe` when `location` is a package folder directly
+/// below `<program_files>\WindowsApps` (single line, no traversal).
+fn winget_exe_in(location: &str, program_files: &str) -> Option<String> {
+    let loc = location.trim_end_matches('\\');
+    let base = format!("{}\\WindowsApps\\", program_files.trim_end_matches('\\'));
+    let pkg = loc
+        .get(..base.len())
+        .filter(|p| p.eq_ignore_ascii_case(&base))
+        .map(|_| &loc[base.len()..])?;
+    let valid = !program_files.is_empty()
+        && !pkg.is_empty()
+        && !pkg.contains(['\\', '/', ':'])
+        && pkg != ".."
+        && pkg != "."
+        && !loc.chars().any(char::is_control);
+    valid.then(|| format!("{loc}\\winget.exe"))
 }
 
 /// True for a canonical 8-4-4-4-12 GUID string. Used to extract GUIDs from
@@ -299,8 +458,65 @@ pub fn is_guid(s: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_safe_ident, is_safe_regkey_name, run_checked, wait_with_timeout};
+    use super::{is_safe_ident, is_safe_regkey_name, quote_single, trusted_env, winget_exe_in};
+
+    #[test]
+    fn children_get_an_environment_from_the_windows_dir_only() {
+        let env = trusted_env(r"D:\WINDOWS");
+        let get = |k: &str| {
+            env.iter()
+                .find(|(n, _)| *n == k)
+                .map(|(_, v)| v.clone())
+                .unwrap()
+        };
+        assert_eq!(get("SystemRoot"), r"D:\WINDOWS");
+        assert_eq!(get("windir"), r"D:\WINDOWS");
+        assert_eq!(get("SystemDrive"), "D:");
+        assert_eq!(get("ComSpec"), r"D:\WINDOWS\System32\cmd.exe");
+        let path = get("PATH");
+        assert!(path.starts_with(r"D:\WINDOWS\System32;"));
+        assert!(
+            path.split(';').all(|p| p.starts_with(r"D:\WINDOWS")),
+            "{path}"
+        );
+        assert_eq!(
+            get("PSModulePath"),
+            r"D:\WINDOWS\System32\WindowsPowerShell\v1.0\Modules"
+        );
+        assert!(
+            super::powershell_exe().ends_with(r"\System32\WindowsPowerShell\v1.0\powershell.exe")
+        );
+    }
+
+    #[test]
+    fn winget_location_must_be_a_windowsapps_package() {
+        let pf = r"C:\Program Files";
+        let loc = r"C:\Program Files\WindowsApps\Microsoft.DesktopAppInstaller_1.24.25200.0_x64__8wekyb3d8bbwe";
+        assert_eq!(winget_exe_in(loc, pf), Some(format!(r"{loc}\winget.exe")));
+        assert_eq!(
+            winget_exe_in(&loc.to_lowercase(), pf),
+            Some(format!(r"{}\winget.exe", loc.to_lowercase()))
+        );
+        for bad in [
+            "",
+            r"C:\Program Files\WindowsApps",
+            r"C:\Program Files\WindowsApps\",
+            r"C:\Users\me\AppData\Local\Microsoft\WindowsApps\x",
+            r"C:\Program Files\WindowsApps\..",
+            r"C:\Program Files\WindowsApps\a\..\..\evil",
+            r"C:\Program Files\WindowsAppsX\pkg",
+            "C:\\Program Files\\WindowsApps\\pkg\nC:\\evil",
+            r"D:\Program Files\WindowsApps\pkg",
+        ] {
+            assert_eq!(winget_exe_in(bad, pf), None, "should reject {bad:?}");
+        }
+        assert_eq!(winget_exe_in(loc, ""), None);
+    }
+    #[cfg(not(windows))]
+    use super::{run_checked, wait_with_timeout};
+    #[cfg(not(windows))]
     use std::process::{Command, Stdio};
+    #[cfg(not(windows))]
     use std::time::Duration;
 
     #[test]
@@ -332,6 +548,43 @@ mod tests {
         assert!(!is_safe_ident(&"x".repeat(257)));
         assert!(!is_safe_ident("foo\nbar"));
         assert!(!is_safe_ident("foo\rbar"));
+    }
+
+    #[test]
+    fn unicode_quote_breakouts_are_rejected() {
+        // PowerShell treats U+2018..U+201B as `'` and U+201C..U+201E as `"`.
+        for q in ['\u{2018}', '\u{2019}', '\u{201A}', '\u{201B}'] {
+            assert!(!is_safe_ident(&format!(
+                "a{q}; Write-Output INJECTED; {q}b"
+            )));
+            assert!(!is_safe_regkey_name(&format!("a{q}b")));
+        }
+        for q in ['\u{201C}', '\u{201D}', '\u{201E}', '\u{201F}'] {
+            assert!(!is_safe_ident(&format!("a{q}b")));
+            assert!(!is_safe_regkey_name(&format!("a{q}b")));
+        }
+        // Neighbouring typographic punctuation stays allowed.
+        assert!(is_safe_ident("a\u{2014}b")); // em dash
+        assert!(is_safe_ident("a\u{2020}b")); // dagger
+    }
+
+    #[test]
+    fn quote_single_doubles_every_single_quote_form() {
+        assert_eq!(quote_single("abc"), "'abc'");
+        assert_eq!(quote_single(""), "''");
+        assert_eq!(quote_single("it's"), "'it''s'");
+        assert_eq!(quote_single("a\u{2019}b"), "'a\u{2019}\u{2019}b'");
+        assert_eq!(
+            quote_single("\u{2018}\u{2019}\u{201A}\u{201B}"),
+            "'\u{2018}\u{2018}\u{2019}\u{2019}\u{201A}\u{201A}\u{201B}\u{201B}'"
+        );
+        // `$`, backtick and double quotes are inert inside single quotes.
+        assert_eq!(quote_single("$(calc)`\""), "'$(calc)`\"'");
+        // The verified breakout payload stays a single literal.
+        assert_eq!(
+            quote_single("a\u{2019}; Write-Output 'INJECTED'; \u{2018}b"),
+            "'a\u{2019}\u{2019}; Write-Output ''INJECTED''; \u{2018}\u{2018}b'"
+        );
     }
 
     #[test]

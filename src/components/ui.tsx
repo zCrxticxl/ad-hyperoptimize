@@ -97,3 +97,22 @@ export const ErrorBanner: React.FC<{ msg?: string | null; onRetry?: () => void }
     </div>
   );
 };
+
+/** Contains a crash to the tool that threw it. Without this a single render
+ * error (e.g. reading a field of a failed backend response) blanks the whole
+ * app including the navigation. `resetKey` clears the error when the user
+ * switches tools. */
+export class ToolErrorBoundary extends React.Component<
+  { resetKey: string; children: React.ReactNode },
+  { error: string | null }
+> {
+  state = { error: null as string | null };
+  static getDerivedStateFromError(e: unknown) { return { error: String(e) }; }
+  componentDidUpdate(prev: { resetKey: string }) {
+    if (prev.resetKey !== this.props.resetKey && this.state.error) this.setState({ error: null });
+  }
+  render() {
+    if (this.state.error) return <ErrorBanner msg={this.state.error} onRetry={() => this.setState({ error: null })} />;
+    return this.props.children;
+  }
+}

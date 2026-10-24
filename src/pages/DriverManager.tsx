@@ -39,7 +39,7 @@ function DriverRow({ d, admin }: { d: Driver; admin?: boolean }) {
   };
 
   const installWinget = async () => {
-    if (!d.wingetId) return;
+    if (!d.wingetId || !admin) return;
     setBusy(true);
     setLog(t("drvInstallingWinget"));
     try {
@@ -111,7 +111,7 @@ function DriverRow({ d, admin }: { d: Driver; admin?: boolean }) {
             {/* winget */}
             {d.wingetId && (
               wgStatus?.available ? (
-                <button className="btn small" disabled={busy} onClick={installWinget}>
+                <button className="btn small" disabled={busy || !admin} title={!admin ? t("adminRequired") : undefined} onClick={installWinget}>
                   {busy ? <><Spinner /> {t("drvInstalling")}</> : `⬆ ${t("drvInstallViaWinget")}${wgStatus.newVersion ? ` (${wgStatus.newVersion})` : ""}`}
                 </button>
               ) : (
@@ -130,7 +130,7 @@ function DriverRow({ d, admin }: { d: Driver; admin?: boolean }) {
             </button>
 
             {/* Windows Update */}
-            <button className="btn small ghost" disabled={busy} onClick={updateViaWU}>
+            <button className="btn small ghost" disabled={busy || !admin} title={!admin ? t("adminRequired") : undefined} onClick={updateViaWU}>
               🪟 {t("drvWindowsUpdateScan")}
             </button>
 
@@ -160,7 +160,7 @@ function DriverRow({ d, admin }: { d: Driver; admin?: boolean }) {
   );
 }
 
-export default function DriverManager() {
+export default function DriverManager({ admin }: { admin: boolean }) {
   const { t } = useLang();
   const [data, setData]       = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -244,7 +244,7 @@ export default function DriverManager() {
               {filtered.length === 0 ? (
                 <div className="muted">{t("drvNoMatch")}</div>
               ) : filtered.map((d, i) => (
-                <DriverRow key={`${d.DeviceName}-${i}`} d={d} />
+                <DriverRow key={`${d.DeviceName}-${i}`} d={d} admin={admin} />
               ))}
             </div>
 
