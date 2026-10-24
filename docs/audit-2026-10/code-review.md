@@ -70,6 +70,9 @@ Severity:
 | `analysis.rs` | 560 | reviewed |
 | `hwprofile.rs` | 510 | reviewed |
 | `frametime.rs` | 500 | reviewed |
+| `broker.rs`, `broker/pipe.rs` | 1150 | reviewed |
+| `commands.rs`, `main.rs`, `build.rs` | 610 | reviewed |
+| **Rust backend** | | **complete** |
 
 ## Findings
 
@@ -157,3 +160,5 @@ Severity:
 | 80 | `hwprofile.rs` warnings/verdicts + 7 overlays | Low | Invented numbers and stale statements: "battery life −30-60%", "SSD 5-10× faster", "Power Plan is High Impact" for budget CPUs (unmeasured). There was also a warning about the removed Game Booster "GPU Performance Mode", and a risk verdict for `nv_power_max_perf` ("locks your GPU at maximum clock"), although that tweak is a legacy no-op that is no longer offered. | fixed: texts without numbers (budget CPU: "compare with the FPS measurement"); warning and verdict removed; es/fr/pl/pt/ru/sv/tr updated |
 | 81 | `localize.ts` | Low | Hardware warnings and risk verdicts have overlays for 7 languages, but **not for German**: German users see these texts in English. | open (HANDOFF item 2, translations) |
 | 82 | `frametime.rs:compare_metric` | Medium | The before/after verdict used 2 × standard error as "about a 95 % interval". That only holds for many runs. With 3 runs per state (the minimum allowed) the correct factor is 2.8–4.3 (t distribution, Welch df 2–4). Ordinary run-to-run variation could be reported as "better/worse", which defeats the purpose of the feature. | fixed: Welch–Satterthwaite df + t table (rounded down, conservative), still at least 1 %; test `small_samples_use_the_t_distribution`; method text (de/en) adjusted |
+| 83 | `broker.rs`, `broker/pipe.rs` | Info | Checked: protected pipe DACL (user + SYSTEM), `FILE_FLAG_FIRST_PIPE_INSTANCE`, one instance, no remote clients; client PID + same image path checked by the broker; server PID checked by the client; 256-bit nonce, constant-time compare; `SECURITY_IDENTIFICATION`; typed requests with `deny_unknown_fields`; ids validated before the engine; idle and connect timeouts. | ok |
+| 84 | `commands.rs` | Info | `cmd_boot_analysis` is described as "may enable the log". That is no longer true: the boot log is only read. | note |
