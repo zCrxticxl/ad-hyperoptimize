@@ -237,6 +237,21 @@ fn drive_exists(p: &str) -> bool {
         && std::path::Path::new(&format!("{}:\\", b[0] as char)).exists()
 }
 
+/// A drive-letter path (`X:\…`). Only these are judged: bare names
+/// (`shell32.dll`) resolve through the search path, and UNC paths would make
+/// the elevated scan touch the network.
+fn is_local_qualified(p: &str) -> bool {
+    let b = p.as_bytes();
+    b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && (b[2] == b'\\' || b[2] == b'/')
+}
+
+/// The single orphan rule for every scanner: a local, fully qualified path
+/// on a drive that is present, and the file or folder is gone.
+#[cfg(windows)]
+fn is_missing(p: &str) -> bool {
+    is_local_qualified(p) && drive_exists(p) && !exists(p)
+}
+
 #[cfg(windows)]
 fn hive(root: &str) -> RegKey {
     RegKey::predef(if root == "HKLM" {
@@ -270,10 +285,7 @@ fn scan_mui_cache(out: &mut Vec<Value>) {
         } else {
             continue; // not an exe entry
         };
-        if !base.contains('\\') {
-            continue;
-        }
-        if exists(&base) {
+        if !is_missing(&base) {
             continue;
         }
 
@@ -322,14 +334,14 @@ fn scan_uninstall(root: &'static str, subpath: &str, out: &mut Vec<Value>) {
         let loc: String = sub.get_value("InstallLocation").unwrap_or_default();
         let loc = expand_env(loc.trim().trim_matches('"'));
         // A missing folder on an unmounted/removable drive is not an orphan.
-        if loc.is_empty() || exists(&loc) || !drive_exists(&loc) {
+        if !is_missing(&loc) {
             continue;
         }
         // The uninstaller itself must be gone too (on a present drive). An
         // unverifiable command (MsiExec, bare names) never counts as missing.
         let uninst: String = sub.get_value("UninstallString").unwrap_or_default();
         match extract_exe_path(&uninst) {
-            Some(target) if drive_exists(&target) && !exists(&target) => {}
+            Some(target) if is_missing(&target) => {}
             _ => continue,
         }
         let key_path = format!("{subpath}\\{sub_name}");
@@ -361,7 +373,7 @@ fn scan_app_paths(out: &mut Vec<Value>) {
         };
         let default: String = sub.get_value("").unwrap_or_default();
         let expanded = expand_env(default.trim().trim_matches('"'));
-        if expanded.is_empty() || exists(&expanded) {
+        if !is_missing(&expanded) {
             continue;
         }
         let key_path = format!("{PATH}\\{name}");
@@ -392,7 +404,7 @@ fn scan_shared_dlls(out: &mut Vec<Value>) {
             continue;
         }
         let expanded = expand_env(&name);
-        if !expanded.contains('\\') || exists(&expanded) {
+        if !is_missing(&expanded) {
             continue;
         }
         let fname = std::path::Path::new(&expanded)
@@ -439,7 +451,7 @@ fn scan_shell_extensions(out: &mut Vec<Value>) {
             continue;
         }
         let expanded = expand_env(dll.trim().trim_matches('"'));
-        if expanded.is_empty() || exists(&expanded) {
+        if !is_missing(&expanded) {
             continue;
         }
         out.push(json!({
@@ -468,7 +480,7 @@ fn scan_run_keys(root: &'static str, path: &str, out: &mut Vec<Value>) {
         let Some(exe) = extract_exe_path(&cmd) else {
             continue;
         };
-        if exists(&exe) {
+        if !is_missing(&exe) {
             continue;
         }
         out.push(json!({
@@ -879,8 +891,22 @@ pub fn list_backups() -> Value {
 #[cfg(test)]
 mod tests {
     use super::{
-        expand_env_with, is_valid_key_path, is_valid_root, match_scanned, parse_command_target,
+        expand_env_with, is_local_qualified, is_valid_key_path, is_valid_root, match_scanned,
+        parse_command_target,
     };
+
+    #[test]
+    fn only_local_qualified_paths_can_be_orphans() {
+        assert!(is_local_qualified("C:\\Program Files\\X\\x.dll"));
+        assert!(is_local_qualified("d:/games/x.exe"));
+        // Resolved through the search path: never judged missing.
+        assert!(!is_local_qualified("shell32.dll"));
+        assert!(!is_local_qualified("system32\\x.dll"));
+        // Network paths are not probed from the elevated scan.
+        assert!(!is_local_qualified("\\\\server\\share\\a.exe"));
+        assert!(!is_local_qualified("C:"));
+        assert!(!is_local_qualified(""));
+    }
     use serde_json::json;
 
     fn env(name: &str) -> Option<String> {
