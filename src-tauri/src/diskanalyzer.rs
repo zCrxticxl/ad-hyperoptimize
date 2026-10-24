@@ -817,9 +817,7 @@ pub fn scan_temp_age() -> Value {
     let dirs: Vec<PathBuf> = [
         std::env::var("TEMP").ok(),
         std::env::var("TMP").ok(),
-        std::env::var("SystemRoot")
-            .ok()
-            .map(|r| format!("{r}\\Temp")),
+        Some(format!("{}\\Temp", crate::ps::windows_dir())),
     ]
     .into_iter()
     .flatten()

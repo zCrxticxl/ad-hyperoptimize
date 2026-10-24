@@ -249,7 +249,10 @@ fn capture_revert(cap: &ShowCapture) -> Option<String> {
                 "HibernateEnabled",
             )
             .ok()?;
-            let drive = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
+            let drive = crate::ps::windows_dir()
+                .get(..2)
+                .unwrap_or("C:")
+                .to_string();
             let file = std::path::Path::new(&format!("{drive}\\")).join("hiberfil.sys");
             hibernate_revert(reg.as_ref(), std::fs::symlink_metadata(file).is_ok())
         }
@@ -1630,7 +1633,10 @@ fn cmd_live_state(id: &str) -> Option<bool> {
             // Without the value Windows decides from its default; the
             // hibernation file exists exactly while hibernation is enabled.
             None => {
-                let drive = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
+                let drive = crate::ps::windows_dir()
+                    .get(..2)
+                    .unwrap_or("C:")
+                    .to_string();
                 let file = std::path::Path::new(&format!("{drive}\\")).join("hiberfil.sys");
                 Some(std::fs::symlink_metadata(file).is_err())
             }

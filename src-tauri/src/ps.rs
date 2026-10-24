@@ -24,7 +24,75 @@ const CMD_TIMEOUT_LONG: Duration = Duration::from_secs(20 * 60);
 #[cfg_attr(not(windows), allow(unused_variables))]
 fn configure(cmd: &mut Command) {
     #[cfg(windows)]
-    cmd.creation_flags(CREATE_NO_WINDOW);
+    {
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        // The elevated process inherits the environment of whoever started
+        // it. Children get a fixed one for every variable that decides which
+        // program or module runs (PATH, PSModulePath, SystemRoot, ...), so a
+        // tampered environment cannot make an admin child load foreign code.
+        cmd.envs(trusted_env(&windows_dir()));
+    }
+}
+
+/// Windows directory from the API, never from `%SystemRoot%`/`%windir%`.
+#[cfg(windows)]
+pub fn windows_dir() -> String {
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetWindowsDirectoryW(buf: *mut u16, size: u32) -> u32;
+    }
+    static DIR: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| {
+        let mut buf = [0u16; 260];
+        // SAFETY: the buffer length is passed; the return value is the number
+        // of characters written (0 on failure, > len if too small).
+        let n = unsafe { GetWindowsDirectoryW(buf.as_mut_ptr(), buf.len() as u32) } as usize;
+        if n == 0 || n >= buf.len() {
+            r"C:\Windows".to_string()
+        } else {
+            String::from_utf16_lossy(&buf[..n])
+        }
+    })
+    .clone()
+}
+
+#[cfg(not(windows))]
+pub fn windows_dir() -> String {
+    r"C:\Windows".to_string()
+}
+
+/// `<windows>\System32` (64-bit process: the native system directory).
+pub fn system_dir() -> String {
+    format!(r"{}\System32", windows_dir())
+}
+
+/// Absolute path of Windows PowerShell 5.1.
+pub fn powershell_exe() -> String {
+    format!(r"{}\WindowsPowerShell\v1.0\powershell.exe", system_dir())
+}
+
+/// The environment variables every child process gets, derived only from
+/// the real Windows directory.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn trusted_env(windows: &str) -> Vec<(&'static str, String)> {
+    let sys = format!(r"{windows}\System32");
+    let drive = windows.get(..2).unwrap_or("C:").to_string();
+    vec![
+        ("SystemRoot", windows.to_string()),
+        ("windir", windows.to_string()),
+        ("SystemDrive", drive),
+        ("ComSpec", format!(r"{sys}\cmd.exe")),
+        (
+            "PATH",
+            format!(r"{sys};{windows};{sys}\Wbem;{sys}\WindowsPowerShell\v1.0"),
+        ),
+        // Only the modules shipped with Windows; user and third-party module
+        // folders are not searched.
+        (
+            "PSModulePath",
+            format!(r"{sys}\WindowsPowerShell\v1.0\Modules"),
+        ),
+    ]
 }
 
 /// Wait for `child` until `timeout` elapses; kill it (with its whole process
@@ -132,7 +200,7 @@ fn run_checked(
 
 /// Run a PowerShell script, return stdout. Errors carry stderr.
 pub fn run(script: &str) -> Result<String, String> {
-    let mut cmd = Command::new("powershell.exe");
+    let mut cmd = Command::new(powershell_exe());
     cmd.args([
         "-NoProfile",
         "-NonInteractive",
@@ -148,7 +216,7 @@ pub fn run(script: &str) -> Result<String, String> {
 /// Like [`run`], but with the long timeout for operations that legitimately
 /// take minutes (winget install/upgrade, WU driver install, DISM/SFC checks).
 pub fn run_long(script: &str) -> Result<String, String> {
-    let mut cmd = Command::new("powershell.exe");
+    let mut cmd = Command::new(powershell_exe());
     cmd.args([
         "-NoProfile",
         "-NonInteractive",
@@ -202,7 +270,7 @@ fn run_json_with(script: &str, timeout: Duration) -> Result<serde_json::Value, S
 }
 
 fn run_with(script: &str, timeout: Duration) -> Result<String, String> {
-    let mut cmd = Command::new("powershell.exe");
+    let mut cmd = Command::new(powershell_exe());
     cmd.args([
         "-NoProfile",
         "-NonInteractive",
@@ -390,7 +458,35 @@ pub fn is_guid(s: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_safe_ident, is_safe_regkey_name, quote_single, winget_exe_in};
+    use super::{is_safe_ident, is_safe_regkey_name, quote_single, trusted_env, winget_exe_in};
+
+    #[test]
+    fn children_get_an_environment_from_the_windows_dir_only() {
+        let env = trusted_env(r"D:\WINDOWS");
+        let get = |k: &str| {
+            env.iter()
+                .find(|(n, _)| *n == k)
+                .map(|(_, v)| v.clone())
+                .unwrap()
+        };
+        assert_eq!(get("SystemRoot"), r"D:\WINDOWS");
+        assert_eq!(get("windir"), r"D:\WINDOWS");
+        assert_eq!(get("SystemDrive"), "D:");
+        assert_eq!(get("ComSpec"), r"D:\WINDOWS\System32\cmd.exe");
+        let path = get("PATH");
+        assert!(path.starts_with(r"D:\WINDOWS\System32;"));
+        assert!(
+            path.split(';').all(|p| p.starts_with(r"D:\WINDOWS")),
+            "{path}"
+        );
+        assert_eq!(
+            get("PSModulePath"),
+            r"D:\WINDOWS\System32\WindowsPowerShell\v1.0\Modules"
+        );
+        assert!(
+            super::powershell_exe().ends_with(r"\System32\WindowsPowerShell\v1.0\powershell.exe")
+        );
+    }
 
     #[test]
     fn winget_location_must_be_a_windowsapps_package() {

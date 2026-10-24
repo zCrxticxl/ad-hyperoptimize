@@ -960,8 +960,7 @@ pub fn detect() -> Result<System, String> {
         .iter()
         .any(|(n, _, _)| n.to_ascii_lowercase().contains("nvidia"))
     {
-        let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
-        let smi = format!(r"{root}\System32\nvidia-smi.exe");
+        let smi = format!(r"{}\nvidia-smi.exe", crate::ps::system_dir());
         if let Ok((_, out, _)) = crate::ps::exec_capture(&smi, &["-q", "-d", "MEMORY"]) {
             sys.nvidia_bar = parse_nvidia_bar(&out);
         }

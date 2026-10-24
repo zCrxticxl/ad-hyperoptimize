@@ -3,9 +3,9 @@ mod bench;
 mod bootopt;
 mod broker;
 mod cache;
+mod cleanup;
 // Privilege inventory of all commands (broker phase 1); test-only until the
 // broker uses it at runtime.
-mod cleanup;
 #[cfg(test)]
 mod commands;
 #[cfg(windows)]
@@ -233,8 +233,7 @@ fn cmd_open_windows_settings(page: String) -> Result<(), String> {
         "display-advancedgraphics" => "ms-settings:display-advancedgraphics",
         _ => return Err(format!("unknown settings page '{page}'")),
     };
-    let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
-    std::process::Command::new(format!(r"{root}\explorer.exe"))
+    std::process::Command::new(format!(r"{}\explorer.exe", ps::windows_dir()))
         .arg(uri)
         .spawn()
         .map(|_| ())
@@ -1101,12 +1100,10 @@ fn cmd_open_path(path: String) -> Result<(), String> {
         OpenTarget::Dir(p) | OpenTarget::ReportHtml(p) => p,
         OpenTarget::RevealFile(p) => format!("/select,{p}"),
     };
-    let windir = std::env::var_os("SystemRoot")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::path::PathBuf::from("C:\\Windows"));
     // explorer.exe's exit code is meaningless (often 1 on success), so the
-    // child is detached instead of waited on.
-    std::process::Command::new(windir.join("explorer.exe"))
+    // child is detached instead of waited on. Its path comes from the API,
+    // not from %SystemRoot%, which the caller of an elevated app controls.
+    std::process::Command::new(std::path::Path::new(&ps::windows_dir()).join("explorer.exe"))
         .arg(arg)
         .spawn()
         .map(|_| ())
@@ -1586,7 +1583,7 @@ fn ensure_admin() {
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x0800_0000; // no console/PowerShell flash
 
-        let is_admin = std::process::Command::new("powershell")
+        let is_admin = std::process::Command::new(ps::powershell_exe())
             .args([
                 "-NoProfile",
                 "-NonInteractive",
@@ -1619,7 +1616,7 @@ fn ensure_admin() {
             // elevated window appears (no lingering second, unelevated window);
             // on cancellation we fall through and keep running unelevated with
             // the in-app admin hint.
-            let approved = std::process::Command::new("powershell")
+            let approved = std::process::Command::new(ps::powershell_exe())
                 .args([
                     "-NoProfile",
                     "-NonInteractive",
