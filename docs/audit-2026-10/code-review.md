@@ -55,6 +55,7 @@ Severity:
 | `powerplan.rs` | 320 | reviewed |
 | `profiles.rs` | 300 | reviewed |
 | `updates.rs` | 360 | reviewed |
+| `drivers.rs` | 320 | reviewed |
 
 ## Findings
 
@@ -121,3 +122,7 @@ Severity:
 | 59 | `updates.rs:update_apps` | Medium | The package id from the renderer became the value of `--id` unchecked. An id like `--manifest`/`-h` was parsed by winget as an option (option injection in an elevated call). | fixed: `valid_package_id` (one token, no leading `-`, no truncation `…`); test |
 | 60 | `gameprofile.rs` | Low | Game profiles switch to Ultimate/High performance on laptops too; the health check offers High performance only on desktops. No defect in the code, an inconsistent policy. | open: decide whether game profiles should skip the plan switch on battery devices |
 | 61 | `updates.rs:install_driver_updates` | Info | Installs *all* pending WU drivers at once, without a restore point. Explicit user action; WHQL from Microsoft. | open (low): create a restore point first, as profiles do |
+| 62 | `drivers.rs:open_vendor_url/open_windows_update` | Medium | `Start-Process '<url>'` in the elevated process opened the default browser **with the admin token**. Any page or download then ran elevated. `cmd_open_path` already did it correctly through `explorer.exe`. | fixed: via `explorer.exe` (path from the API), as in `cmd_open_path` |
+| 63 | `drivers.rs:install_via_winget` | Medium | 1) Exit code `0x8A150014` ("no package found": upgrade of a package that is not installed) counted as success. "Install" for a driver package that was not installed reported success and did nothing. 2) The fallback to `install` depended on English winget text (`No applicable update\|already installed`). | fixed: decided by exit code (`NO_PACKAGE_FOUND` → install; success only for 0 / `UPDATE_NOT_APPLICABLE` / `ALREADY_INSTALLED`); test |
+| 64 | `drivers.rs:update_via_pnputil` | Low | The message promised a "driver scan via Windows Update". `pnputil /scan-devices` only re-enumerates hardware. A failure was returned as `Ok("Error: …")`, so the UI showed it as success. | fixed: accurate text; failure returns an error |
+| 65 | `gputweaks.rs:nv_open_panel` | Info | Starts the NVIDIA Control Panel elevated (`Start-Process` in the admin process). No browser, but inconsistent with #62. | open (low) |
