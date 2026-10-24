@@ -163,9 +163,23 @@ pub fn scan_app_updates() -> Result<Value, String> {
     Ok(json!({ "count": apps.len(), "apps": apps }))
 }
 
+/// A winget package id as `scan_app_updates` reports it: one token, not an
+/// option. The id comes from the renderer and becomes the value of `--id`;
+/// `--manifest` or similar must never be parsed as a flag.
+fn valid_package_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 256
+        && !id.starts_with('-')
+        && !id.contains('…')
+        && !id.chars().any(|c| c.is_whitespace() || c.is_control())
+}
+
 /// Upgrade one app by exact id, or everything when `id` is None.
 /// Silent, license-accepting. Can run for many minutes, async command.
 pub fn update_apps(id: Option<String>) -> Result<Value, String> {
+    if id.as_deref().is_some_and(|pkg| !valid_package_id(pkg)) {
+        return Err("Invalid package id".into());
+    }
     let mut args: Vec<String> = vec!["upgrade".into()];
     match &id {
         Some(pkg) => {
@@ -332,4 +346,24 @@ pub fn gpu_vendor_hint() -> Value {
         ("unknown", "")
     };
     json!({ "gpus": gpus.trim(), "vendor": vendor, "url": url })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::valid_package_id;
+
+    #[test]
+    fn package_ids_cannot_be_options() {
+        for ok in [
+            "Mozilla.Firefox",
+            "Valve.Steam",
+            r"ARP\Machine\X64\{1D8E6291-B0D5-35EC-8441-6616F567A0F7}",
+            "9NBLGGH4NNS1",
+        ] {
+            assert!(valid_package_id(ok), "{ok}");
+        }
+        for bad in ["", "--manifest", "-h", "a b", "Mozilla.Fire…", "a\nb"] {
+            assert!(!valid_package_id(bad), "{bad:?}");
+        }
+    }
 }

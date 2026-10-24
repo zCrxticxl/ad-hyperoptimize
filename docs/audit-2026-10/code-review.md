@@ -51,6 +51,10 @@ Severity:
 | `bootopt.rs` | 560 | reviewed |
 | `services.rs` | 435 | reviewed |
 | `schedtasks.rs` | 300 | reviewed |
+| `gameprofile.rs` | 447 | reviewed |
+| `powerplan.rs` | 320 | reviewed |
+| `profiles.rs` | 300 | reviewed |
+| `updates.rs` | 360 | reviewed |
 
 ## Findings
 
@@ -112,3 +116,8 @@ Severity:
 | 54 | `services.rs:PROTECTED_SERVICES` | Medium | Missing from the "never disable" list were services whose loss breaks elevation, sign-in or device handling: `Appinfo` (UAC), `PlugPlay`, `Power`, `SamSs`, `UserManager`, `SystemEventsBroker`, `EventSystem`, `KeyIso`, `TimeBrokerSvc`. With `Appinfo` disabled no program can start elevated any more, including this app to undo it. | fixed: added; test extended |
 | 55 | `services.rs:list` (origin) | Low | "Windows" vs "third party" assumed `C:\Windows`. On a different system drive every Windows service showed as third-party. | fixed: `ps::windows_dir()` |
 | 56 | `schedtasks.rs:toggle` | Low | A failed toggle (typically access denied for tasks owned by SYSTEM/TrustedInstaller) left an open entry that the health check reported as an unfinished change, although nothing changed. | fixed: unchanged → entry closed; changed → `revert_entry` |
+| 57 | `powerplan.rs:delete_plan` | Medium | Custom power plans were deleted for good without a backup; the GUID from the renderer also reached `powercfg` unvalidated. | fixed: GUID check; `powercfg /export` into the protected state folder first, no delete without a backup; the message names the file (`powercfg /import` restores it) |
+| 58 | `profiles.rs:apply` | Low | When `tweaks::apply` returned `already_applied` with the id of an open entry from elsewhere (applied manually, live status `partial`), the profile re-tagged that entry as its own. A later profile revert also undid the manual change. `benchNote` also contained the unmeasured threshold "~3%". | fixed: an existing entry stays with its owner (counted as skipped); text without the number |
+| 59 | `updates.rs:update_apps` | Medium | The package id from the renderer became the value of `--id` unchecked. An id like `--manifest`/`-h` was parsed by winget as an option (option injection in an elevated call). | fixed: `valid_package_id` (one token, no leading `-`, no truncation `…`); test |
+| 60 | `gameprofile.rs` | Low | Game profiles switch to Ultimate/High performance on laptops too; the health check offers High performance only on desktops. No defect in the code, an inconsistent policy. | open: decide whether game profiles should skip the plan switch on battery devices |
+| 61 | `updates.rs:install_driver_updates` | Info | Installs *all* pending WU drivers at once, without a restore point. Explicit user action; WHQL from Microsoft. | open (low): create a restore point first, as profiles do |
