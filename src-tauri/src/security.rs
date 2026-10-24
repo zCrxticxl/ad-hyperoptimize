@@ -137,10 +137,32 @@ fn require_device_id(device_id: &str) -> Result<(), String> {
     }
 }
 
+/// True when `device_id` is one of the unsigned drivers in `scan` (the
+/// `unsigned_drivers()` result). The renderer only selects: disabling or
+/// removing any other device (e.g. the boot disk controller) is refused.
+fn is_flagged_unsigned(scan: &Value, device_id: &str) -> bool {
+    scan["items"].as_array().is_some_and(|items| {
+        items.iter().any(|d| {
+            d["deviceId"]
+                .as_str()
+                .is_some_and(|id| id.eq_ignore_ascii_case(device_id))
+        })
+    })
+}
+
+fn require_flagged_unsigned(device_id: &str) -> Result<(), String> {
+    require_device_id(device_id)?;
+    if is_flagged_unsigned(&unsigned_drivers(), device_id) {
+        Ok(())
+    } else {
+        Err("This device is not an unsigned driver in a fresh scan; nothing was changed.".into())
+    }
+}
+
 /// Reversible: device stays installed but stops loading/binding. Safe first
 /// step, can be undone with enable_unsigned_driver.
 pub fn disable_unsigned_driver(device_id: String) -> Result<String, String> {
-    require_device_id(&device_id)?;
+    require_flagged_unsigned(&device_id)?;
     pnputil(&["/disable-device", &device_id])
 }
 
@@ -156,7 +178,7 @@ pub fn enable_unsigned_driver(device_id: String) -> Result<String, String> {
 /// the same "repair by reinstall" path Device Manager's own Uninstall-device
 /// button uses, not a guaranteed permanent removal.
 pub fn remove_unsigned_driver(device_id: String) -> Result<String, String> {
-    require_device_id(&device_id)?;
+    require_flagged_unsigned(&device_id)?;
     pnputil(&["/remove-device", &device_id])
 }
 
@@ -180,9 +202,11 @@ fn autoruns() -> Value {
 
 const HO_PREFIX: &str = "# [ADHYPER] ";
 
+/// From the Windows API, never `%WINDIR%`: the elevated app inherits the
+/// caller's environment, and a redirected path would make it read and
+/// overwrite (through a planted junction) a file of the caller's choice.
 fn hosts_path() -> String {
-    let windir = std::env::var("WINDIR").unwrap_or_else(|_| "C:\\Windows".into());
-    format!("{windir}\\System32\\drivers\\etc\\hosts")
+    format!("{}\\drivers\\etc\\hosts", crate::ps::system_dir())
 }
 
 fn hosts_entries() -> Value {
@@ -446,6 +470,20 @@ pub fn defender_set_cloud(enabled: bool) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_scanned_unsigned_devices_can_be_targeted() {
+        let scan = json!({ "count": 1, "items": [
+            { "device": "X", "deviceId": "ROOT\\LEGACY_X\\0000" }
+        ]});
+        assert!(is_flagged_unsigned(&scan, "ROOT\\LEGACY_X\\0000"));
+        assert!(is_flagged_unsigned(&scan, "root\\legacy_x\\0000"));
+        assert!(!is_flagged_unsigned(&scan, "PCI\\VEN_144D&DEV_A80A\\4&2"));
+        assert!(!is_flagged_unsigned(
+            &json!({ "error": "x" }),
+            "ROOT\\LEGACY_X\\0000"
+        ));
+    }
 
     #[test]
     fn parses_captured_defender_values() {
