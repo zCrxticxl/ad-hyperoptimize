@@ -20,7 +20,10 @@ export default function Reports() {
     loadHistory();
   }, []);
 
-  const undoEntry = async (id: string) => {
+  const undoEntry = async (id: string, name: string) => {
+    // One undo at a time: entries can touch the same keys and must not interleave.
+    if (undoBusy) return;
+    if (!window.confirm(t("repUndoConfirm").replace("{name}", name || id))) return;
     setUndoBusy(id);
     setUndoErr("");
     try {
@@ -60,12 +63,21 @@ export default function Reports() {
             {[...history].reverse().map((h, i) => (
               <tr key={h.id ?? i}>
                 <td className="muted">{new Date(h.time).toLocaleString()}</td>
-                <td>{h.tweak_name}</td>
-                <td style={{ color: h.reverted ? "var(--muted)" : "var(--green)" }}>{h.reverted ? t("repReverted") : t("repApplied")}</td>
+                <td>
+                  {h.tweak_name}
+                  {h.untrusted && (
+                    <span className="badge risk-High" style={{ marginLeft: 6 }} title={t("repUntrustedHint")}>
+                      {t("repUntrusted")}
+                    </span>
+                  )}
+                </td>
+                <td style={{ color: h.reverted ? "var(--muted)" : h.completed === false ? "var(--orange)" : "var(--green)" }}>
+                  {h.reverted ? t("repReverted") : h.completed === false ? t("repIncomplete") : t("repApplied")}
+                </td>
                 <td className="muted">{h.backup_files?.length ?? 0} {t("repRegFiles")}</td>
                 <td>
                   {!h.reverted && h.id && (
-                    <button className="btn small ghost" disabled={undoBusy === h.id} onClick={() => undoEntry(h.id)}>
+                    <button className="btn small ghost" disabled={undoBusy !== null} onClick={() => undoEntry(h.id, h.tweak_name)}>
                       {undoBusy === h.id ? "…" : t("revert")}
                     </button>
                   )}

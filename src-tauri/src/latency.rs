@@ -4,10 +4,12 @@
 //! 1. Per-core DPC / interrupt pressure via WMI formatted perf counters
 //!    (`Win32_PerfFormattedData_Counters_ProcessorInformation`), class and
 //!    property names are locale-independent, unlike `Get-Counter` paths.
-//! 2. Execution-stall probe: a pinned spinning thread timestamps continuously;
-//!    any gap between consecutive reads is time the thread was preempted by
-//!    DPCs/ISRs/scheduler, the same signal LatencyMon's "highest measured
-//!    interrupt to process latency" reflects.
+//! 2. Execution-stall probe: a spinning thread timestamps continuously; any
+//!    gap between consecutive reads is time the thread was preempted by
+//!    DPCs/ISRs/scheduler, similar to LatencyMon's "highest measured
+//!    interrupt to process latency". The thread is NOT pinned to a core (no
+//!    affinity is set), so the scheduler may migrate it and a gap can also be
+//!    plain preemption by other threads, not only driver DPC/ISR time.
 //! 3. Deep trace: drives the built-in `wpr.exe` (Windows Performance
 //!    Recorder) CPU profile for per-driver DPC attribution in WPA.
 
@@ -35,7 +37,8 @@ pub fn counters(samples: u32) -> Value {
 }
 
 /// Layer 2: spin-probe. Returns stall distribution in microseconds.
-/// A gap > ~250µs on an idle-ish core almost always means a long DPC/ISR.
+/// The probe thread is unpinned; on an otherwise idle system a gap > ~250µs
+/// usually means a long DPC/ISR, but under load it can be ordinary preemption.
 pub fn stall_probe(seconds: u32) -> Value {
     let seconds = seconds.clamp(1, 30) as u64;
     let handle = std::thread::spawn(move || {
@@ -63,17 +66,22 @@ pub fn stall_probe(seconds: u32) -> Value {
     let over_250 = gaps.iter().filter(|g| **g > 250.0).count();
     let over_1000 = gaps.iter().filter(|g| **g > 1000.0).count();
 
+    // The rating follows the single worst gap of an unpinned thread, so the
+    // texts name likely causes without claiming a driver was proven guilty.
     let verdict = if max < 250.0 {
-        ("excellent", "No significant execution stalls. Drivers are well-behaved; suitable for real-time audio and competitive gaming.")
+        (
+            "excellent",
+            "No execution stall above 250 µs during the probe.",
+        )
     } else if max < 1000.0 {
         (
             "good",
-            "Minor stalls under 1ms, normal Windows background behavior, imperceptible in games.",
+            "Stalls under 1 ms, common Windows background behavior; usually imperceptible in games.",
         )
     } else if max < 4000.0 {
-        ("fair", "Stalls of 1-4ms detected. Can cause occasional frametime spikes or audio crackle under load. Run a deep trace to identify the driver.")
+        ("fair", "Stalls of 1-4 ms measured. Repeated stalls of this size can cause frametime spikes or audio crackle. On a loaded system they can also be ordinary preemption: repeat the probe idle, and run a deep trace to see the cause.")
     } else {
-        ("poor", "Stalls above 4ms detected, a driver is hogging DPC/ISR time. Typical culprits: Wi-Fi/LAN drivers, audio stacks, storage drivers, GPU driver during clock changes. Run a deep trace and check the worst DPC in WPA.")
+        ("poor", "Stalls above 4 ms measured. On an idle system this usually points to a long DPC/ISR (typical: Wi-Fi/LAN, audio, storage or GPU drivers); under load it can also be ordinary preemption of the probe thread. Repeat the probe idle, and run a deep trace to see which driver, if any, is responsible.")
     };
 
     json!({
@@ -111,6 +119,14 @@ pub fn wpr_stop() -> Result<Value, String> {
         "dpc-trace-{}.etl",
         chrono::Local::now().format("%Y%m%d-%H%M%S")
     ));
+    // wpr writes the trace with this process's rights into the
+    // user-writable reports folder: no link in the path, no existing file.
+    if crate::diskanalyzer::has_reparse_ancestor(&path) || path.symlink_metadata().is_ok() {
+        return Err(format!(
+            "refusing to write the trace to {}: link in the path or file exists",
+            path.display()
+        ));
+    }
     ps::exec(
         "wpr.exe",
         &["-stop", &path.to_string_lossy(), "PCOptSuite DPC trace"],

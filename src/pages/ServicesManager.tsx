@@ -14,6 +14,10 @@ const STATUS_CLS: Record<string, string> = {
   Running: "st-applied", Stopped: "st-unknown", Paused: "st-medium",
 };
 const START_OPTIONS = ["Automatic", "AutomaticDelayedStart", "Manual", "Disabled"];
+/** Never part of the bulk "disable bloat" action: disabling them is a no-op on
+ * most systems (RemoteRegistry is already off) or breaks Windows Insider /
+ * MDM enrollment and push (wisvc, dmwappushservice). Still adjustable per row. */
+const BULK_EXCLUDE = new Set(["wisvc", "dmwappushservice", "remoteregistry"]);
 
 export default function ServicesManager({ admin, focusId }: { admin: boolean; focusId?: string }) {
   const { t } = useLang();
@@ -32,7 +36,11 @@ export default function ServicesManager({ admin, focusId }: { admin: boolean; fo
   const refresh = () => {
     setLoading(true);
     api.servicesList()
-      .then((r: any) => setServices(r.services ?? []))
+      .then((r: any) => {
+        if (r.error) throw new Error(String(r.error));
+        setErr("");
+        setServices(r.services ?? []);
+      })
       .catch(e => setErr(String(e)))
       .finally(() => setLoading(false));
   };
@@ -79,7 +87,10 @@ export default function ServicesManager({ admin, focusId }: { admin: boolean; fo
   };
 
   const disableBloat = async () => {
-    for (const s of services.filter(s => s.isBloat && s.startType !== "Disabled")) {
+    const candidates = services.filter(s => s.isBloat && s.startType !== "Disabled" && !BULK_EXCLUDE.has(s.name.toLowerCase()));
+    if (!candidates.length) return;
+    if (!window.confirm(t("svcBulkConfirm").replace("{n}", String(candidates.length)))) return;
+    for (const s of candidates) {
       await doSetStartup(s, "Disabled", false);
     }
     refresh();
@@ -158,7 +169,11 @@ export default function ServicesManager({ admin, focusId }: { admin: boolean; fo
                         className="sel"
                         value={svc.startType}
                         disabled={!!busy || isBusy || !admin}
-                        onChange={e => doSetStartup(svc, e.target.value)}
+                        onChange={e => {
+                          const next = e.target.value;
+                          if (next === "Disabled" && !window.confirm(t("svcDisableConfirm").replace("{name}", svc.displayName || svc.name))) return;
+                          doSetStartup(svc, next);
+                        }}
                         title={svc.startType}
                       >
                         {START_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}

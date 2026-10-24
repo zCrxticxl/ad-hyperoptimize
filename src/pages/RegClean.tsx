@@ -111,7 +111,7 @@ export default function RegClean({ admin }: { admin: boolean }) {
     setRestoreMsg("");
     try {
       const r = await api.regcleanRestore(path);
-      setRestoreMsg(`✓ ${r.restored} restored${r.errors?.length ? ` · ${r.errors.length} errors` : ""}`);
+      setRestoreMsg(`✓ ${r.restored} ${t("regRestoredWord")}${r.errors?.length ? ` · ${r.errors.length} ${t("diskErrors")}` : ""}`);
       await doScan();
     } catch (e: any) {
       setRestoreMsg(String(e));

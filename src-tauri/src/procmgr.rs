@@ -29,6 +29,23 @@ fn is_protected(name: &str) -> bool {
     PROTECTED.contains(&name.to_lowercase().as_str())
 }
 
+/// Priority and affinity are refused for the same processes as kill: Idle
+/// or a single core on csrss/dwm/lsass stalls the whole system.
+fn refuse_protected_pid(pid: u32) -> Result<(), String> {
+    let mut sys = System::new();
+    sys.refresh_processes();
+    let p = sys
+        .process(Pid::from_u32(pid))
+        .ok_or("Process not found (already terminated?)")?;
+    if is_protected(p.name()) {
+        return Err(format!(
+            "'{}' ist ein geschützter Systemprozess; Priorität und Kerne bleiben unverändert.",
+            p.name()
+        ));
+    }
+    Ok(())
+}
+
 pub fn list() -> Value {
     let mut sys = System::new_all();
     sys.refresh_processes();
@@ -92,6 +109,7 @@ pub fn set_priority(pid: u32, priority: String) -> Result<Value, String> {
     if !PRIORITIES.contains(&priority.as_str()) {
         return Err(format!("ungültige Priorität '{priority}'"));
     }
+    refuse_protected_pid(pid)?;
     ps::run(&format!(
         "(Get-Process -Id {pid} -ErrorAction Stop).PriorityClass = '{priority}'; 'OK'"
     ))?;
@@ -103,6 +121,7 @@ pub fn set_affinity(pid: u32, mask: u64) -> Result<Value, String> {
     if mask == 0 {
         return Err("mindestens ein Kern muss ausgewählt sein".into());
     }
+    refuse_protected_pid(pid)?;
     ps::run(&format!(
         "(Get-Process -Id {pid} -ErrorAction Stop).ProcessorAffinity = [IntPtr]{mask}; 'OK'"
     ))?;
@@ -156,20 +175,6 @@ fn is_valid_exe_name(exe: &str) -> bool {
         && ps::is_safe_ident(exe)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::is_valid_exe_name;
-
-    #[test]
-    fn exe_name_validation() {
-        assert!(is_valid_exe_name("chrome.exe"));
-        assert!(is_valid_exe_name("My App (x64).exe"));
-        assert!(is_valid_exe_name("CHROME.EXE"));
-        assert!(is_valid_exe_name("evil.exe.exe.exe"));
-        assert!(!is_valid_exe_name(""));
-    }
-}
-
 /// All exes with a permanent CpuPriorityClass override.
 pub fn perm_list() -> Value {
     #[cfg(windows)]
@@ -198,6 +203,11 @@ pub fn perm_set(exe: String, priority: String) -> Result<Value, String> {
     if !is_valid_exe_name(&exe) {
         return Err("erwarte einen Exe-Namen wie 'chrome.exe'".into());
     }
+    if is_protected(&exe) {
+        return Err(format!(
+            "'{exe}' ist ein geschützter Systemprozess; keine dauerhafte Priorität."
+        ));
+    }
     #[cfg(windows)]
     {
         if !ps::is_admin() {
@@ -205,11 +215,48 @@ pub fn perm_set(exe: String, priority: String) -> Result<Value, String> {
         }
         let d = prio_to_dword(&priority)
             .ok_or("ungültige Priorität (RealTime ist dauerhaft nicht erlaubt)")?;
-        let (key, _) = RegKey::predef(HKEY_LOCAL_MACHINE)
-            .create_subkey(format!("{IFEO}\\{exe}\\PerfOptions"))
-            .map_err(|e| format!("IFEO: {e}"))?;
-        key.set_value("CpuPriorityClass", &d)
-            .map_err(|e| e.to_string())?;
+        // Journaled like every other registry change: the previous value
+        // (another tool's override, or none) is restorable from the history.
+        let path = format!("{IFEO}\\{exe}\\PerfOptions");
+        let item = crate::safety::ChangeItem::Registry {
+            root: "HKLM".into(),
+            path: path.clone(),
+            name: "CpuPriorityClass".into(),
+            prev: crate::tweaks::reg_read("HKLM", &path, "CpuPriorityClass")?,
+            new: crate::safety::RegVal::Dword(d),
+        };
+        let entry_id = crate::safety::append_entry(crate::safety::JournalEntry {
+            id: format!(
+                "permPriority-{}",
+                chrono::Local::now().format("%Y%m%d%H%M%S%6f")
+            ),
+            tweak_id: format!("permPriority:{}", exe.to_lowercase()),
+            tweak_name: format!("Permanent priority: {exe} = {priority}"),
+            origin: None,
+            time: chrono::Local::now().to_rfc3339(),
+            items: vec![item.clone()],
+            reverted: false,
+            backup_files: vec![],
+            completed: false,
+            attempted: 1,
+            reverted_items: 0,
+            untrusted: false,
+        })?;
+        if let Err(e) = crate::tweaks::apply_item(&item) {
+            let _ = crate::safety::with_journal(|entries| {
+                if let Some(en) = entries.iter_mut().find(|en| en.id == entry_id) {
+                    en.reverted = true;
+                }
+                Ok(())
+            });
+            return Err(format!("IFEO: {e}"));
+        }
+        crate::safety::with_journal(|entries| {
+            if let Some(en) = entries.iter_mut().find(|en| en.id == entry_id) {
+                en.completed = true;
+            }
+            Ok(())
+        })?;
         // Best effort: also apply to running instances right now.
         let base = exe.trim_end_matches(".exe").trim_end_matches(".EXE");
         let _ = ps::run(&format!(
@@ -236,14 +283,60 @@ pub fn perm_remove(exe: String) -> Result<Value, String> {
         let ifeo = RegKey::predef(HKEY_LOCAL_MACHINE)
             .open_subkey_with_flags(IFEO, winreg::enums::KEY_ALL_ACCESS)
             .map_err(|e| e.to_string())?;
-        ifeo.delete_subkey_all(format!("{exe}\\PerfOptions"))
-            .map_err(|e| e.to_string())?;
-        let _ = ifeo.delete_subkey(&exe); // remove now-empty parent; ignore if it has other values
+        // Only the value this app sets is removed. IFEO\<exe> can hold
+        // MitigationOptions/Debugger/GlobalFlag and PerfOptions can hold
+        // IoPriority/PagePriority from other tools; RegDeleteKey would drop
+        // a key's values silently, so keys are deleted only when verifiably
+        // empty (no values, no subkeys).
+        let perf_path = format!("{exe}\\PerfOptions");
+        match ifeo.open_subkey_with_flags(&perf_path, winreg::enums::KEY_ALL_ACCESS) {
+            Ok(perf) => match perf.delete_value("CpuPriorityClass") {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e.to_string()),
+            },
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(json!({ "exe": exe, "removed": false }));
+            }
+            Err(e) => return Err(e.to_string()),
+        }
+        let is_empty = |path: &str| {
+            ifeo.open_subkey_with_flags(path, KEY_READ)
+                .and_then(|k| k.query_info())
+                .is_ok_and(|i| i.values == 0 && i.sub_keys == 0)
+        };
+        if is_empty(&perf_path) {
+            let _ = ifeo.delete_subkey(&perf_path);
+            if is_empty(&exe) {
+                let _ = ifeo.delete_subkey(&exe);
+            }
+        }
         Ok(json!({ "exe": exe, "removed": true }))
     }
     #[cfg(not(windows))]
     {
         let _ = exe;
         Err("Windows only".into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_valid_exe_name;
+
+    #[test]
+    fn system_processes_get_no_permanent_priority() {
+        let err = super::perm_set("lsass.exe".into(), "Idle".into()).unwrap_err();
+        assert!(err.contains("geschützter"), "{err}");
+        assert!(super::perm_set("CSRSS.EXE".into(), "High".into()).is_err());
+    }
+
+    #[test]
+    fn exe_name_validation() {
+        assert!(is_valid_exe_name("chrome.exe"));
+        assert!(is_valid_exe_name("My App (x64).exe"));
+        assert!(is_valid_exe_name("CHROME.EXE"));
+        assert!(is_valid_exe_name("evil.exe.exe.exe"));
+        assert!(!is_valid_exe_name(""));
     }
 }

@@ -6,8 +6,11 @@ import { useLang } from "../i18n";
 import { localizeFinding, localizeSummary } from "../localize";
 import type { Mode } from "../App";
 
+/** Findings whose fix is a page, not a tweak. */
+const FINDING_PAGE: Record<string, string> = { heavy_startup: "startup" };
+
 export default function Dashboard({ mode, go }: { mode: Mode; go: (p: string, target?: string) => void }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const [analysis, setAnalysis] = useState<any | null>(null);
   const [meta, setMeta] = useState<{ time: string; fromCache: boolean } | null>(null);
   const [err, setErr] = useState("");
@@ -49,10 +52,11 @@ export default function Dashboard({ mode, go }: { mode: Mode; go: (p: string, ta
           <button className="btn ghost" onClick={() => run(true)} disabled={busy}>{busy ? <><Spinner /> {t("dashAnalyzing")}</> : <>↻ {t("dashReanalyze")}</>}</button>
           {actionable > 0 && <button className="btn ghost" onClick={() => go("optimize")}>{actionable} · {t("dashFixInOptimize")} →</button>}
         </div>
-        {meta && <div className="analysis-meta"><span className="status-dot is-ready" />{meta.fromCache ? `${t("dashCached")} · ` : ""}{t("dashAnalyzed")} {fmtAge(meta.time)}</div>}
+        {meta && <div className="analysis-meta"><span className="status-dot is-ready" />{meta.fromCache ? `${t("dashCached")} · ` : ""}{t("dashAnalyzed")} {fmtAge(meta.time, lang)}</div>}
+        <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>{t("dashHealthScore")}: {t("dashScoreDef")}</div>
         {err && <div className="inline-error">{err}</div>}
       </div>
-      <div className="score-orbit" style={{ background: `conic-gradient(${ringColor} 0 ${arc}%, rgba(255,255,255,.09) ${arc}%)` }}>
+      <div className="score-orbit" title={t("dashScoreDef")} style={{ background: `conic-gradient(${ringColor} 0 ${arc}%, rgba(255,255,255,.09) ${arc}%)` }}>
         <div className="score-inner"><span className="score-value">{busy && score === null ? <Spinner /> : score ?? "-"}</span><span className="score-label">{t("dashHealthScore")}</span><span className="score-total">/ 100</span></div>
       </div>
     </section>
@@ -75,7 +79,9 @@ export default function Dashboard({ mode, go }: { mode: Mode; go: (p: string, ta
             return <div key={index} className="finding-row">
               <Badge cls={`sev-${finding.severity}`}>{severityLabels[finding.severity]}</Badge>
               <div className="finding-copy"><b>{localized.title}</b><span>{localized.recommendation}</span></div>
-              {finding.tweakIds?.length > 0 && <button className="row-action" onClick={() => go("optimize", finding.tweakIds[0])}>{t("dashFix")}</button>}
+              {finding.tweakIds?.length > 0
+                ? <button className="row-action" onClick={() => go("optimize", finding.tweakIds[0])}>{t("dashFix")}</button>
+                : FINDING_PAGE[finding.code] && <button className="row-action" onClick={() => go(FINDING_PAGE[finding.code])}>{t("dashFix")}</button>}
             </div>;
           })}
         </div>

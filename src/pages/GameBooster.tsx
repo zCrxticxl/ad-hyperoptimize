@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { api } from "../api";
-import { Card, Spinner } from "../components/ui";
+import { Card, Spinner, ErrorBanner } from "../components/ui";
 import { HwWarnings } from "../components/HwWarnings";
 import { useLang } from "../i18n";
 
@@ -12,14 +12,17 @@ export default function GameBooster({ admin }: { admin: boolean }) {
   const [confirmKill, setConfirmKill] = useState(false);
   const [loading, setLoading]   = useState(true);
   const [boosted, setBoosted]   = useState<number | null>(null);
+  const [boostActive, setBoostActive] = useState(false);
   const [busy, setBusy]         = useState(false);
   const [log, setLog]           = useState("");
   const [qbToken, setQbToken]   = useState<Record<number, string>>({});
   const [qbConfirm, setQbConfirm] = useState<number | null>(null);
   const [qbBusy, setQbBusy]     = useState<number | null>(null);
+  const [loadErr, setLoadErr]   = useState("");
 
   const refresh = async () => {
     setLoading(true);
+    setLoadErr("");
     try {
       const [g, b, status] = await Promise.all([
         api.gameboostRunningGames(),
@@ -28,7 +31,10 @@ export default function GameBooster({ admin }: { admin: boolean }) {
       ]);
       setGames(g.games ?? []);
       setBg(b.procs ?? []);
-      setBoosted(status ?? null);
+      setBoosted(status?.pid ?? null);
+      setBoostActive(!!status?.active);
+    } catch (e: any) {
+      setLoadErr(String(e));
     } finally { setLoading(false); }
   };
 
@@ -58,7 +64,14 @@ export default function GameBooster({ admin }: { admin: boolean }) {
       const r = await api.quickBoostStart(g.Name);
       setQbToken(prev => ({ ...prev, [g.Id]: r.restoreToken }));
       const closed = (r.killedBackground ?? []).join(", ");
-      setLog(closed ? `${t("gameboostQuickBoostActive")} · ${t("gameboostQuickBoostClosed")} ${closed}` : t("gameboostQuickBoostActive"));
+      // e.g. priority change denied by anti-cheat: report it, don't hide it.
+      const skippedRaw = r.skipped;
+      const skipped = Array.isArray(skippedRaw)
+        ? skippedRaw.map((x: any) => typeof x === "string" ? x : x?.reason ? `${x.name ?? x.id ?? ""} ${x.reason}`.trim() : JSON.stringify(x)).join("; ")
+        : skippedRaw ? String(skippedRaw) : "";
+      let msg = closed ? `${t("gameboostQuickBoostActive")} · ${t("gameboostQuickBoostClosed")} ${closed}` : t("gameboostQuickBoostActive");
+      if (skipped) msg += ` · ${t("gameboostSkipped")}: ${skipped}`;
+      setLog(msg);
     } catch (e: any) { setLog(String(e)); }
     finally { setQbBusy(null); setQbConfirm(null); }
   };
@@ -83,6 +96,7 @@ export default function GameBooster({ admin }: { admin: boolean }) {
         {!admin && <span style={{ color: "var(--orange)" }}> · {t("gameboostAdminHint")}</span>}
       </div>
       <HwWarnings page="game_booster" />
+      <ErrorBanner msg={loadErr} onRetry={refresh} />
 
       {/* Running games */}
       <Card title={t("gameboostDetectedGames")} style={{ marginBottom: 14 }}>
@@ -109,6 +123,7 @@ export default function GameBooster({ admin }: { admin: boolean }) {
                 onClick={() => act(async () => {
                   const r = await api.gameboostStart(g.Id);
                   setBoosted(g.Id);
+                  setBoostActive(true);
                   refresh();
                   return r;
                 })}
@@ -122,6 +137,7 @@ export default function GameBooster({ admin }: { admin: boolean }) {
                 onClick={() => act(async () => {
                   const r = await api.gameboostStop();
                   setBoosted(null);
+                  setBoostActive(false);
                   refresh();
                   return r;
                 })}
@@ -150,13 +166,14 @@ export default function GameBooster({ admin }: { admin: boolean }) {
         ))}
         <div className="row" style={{ marginTop: 10, gap: 8 }}>
           <button className="btn small ghost" onClick={refresh} disabled={loading}>↺ {t("gameboostRefresh")}</button>
-          {boosted !== null && (
+          {boostActive && (
             <button
               className="btn small ghost danger"
               disabled={busy}
               onClick={() => act(async () => {
                 const r = await api.gameboostStop();
                 setBoosted(null);
+                setBoostActive(false);
                 return r;
               })}
             >

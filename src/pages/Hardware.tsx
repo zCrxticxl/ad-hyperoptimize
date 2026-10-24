@@ -1,13 +1,13 @@
 import React, { useEffect, useState } from "react";
 import { api, fmtBytes, fmtAge } from "../api";
-import { Card, Spinner, RawJson } from "../components/ui";
+import { Card, Spinner, RawJson, ActionBtn } from "../components/ui";
 import { useLang } from "../i18n";
 import type { Mode } from "../App";
 
 const asArr = (v: any) => (Array.isArray(v) ? v : v && !v.error ? [v] : []);
 
 export default function Hardware({ mode }: { mode: Mode }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const [scan, setScan] = useState<any | null>(null);
   const [meta, setMeta] = useState<{ time: string; fromCache: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -47,7 +47,7 @@ export default function Hardware({ mode }: { mode: Mode }) {
     <>
       <h1 className="page-title">{t("hwTitle")}</h1>
       <div className="page-sub">
-        {meta && <>{t("hwScanned")} {fmtAge(meta.time)}{meta.fromCache ? ` (${t("hwCached")})` : ""} · </>}
+        {meta && <>{t("hwScanned")} {fmtAge(meta.time, lang)}{meta.fromCache ? ` (${t("hwCached")})` : ""} · </>}
         <button className="text-action" onClick={() => load(true)}>
           {busy ? t("hwRescanning") : t("hwRescanNow")}
         </button>
@@ -136,7 +136,7 @@ export default function Hardware({ mode }: { mode: Mode }) {
       <div className="grid grid-2 mt">
         <Card title={t("hwBootTimeAnalysis")}>
           {!boot ? (
-            <button className="btn ghost small" onClick={() => api.bootAnalysis().then(setBoot)}>{t("hwAnalyzeBootHistory")}</button>
+            <ActionBtn className="btn ghost small" label={t("hwAnalyzeBootHistory")} onRun={async () => setBoot(await api.bootAnalysis())} />
           ) : (
             <table className="tbl">
               <thead><tr><th scope="col">{t("hwBoot")}</th><th scope="col">{t("hwDuration")}</th></tr></thead>
@@ -151,8 +151,8 @@ export default function Hardware({ mode }: { mode: Mode }) {
         </Card>
         <Card title={t("hwNetworkDiagnostics")}>
           <div className="row">
-            <button className="btn ghost small" onClick={() => api.networkDiag().then(setNet)}>{t("hwLatencyPacketLoss")}</button>
-            <button className="btn ghost small" onClick={() => api.dnsBenchmark().then(setDns)}>{t("hwDnsBenchmark")}</button>
+            <ActionBtn className="btn ghost small" label={t("hwLatencyPacketLoss")} onRun={async () => setNet(await api.networkDiag())} />
+            <ActionBtn className="btn ghost small" label={t("hwDnsBenchmark")} onRun={async () => setDns(await api.dnsBenchmark())} />
           </div>
           {net && !net.error && (
             <div className="mt">{t("hwAvg")} <b>{net.avgMs} ms</b> · {t("hwMin")} {net.minMs} · {t("hwMax")} {net.maxMs} · {t("hwLoss")} <b>{net.lossPct}%</b></div>
@@ -162,7 +162,7 @@ export default function Hardware({ mode }: { mode: Mode }) {
             <table className="tbl mt">
               <tbody>
                 {asArr(dns).map((d: any, i: number) => (
-                  <tr key={i}><td>{d.server}</td><td>{d.ms} ms</td></tr>
+                  <tr key={i}><td>{d.server}</td><td>{d.ms != null ? `${d.ms} ms` : <span style={{ color: "var(--yellow)" }}>✘ {d.error ?? "-"}</span>}</td></tr>
                 ))}
               </tbody>
             </table>

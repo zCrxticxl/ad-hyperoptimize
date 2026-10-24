@@ -1,43 +1,48 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { Card, Spinner, Badge } from "../components/ui";
-import { useLang } from "../i18n";
+import { useLang, TKey } from "../i18n";
+import { localizeCatalog } from "../localize";
 import { useFeatureFocus } from "../hooks/useFeatureFocus";
 
 type PTweak = {
   id: string; name: string; category: string;
-  description: string; risk: "Low" | "Medium" | "High"; applied: boolean;
+  description: string; risk: "Low" | "Medium" | "High"; applied: boolean; canRevert: boolean;
+  retiredReason?: string | null;
 };
 
 const RISK_CLS: Record<string, string> = { Low: "risk-Low", Medium: "risk-Medium", High: "risk-High" };
 
-// Keys are backend category names (always German); icons and display labels are translated
+// Keys are the backend category names (privacy.rs, English); icons and display
+// labels are translated here.
 const CAT_ICONS: Record<string, string> = {
-  "Telemetrie": "📡",
-  "Werbung": "📢",
-  "Suche": "🔍",
-  "Aktivitätsverlauf": "📋",
-  "Eingabe": "⌨",
-  "Standort": "📍",
+  "Telemetry": "📡",
+  "Advertising": "📢",
+  "Search": "🔍",
+  "Activity History": "📋",
+  "Input": "⌨",
+  "Location": "📍",
   "Feedback": "💬",
-  "Netzwerk": "🌐",
+  "Network": "🌐",
 };
 
 export default function PrivacyCenter({ admin, focusId }: { admin: boolean; focusId?: string }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
 
-  // Translate backend category names (backend always returns German keys)
+  // Translate backend category names (privacy.rs returns English names).
   const CAT_LABEL: Record<string, string> = {
-    "Telemetrie":       t("catTelemetrie"),
-    "Werbung":          t("catWerbung"),
-    "Suche":            t("catSuche"),
-    "Aktivitätsverlauf":t("catAktivitaet"),
-    "Eingabe":          t("catEingabe"),
-    "Standort":         t("catStandort"),
+    "Telemetry":        t("catTelemetrie"),
+    "Advertising":      t("catWerbung"),
+    "Search":           t("catSuche"),
+    "Activity History": t("catAktivitaet"),
+    "Input":            t("catEingabe"),
+    "Location":         t("catStandort"),
     "Feedback":         t("catFeedback"),
-    "Netzwerk":         t("catNetzwerk"),
+    "Network":          t("catNetzwerk"),
   };
   const [tweaks, setTweaks]   = useState<PTweak[]>([]);
+  // Retired items, only present while still active (backend filters).
+  const [retired, setRetired] = useState<PTweak[]>([]);
   const [applied, setApplied] = useState(0);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy]       = useState<string | null>(null);
@@ -47,18 +52,34 @@ export default function PrivacyCenter({ admin, focusId }: { admin: boolean; focu
   useFeatureFocus(focusId, !loading);
   const [openId, setOpenId]   = useState<string | null>(null);
 
+  // Localized reason; the backend text is the fallback for unknown ids.
+  const reason = (id: string, fallback?: string | null) => {
+    const key = `wdReason_${id}`;
+    const text = t(key as TKey);
+    return text === key ? fallback ?? "" : text;
+  };
+
   const push = (m: string) =>
     setLog(l => [`[${new Date().toLocaleTimeString()}] ${m}`, ...l.slice(0, 49)]);
+  const fmt = (key: Parameters<typeof t>[0], name: string, warning = "") =>
+    t(key).replace("{name}", name).replace("{warning}", warning);
 
   const refresh = () => {
     setLoading(true);
     api.privacyScan()
-      .then((r: any) => { setTweaks(r.tweaks ?? []); setApplied(r.applied ?? 0); })
+      .then((r: any) => {
+        if (r.error) throw new Error(String(r.error));
+        setErr("");
+        const loc = (tw: PTweak): PTweak => ({ ...tw, ...localizeCatalog("privacy", tw.id, tw.name, tw.description, lang) });
+        setTweaks((r.tweaks ?? []).map(loc));
+        setRetired((r.retired ?? []).map(loc));
+        setApplied(r.applied ?? 0);
+      })
       .catch(e => setErr(String(e)))
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { refresh(); }, []);
+  useEffect(() => { refresh(); }, [lang]);
 
   const categories = useMemo(() => [...new Set(tweaks.map(t => t.category))], [tweaks]);
 
@@ -67,36 +88,59 @@ export default function PrivacyCenter({ admin, focusId }: { admin: boolean; focu
     [tweaks, filter]);
 
   const doApply = async (tw: PTweak, refreshAfter = true) => {
+    if (!admin || busy) return;
     setBusy(tw.id);
-    push(`Applying ${tw.name}…`);
+    push(fmt("privLogApplying", tw.name));
     try {
       const res = await api.privacyApply(tw.id);
-      if (res?.ok === false) push(`✘ ${tw.name}: not applied, ${res.warning}`);
-      else if (res?.warning) push(`⚠ ${tw.name}: applied with warning, ${res.warning}`);
+      if (res?.ok === false) push(`✘ ${fmt("privLogNotApplied", tw.name, String(res.warning ?? ""))}`);
+      else if (res?.warning) push(`⚠ ${fmt("privLogAppliedWarn", tw.name, String(res.warning))}`);
       else push(`✔ ${tw.name} ${t("active")}`);
     } catch (e: any) { push(`✘ ${tw.name}: ${e}`); setErr(String(e)); }
     finally { setBusy(null); if (refreshAfter) refresh(); }
   };
 
   const doRevert = async (tw: PTweak) => {
+    if (!admin || busy) return;
     setBusy(tw.id);
-    push(`Reverting ${tw.name}…`);
+    push(fmt("privLogReverting", tw.name));
     try {
       const res = await api.privacyRevert(tw.id);
-      if (res?.ok === false) push(`✘ ${tw.name}: not reverted, ${res.warning}`);
-      else if (res?.warning) push(`⚠ ${tw.name}: reverted with warning, ${res.warning}`);
-      else push(`↩ ${tw.name} reverted`);
+      if (res?.ok === false) push(`✘ ${fmt("privLogNotReverted", tw.name, String(res.warning ?? ""))}`);
+      else if (res?.warning) push(`⚠ ${fmt("privLogRevertedWarn", tw.name, String(res.warning))}`);
+      else push(`↩ ${fmt("privLogReverted", tw.name)}`);
     } catch (e: any) { push(`✘ ${tw.name}: ${e}`); setErr(String(e)); }
     finally { setBusy(null); refresh(); }
   };
 
   const applyAll = async () => {
+    if (!admin || busy) return;
     const pending = tweaks.filter(t => !t.applied);
-    for (const t of pending) await doApply(t, false);
+    if (!pending.length) return;
+    const risky = pending.filter(tw => tw.risk !== "Low");
+    let msg = t("privApplyAllConfirm").replace("{n}", String(pending.length));
+    if (risky.length) msg += `\n\n${t("privApplyAllRiskList")}\n${risky.map(tw => `• ${tw.name} (${tw.risk})`).join("\n")}`;
+    if (!window.confirm(msg)) return;
+    setBusy("all");
+    let succeeded = 0;
+    const failed: string[] = [];
+    for (const tw of pending) {
+      try {
+        const result = await api.privacyApply(tw.id);
+        if (result?.ok === false) failed.push(tw.name);
+        else succeeded++;
+      } catch (error) {
+        failed.push(`${tw.name}: ${String(error)}`);
+      }
+    }
+    push(t("privLogSummary").replace("{ok}", String(succeeded)).replace("{failed}", String(failed.length)));
+    if (failed.length) setErr(failed.join("; "));
+    setBusy(null);
     refresh();
   };
 
   const totalApplied = tweaks.filter(t => t.applied).length;
+  // Share of the catalog that is applied, not a measured privacy score.
   const pct = tweaks.length > 0 ? Math.round(totalApplied / tweaks.length * 100) : 0;
 
   return (
@@ -106,6 +150,7 @@ export default function PrivacyCenter({ admin, focusId }: { admin: boolean; focu
 
       {loading && <><Spinner /> <span className="muted">{t("privLoading")}</span></>}
       {err && <div style={{ color: "var(--red)", marginBottom: 10 }}>{err}</div>}
+      {!admin && <div style={{ color: "var(--yellow)", marginBottom: 10, fontSize: 13 }}>{t("adminRestart")}</div>}
 
       {!loading && tweaks.length > 0 && (
         <>
@@ -116,7 +161,7 @@ export default function PrivacyCenter({ admin, focusId }: { admin: boolean; focu
                 <div style={{
                   fontSize: 36, fontWeight: 900,
                   color: pct >= 80 ? "var(--green)" : pct >= 50 ? "var(--yellow)" : "var(--red)"
-                }}>{pct}%</div>
+                }}>{totalApplied}/{tweaks.length}</div>
                 <div className="muted" style={{ fontSize: 11 }}>{t("privScore")}</div>
               </div>
               <div style={{ flex: 1 }}>
@@ -132,8 +177,8 @@ export default function PrivacyCenter({ admin, focusId }: { admin: boolean; focu
                 </div>
               </div>
               <div style={{ display: "flex", gap: 8 }}>
-                <button className="btn" disabled={!!busy || totalApplied === tweaks.length} onClick={applyAll}>
-                  {t("applyAll")}
+                <button className="btn" disabled={!!busy || !admin || totalApplied === tweaks.length} onClick={applyAll}>
+                  {busy === "all" ? <Spinner /> : t("applyAll")}
                 </button>
                 <button className="btn ghost small" onClick={refresh} disabled={loading || !!busy}>{t("refresh")}</button>
               </div>
@@ -181,15 +226,15 @@ export default function PrivacyCenter({ admin, focusId }: { admin: boolean; focu
                     <button className="btn small ghost" onClick={() => setOpenId(isOpen ? null : tw.id)}>
                       {isOpen ? "▲" : "▼"}
                     </button>
-                    {tw.applied ? (
-                      <button className="btn small ghost" disabled={isBusy} onClick={() => doRevert(tw)}>
+                    {tw.applied && tw.canRevert ? (
+                      <button className="btn small ghost" disabled={!!busy || !admin} onClick={() => doRevert(tw)}>
                         {isBusy ? <Spinner /> : t("revert")}
                       </button>
-                    ) : (
-                      <button className="btn small" disabled={isBusy} onClick={() => doApply(tw)}>
+                    ) : !tw.applied ? (
+                      <button className="btn small" disabled={!!busy || !admin} onClick={() => doApply(tw)}>
                         {isBusy ? <Spinner /> : t("privActivate")}
                       </button>
-                    )}
+                    ) : null}
                   </div>
                   {isOpen && (
                     <div className="tweak-detail">
@@ -201,6 +246,43 @@ export default function PrivacyCenter({ admin, focusId }: { admin: boolean; focu
             })}
           </Card>
         </>
+      )}
+
+      {!loading && retired.length > 0 && (
+        <div className="mt">
+          <Card title={`${t("wdTitle")} (${retired.length})`}>
+            <div className="muted" style={{ fontSize: 12.5, marginBottom: 10 }}>{t("wdPrivacyHint")}</div>
+            {retired.map(tw => (
+              <div className="tweak" key={tw.id} data-focus-id={tw.id}>
+                <div className="tweak-head">
+                  <span className="tweak-name">{tw.name}</span>
+                  <Badge cls="st-partial">{t("active")}</Badge>
+                  {tw.canRevert && (
+                    <button className="btn small ghost" disabled={!!busy || !admin} onClick={() => doRevert(tw)}>
+                      {busy === tw.id ? <Spinner /> : t("wdReset")}
+                    </button>
+                  )}
+                </div>
+                <div className="tweak-detail">
+                  <p>{reason(tw.id, tw.retiredReason)}</p>
+                  {!tw.canRevert && <p className="muted">{t("wdNoCapture")}</p>}
+                </div>
+              </div>
+            ))}
+          </Card>
+        </div>
+      )}
+
+      {log.length > 0 && (
+        <div className="mt">
+          <Card title={t("log")}>
+            <div className="mono muted" style={{ fontSize: 11, lineHeight: 1.8, maxHeight: 160, overflowY: "auto" }}>
+              {log.map((l, i) => (
+                <div key={i} style={{ color: l.includes("✔") ? "var(--green)" : l.includes("✘") ? "var(--red)" : undefined }}>{l}</div>
+              ))}
+            </div>
+          </Card>
+        </div>
       )}
     </>
   );

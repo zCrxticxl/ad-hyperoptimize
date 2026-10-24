@@ -23,6 +23,26 @@ fn wmi_arr(v: &Value) -> Vec<&Value> {
     }
 }
 
+/// Milliseconds since the Unix epoch from a date as Windows PowerShell 5.1's
+/// ConvertTo-Json writes it: `/Date(1698765432100)/` (DateTimeOffset adds
+/// `+0100`). RFC 3339 strings (other serializers) are accepted too.
+fn ps_date_ms(s: &str) -> Option<i64> {
+    if let Some(inner) = s
+        .trim()
+        .strip_prefix("/Date(")
+        .and_then(|r| r.strip_suffix(")/"))
+    {
+        let end = inner[1..]
+            .find(['+', '-'])
+            .map(|i| i + 1)
+            .unwrap_or(inner.len());
+        return inner[..end].parse().ok();
+    }
+    chrono::DateTime::parse_from_rfc3339(s.trim())
+        .ok()
+        .map(|d| d.timestamp_millis())
+}
+
 struct Finding {
     severity: u8, // 1 info, 2 low, 3 medium, 4 high, 5 critical
     code: &'static str,
@@ -33,32 +53,14 @@ struct Finding {
     params: Value,
 }
 
-/// Well-known power scheme GUIDs — locale-invariant, unlike the plan name
-/// that `powercfg /getactivescheme` prints around them.
-const PLAN_HIGH_PERFORMANCE: &str = "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c";
-const PLAN_ULTIMATE: &str = "e9a42b02-d5df-448d-aa00-03f14749eb61";
-const PLAN_BALANCED: &str = "381b4222-f694-41f0-9685-ff5bb260df2e";
+/// Power saver scheme GUID: locale-invariant, unlike the plan name that
+/// `powercfg /getactivescheme` prints around it.
 const PLAN_POWER_SAVER: &str = "a1841308-3541-4fab-bc81-f71556f20b4a";
 
-/// Decide from `powercfg /getactivescheme` output whether the active plan is
-/// a performance plan. Known stock GUIDs decide directly; OEM/custom schemes
-/// (unknown GUID) fall back to name matching so vendor gaming plans on
-/// English/German systems are still recognized.
-fn plan_is_suboptimal(raw: &str) -> bool {
-    let guid = raw
-        .split_whitespace()
-        .find(|t| crate::ps::is_guid(t))
-        .map(|g| g.to_ascii_lowercase());
-    match guid.as_deref() {
-        Some(PLAN_HIGH_PERFORMANCE) | Some(PLAN_ULTIMATE) => false,
-        Some(PLAN_BALANCED) | Some(PLAN_POWER_SAVER) => true,
-        _ => {
-            let name = raw.to_lowercase();
-            !(name.contains("high performance")
-                || name.contains("ultimate")
-                || name.contains("h\u{00f6}chstleistung"))
-        }
-    }
+/// True when `powercfg /getactivescheme` reports the stock Power saver plan.
+fn plan_is_power_saver(raw: &str) -> bool {
+    raw.split_whitespace()
+        .any(|t| t.eq_ignore_ascii_case(PLAN_POWER_SAVER))
 }
 
 fn f(
@@ -101,8 +103,8 @@ pub fn analyze(scan: &Value, security: &Value, cleanup: &Value) -> Value {
                 let total_gb = total as f64 / 1_048_576.0;
                 findings.push(f(4, "high_mem_pressure", "High memory pressure",
                     format!("{used_pct:.0}% of {total_gb:.1} GB RAM in use at scan time. Sustained >85% causes paging and stutter."),
-                    "Review top memory processes on the Monitor page; consider disabling UWP background apps.",
-                    vec!["background_apps_off"],
+                    "Review top memory processes on the Monitor page; close what you do not need while gaming.",
+                    vec![],
                     json!({ "pct": (used_pct).round(), "totalGb": (total_gb * 10.0).round() / 10.0 })));
             }
         }
@@ -165,11 +167,20 @@ pub fn analyze(scan: &Value, security: &Value, cleanup: &Value) -> Value {
     // Startup bloat
     if let Some(items) = scan["startup_items"].as_array() {
         if items.len() > 10 {
-            findings.push(f(3, "heavy_startup", "Heavy startup load",
-                format!("{} programs launch at login. Each adds boot time and idle RAM.", items.len()),
-                "Disable nonessential entries (Task Manager → Startup). Apply the startup-delay tweak for faster time-to-desktop.",
-                vec!["startup_delay_off"],
-                json!({ "count": items.len() })));
+            findings.push(f(
+                3,
+                "heavy_startup",
+                "Heavy startup load",
+                format!(
+                    "{} programs launch at login. Each adds boot time and idle RAM.",
+                    items.len()
+                ),
+                // No tweak: startup_delay_off has no proven benefit, and the
+                // real fix is disabling entries on the Startup page.
+                "Disable nonessential entries on the Startup page.",
+                vec![],
+                json!({ "count": items.len() }),
+            ));
         }
     }
 
@@ -232,8 +243,11 @@ pub fn analyze(scan: &Value, security: &Value, cleanup: &Value) -> Value {
         }
     }
 
-    // Hosts file hijack indicators
-    if let Some(c) = security["hosts"]["count"].as_u64() {
+    // Hosts file hijack indicators (security::hosts_entries: active lines).
+    if let Some(c) = security["hosts"]["active"]
+        .as_array()
+        .map(|a| a.len() as u64)
+    {
         if c > 5 {
             findings.push(f(3, "hosts_entries", "Non-default hosts file entries",
                 format!("{c} active hosts entries. Legit for ad-blocking/dev work; also a classic hijack vector."),
@@ -265,7 +279,7 @@ pub fn analyze(scan: &Value, security: &Value, cleanup: &Value) -> Value {
     if let Some(svcs) = scan["vbs"]["SecurityServicesRunning"].as_array() {
         if svcs.iter().any(|v| v.as_i64() == Some(2)) {
             findings.push(f(1, "hvci_active", "Memory Integrity (HVCI) is active",
-                "Virtualization-based security with HVCI is running. It's a genuine security protection but costs roughly 3-8% performance in CPU-bound games on some systems.".into(),
+                "Virtualization-based security with HVCI is running. It is a genuine security protection; in some CPU-bound games it can cost performance.".into(),
                 "Informational only, this app will not change security protections. If you want maximum FPS and accept the tradeoff, toggle it yourself: Windows Security → Device Security → Core Isolation. Benchmark before/after.",
                 vec![],
                 json!({})));
@@ -291,10 +305,8 @@ pub fn analyze(scan: &Value, security: &Value, cleanup: &Value) -> Value {
 
     // Long uptime
     if let Some(last_boot) = scan["os"]["LastBootUpTime"].as_str() {
-        if let Ok(boot_time) = chrono::DateTime::parse_from_rfc3339(last_boot)
-            .or_else(|_| chrono::DateTime::parse_from_str(last_boot, "%Y%m%d%H%M%S%.f%z"))
-        {
-            let hours = (chrono::Local::now().timestamp() - boot_time.timestamp()) / 3600;
+        if let Some(boot_ms) = ps_date_ms(last_boot) {
+            let hours = (chrono::Local::now().timestamp_millis() - boot_ms) / 3_600_000;
             if hours > 168 {
                 findings.push(f(2, "long_uptime", "System not rebooted in over 7 days",
                     format!("Last reboot was {hours} hours ago. Long uptimes accumulate memory leaks, pending updates, and degraded performance."),
@@ -316,13 +328,14 @@ pub fn analyze(scan: &Value, security: &Value, cleanup: &Value) -> Value {
         }
     }
 
-    // Non-power-plan (not High Performance or Ultimate)
+    // Power saver only: Balanced boosts quickly on current CPUs (see the
+    // optimization registry: High performance gains are usually small).
     if let Some(plan) = scan["power_plan"].as_str() {
-        if plan_is_suboptimal(plan) {
+        if plan_is_power_saver(plan) {
             let plan_trimmed = plan.trim();
-            findings.push(f(2, "suboptimal_power_plan", "Suboptimal power plan active",
-                format!("Active power plan: '{plan_trimmed}'. Balanced/Power Saver plans throttle CPU frequency and increase latency."),
-                "Switch to High Performance or Ultimate Performance on the Power Plan page.",
+            findings.push(f(2, "suboptimal_power_plan", "Power saver plan active",
+                format!("Active power plan: '{plan_trimmed}'. Power saver limits CPU clocks."),
+                "On a desktop or while plugged in, switch to Balanced or High performance on the Power Plan page.",
                 vec![],
                 json!({ "plan": plan_trimmed })));
         }
@@ -354,7 +367,7 @@ pub fn analyze(scan: &Value, security: &Value, cleanup: &Value) -> Value {
     if let Some(svcs) = scan["services_running"].as_array() {
         if svcs.len() > 150 {
             findings.push(f(2, "many_services", "High number of running background services",
-                format!("{} services currently running. Many are Windows bloat or third-party telemetry that increase RAM usage and boot time.", svcs.len()),
+                format!("{} services currently running. Each one uses some RAM; check third-party ones you do not need.", svcs.len()),
                 "Review and disable unnecessary services on the Services page.",
                 vec![],
                 json!({ "count": svcs.len() })));
@@ -381,23 +394,21 @@ pub fn analyze(scan: &Value, security: &Value, cleanup: &Value) -> Value {
     }
 
     // GPU driver outdated (> 2 years old)
-    {
-        for gpu in wmi_arr(&scan["gpu"]) {
-            if let Some(date_str) = gpu["DriverDate"].as_str() {
-                if date_str.len() >= 8 {
-                    if let Ok(year) = date_str[0..4].parse::<i32>() {
-                        let current_year = chrono::Local::now().year();
-                        if current_year - year >= 2 {
-                            let date_short = &date_str[0..8];
-                            findings.push(f(2, "gpu_driver_old", "GPU driver is over 2 years old",
-                                format!("GPU driver date: {date_short}. Outdated drivers miss performance optimizations, game-specific fixes, and may cause crashes."),
-                                "Update GPU drivers from the Drivers page or manufacturer website.",
-                                vec![],
-                                json!({ "date": date_short })));
-                        }
-                    }
-                }
-            }
+    for gpu in wmi_arr(&scan["gpu"]) {
+        let driver_date = gpu["DriverDate"]
+            .as_str()
+            .and_then(ps_date_ms)
+            .and_then(chrono::DateTime::from_timestamp_millis);
+        let Some(date) = driver_date else {
+            continue;
+        };
+        if chrono::Local::now().year() - date.year() >= 2 {
+            let date_short = date.format("%Y%m%d").to_string();
+            findings.push(f(2, "gpu_driver_old", "GPU driver is over 2 years old",
+                format!("GPU driver date: {date_short}. Outdated drivers miss performance optimizations, game-specific fixes, and may cause crashes."),
+                "Update GPU drivers from the Drivers page or manufacturer website.",
+                vec![],
+                json!({ "date": date_short })));
         }
     }
 
@@ -492,4 +503,75 @@ pub fn analyze(scan: &Value, security: &Value, cleanup: &Value) -> Value {
             "recommendation": x.recommendation, "tweakIds": x.tweak_ids, "params": x.params,
         })).collect::<Vec<_>>(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{analyze, plan_is_power_saver, ps_date_ms};
+
+    #[test]
+    fn powershell_dates_are_parsed() {
+        assert_eq!(ps_date_ms("/Date(1698765432100)/"), Some(1698765432100));
+        assert_eq!(
+            ps_date_ms("/Date(1698765432100+0100)/"),
+            Some(1698765432100)
+        );
+        assert_eq!(ps_date_ms("/Date(-1000)/"), Some(-1000));
+        assert_eq!(ps_date_ms("2023-10-31T15:17:12Z"), Some(1698765432000));
+        assert_eq!(ps_date_ms("20231031"), None);
+    }
+
+    #[test]
+    fn only_power_saver_is_flagged() {
+        assert!(plan_is_power_saver(
+            "Power Scheme GUID: a1841308-3541-4fab-bc81-f71556f20b4a  (Power saver)"
+        ));
+        assert!(!plan_is_power_saver(
+            "Power Scheme GUID: 381b4222-f694-41f0-9685-ff5bb260df2e  (Balanced)"
+        ));
+    }
+
+    #[test]
+    fn hosts_and_uptime_findings_fire_on_real_shapes() {
+        let scan = json!({ "os": { "LastBootUpTime": "/Date(1000)/" } });
+        let security = json!({ "hosts": { "active": ["a","b","c","d","e","f"], "disabled": [] } });
+        let out = analyze(&scan, &security, &json!([]));
+        let codes: Vec<&str> = out["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|f| f["code"].as_str().unwrap())
+            .collect();
+        assert!(codes.contains(&"hosts_entries"), "{codes:?}");
+        assert!(codes.contains(&"long_uptime"), "{codes:?}");
+    }
+    use serde_json::json;
+
+    /// A finding's "Fix" button jumps to its tweak, so it may only name tweaks
+    /// the engine offers (not retired, not "no proven benefit").
+    #[test]
+    fn findings_only_link_offerable_tweaks() {
+        let scan = json!({
+            "startup_items": (0..15).map(|i| json!({ "Name": format!("app{i}") })).collect::<Vec<_>>(),
+            "volumes": [{ "DriveLetter": "C", "Size": 100.0, "SizeRemaining": 5.0 }],
+        });
+        let out = analyze(&scan, &json!({}), &json!({}));
+        let findings = out["findings"].as_array().expect("findings");
+        let startup = findings
+            .iter()
+            .find(|f| f["code"] == "heavy_startup")
+            .expect("heavy_startup");
+        assert!(startup["tweakIds"].as_array().unwrap().is_empty());
+        for f in findings {
+            for id in f["tweakIds"].as_array().unwrap() {
+                let id = id.as_str().unwrap();
+                let m = crate::optregistry::meta(id).unwrap_or_else(|| panic!("{id} unknown"));
+                assert!(
+                    crate::optregistry::offerable(m.evidence),
+                    "{id} is not offerable"
+                );
+                assert!(!crate::optregistry::is_retired(id), "{id} is retired");
+            }
+        }
+    }
 }

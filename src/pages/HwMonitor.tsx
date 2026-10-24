@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { api } from "../api";
-import { Card, Spinner } from "../components/ui";
+import { Card, Spinner, ErrorBanner } from "../components/ui";
 import { useLang } from "../i18n";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -200,6 +200,8 @@ export default function HwMonitor() {
   const [err, setErr] = useState("");
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
   const errStreak = useRef(0);
+  // A slow hwFull() must not stack up: skip poll ticks while one is in flight.
+  const inFlight = useRef(false);
 
   // Auto-refresh stops after 3 consecutive failures so a broken backend is not
   // polled (and the error not re-flashed) every 10s; a successful load — e.g.
@@ -212,6 +214,8 @@ export default function HwMonitor() {
   };
 
   const load = async () => {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setBusy(true);
     try {
       const d = await api.hwFull();
@@ -225,6 +229,7 @@ export default function HwMonitor() {
       errStreak.current += 1;
       if (errStreak.current >= 3) stopPolling();
     } finally {
+      inFlight.current = false;
       setBusy(false);
     }
   };
@@ -248,7 +253,9 @@ export default function HwMonitor() {
         {" " + t("hwMonAutoRefresh")}
       </div>
 
-      {!data ? (
+      {!data && err ? (
+        <ErrorBanner msg={err} onRetry={load} />
+      ) : !data ? (
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 40 }}>
           <Spinner /> <span className="muted">{t("hwMonLoading")}</span>
         </div>

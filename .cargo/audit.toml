@@ -1,0 +1,22 @@
+# cargo-audit configuration (read by the cargo-audit CI job, which runs from
+# the repository root with --file src-tauri/Cargo.lock).
+#
+# Every ignored advisory needs a reason and a removal condition. Review this
+# list whenever tauri-plugin-updater is updated.
+
+[advisories]
+ignore = [
+    # zip 4.6.1, pulled in only by tauri-plugin-updater (latest 2.14.0 still
+    # depends on zip 4.x; the fixes need zip >= 9.0.0).
+    #   RUSTSEC-2026-0367  SUID/SGID bits preserved on extraction
+    #   RUSTSEC-2026-0368  extract() creates symlinks outside the destination
+    #   RUSTSEC-2026-0369  Unix permissions applied through symlinks
+    # Not reachable here: releases ship plain NSIS .exe / MSI installers and
+    # latest.json points at those; the updater never extracts a zip archive.
+    # Every update is also verified against the embedded minisign key before
+    # it is used. All three concern Unix permission/symlink semantics.
+    # Remove once tauri-plugin-updater depends on zip >= 9.
+    "RUSTSEC-2026-0367",
+    "RUSTSEC-2026-0368",
+    "RUSTSEC-2026-0369",
+]

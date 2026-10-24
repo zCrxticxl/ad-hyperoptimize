@@ -112,7 +112,7 @@ export default function Monitor() {
 
       <Card title={t("monDisks")} style={{ marginTop: 14 }}>
         {latest?.disks.map((d, i) => {
-          const used = ((d.totalGb - d.freeGb) / d.totalGb) * 100;
+          const used = d.totalGb > 0 ? ((d.totalGb - d.freeGb) / d.totalGb) * 100 : 0;
           return (
             <div key={i} className="mt">
               <div className="row" style={{ justifyContent: "space-between" }}>

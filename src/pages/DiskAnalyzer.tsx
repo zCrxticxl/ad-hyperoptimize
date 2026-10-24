@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { api, fmtBytes } from "../api";
 import { Card, Spinner } from "../components/ui";
 import { useLang } from "../i18n";
+import { Organizer } from "../components/Organizer";
 
 // ── types ────────────────────────────────────────────────────────────────────
 
@@ -49,6 +50,7 @@ function ActionBar({ selection, selectionSize, drives, currentRoot, onClear, onD
   const { t } = useLang();
   const [confirm, setConfirm] = useState<"delete" | "move" | null>(null);
   const [moveDest, setMoveDest] = useState("");
+  const [customDest, setCustomDest] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<string | null>(null);
 
@@ -58,7 +60,10 @@ function ActionBar({ selection, selectionSize, drives, currentRoot, onClear, onD
     setBusy(true);
     try {
       const r = await api.diskDelete([...selection]);
-      setResult(`✔ ${r.deleted} ${t("diskDeleted")}${r.failed ? `, ${r.failed} ${t("diskErrors")}` : ""}`);
+      // A refusal (protected path, junction) or a locked file must not be
+      // reported as success: show the first reason, red when nothing went.
+      const firstErr = r.errors?.[0] ? ` (${r.errors[0]})` : "";
+      setResult(`${r.deleted ? "✔" : "✘"} ${r.deleted} ${t("diskDeleted")}${r.failed ? `, ${r.failed} ${t("diskErrors")}${firstErr}` : ""}`);
       onDeleted();
       onClear();
     } catch (e: any) {
@@ -70,11 +75,13 @@ function ActionBar({ selection, selectionSize, drives, currentRoot, onClear, onD
   };
 
   const doMove = async () => {
-    if (!moveDest) return;
+    const destination = moveDest === "custom" ? customDest : moveDest;
+    if (!destination) return;
     setBusy(true);
     try {
-      const r = await api.diskMove([...selection], moveDest);
-      setResult(`✔ ${r.moved} ${t("diskMoved")}${r.failed ? `, ${r.failed} ${t("diskErrors")}` : ""}`);
+      const r = await api.diskMove([...selection], destination);
+      const firstErr = r.errors?.[0] ? ` (${r.errors[0]})` : "";
+      setResult(`${r.moved ? "✔" : "✘"} ${r.moved} ${t("diskMoved")}${r.failed ? `, ${r.failed} ${t("diskErrors")}${firstErr}` : ""}`);
       onMoved();
       onClear();
     } catch (e: any) {
@@ -131,9 +138,9 @@ function ActionBar({ selection, selectionSize, drives, currentRoot, onClear, onD
             <option value="custom">{t("diskCustomPath")}</option>
           </select>
           {moveDest === "custom" && (
-            <CustomPathInput onChange={setMoveDest} />
+            <CustomPathInput value={customDest} onChange={setCustomDest} />
           )}
-          <button className="btn small" onClick={doMove} disabled={busy || !moveDest || moveDest === "custom"}>
+          <button className="btn small" onClick={doMove} disabled={busy || !moveDest || (moveDest === "custom" && !customDest)}>
             {busy ? <Spinner /> : t("diskDoMove")}
           </button>
           <button className="btn small ghost" onClick={() => setConfirm(null)} disabled={busy}>{t("cancel")}</button>
@@ -147,7 +154,7 @@ function ActionBar({ selection, selectionSize, drives, currentRoot, onClear, onD
             onClick={() => setConfirm("delete")}>
             {t("diskDelete")}
           </button>
-          <button className="btn small ghost" onClick={() => { setConfirm("move"); setMoveDest(""); }}>
+          <button className="btn small ghost" onClick={() => { setConfirm("move"); setMoveDest(""); setCustomDest(""); }}>
             {t("diskMove")}
           </button>
           <button className="btn small ghost" onClick={onClear} style={{ marginLeft: "auto" }}>
@@ -159,14 +166,13 @@ function ActionBar({ selection, selectionSize, drives, currentRoot, onClear, onD
   );
 }
 
-function CustomPathInput({ onChange }: { onChange: (v: string) => void }) {
+function CustomPathInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const { t } = useLang();
-  const [val, setVal] = useState("");
   return (
     <input
       placeholder={t("diskPathPlaceholder")}
-      value={val}
-      onChange={e => { setVal(e.target.value); onChange(e.target.value); }}
+      value={value}
+      onChange={e => onChange(e.target.value)}
       style={{ background: "var(--input-bg)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)", padding: "4px 10px", fontSize: 12, width: 180 }}
     />
   );
@@ -452,7 +458,7 @@ function DuplicatesTab({ path, drives, currentRoot }: DuplicatesTabProps) {
       {err && <div style={{ color: "var(--red)", marginBottom: 10 }}>{err}</div>}
       {!data && !loading && (
         <div style={{ textAlign: "center", padding: "40px 0" }}>
-          <div className="muted" style={{ marginBottom: 14 }}>SHA-256 · Min. 100 KB · Only size-matched candidates are hashed</div>
+          <div className="muted" style={{ marginBottom: 14 }}>{t("diskDupesMethod")}</div>
           <button className="btn" onClick={load} disabled={loading}>🔍 {t("diskScanDupes")}</button>
         </div>
       )}
@@ -569,119 +575,8 @@ function TempTab() {
         ))}
       </div>
       <div className="muted" style={{ fontSize: 11, marginTop: 16 }}>
-        ℹ To clean: go to the Cleanup page → select "Temp Files".
+        ℹ {t("diskTempCleanHint")}
       </div>
-    </div>
-  );
-}
-
-// ── Organizer tab ─────────────────────────────────────────────────────────────
-
-const CAT_COLORS: Record<string, string> = {
-  "Images":      "#3b9edd",
-  "Videos":      "#9b59b6",
-  "Music":       "#e74c3c",
-  "Documents":   "#27ae60",
-  "Archives":    "#e67e22",
-  "Code":        "#1abc9c",
-  "Executables": "#e91e63",
-  "Fonts":       "#795548",
-  "3D & CAD":    "#607d8b",
-  "Torrents":    "#009688",
-};
-
-
-type OrgItem = { src: string; dest: string; name: string; size: number; sizeFmt: string; cat: string; catFolder: string; icon: string };
-type OrgPreview = { items: OrgItem[]; total_size: number; total_size_fmt: string };
-
-// ─── Organize Tab ─────────────────────────────────────────────────────────────
-
-function OrganizeTab() {
-  const { t } = useLang();
-  const [root, setRoot]         = useState("C:\\Users");
-  const [preview, setPreview]   = useState<OrgPreview | null>(null);
-  const [busy, setBusy]         = useState(false);
-  const [log, setLog]           = useState<string | null>(null);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-
-  const doPreview = async () => {
-    setBusy(true); setPreview(null); setLog(null);
-    try { setPreview(await api.diskOrganizePreview(root, true)); }
-    catch (e: any) { setLog(String(e)); }
-    finally { setBusy(false); }
-  };
-
-  const doApply = async () => {
-    if (!preview) return;
-    setBusy(true); setLog(null);
-    const items = preview.items.filter(it => selected.has(it.src));
-    try { setLog(await api.diskOrganizeApply(items)); }
-    catch (e: any) { setLog(String(e)); }
-    finally { setBusy(false); }
-  };
-
-  const toggleAll = () => {
-    if (!preview) return;
-    if (selected.size === preview.items.length) setSelected(new Set());
-    else setSelected(new Set(preview.items.map(i => i.src)));
-  };
-
-  return (
-    <div style={{ paddingTop: 8 }}>
-      <div className="row" style={{ gap: 8, marginBottom: 12 }}>
-        <input
-          value={root}
-          onChange={e => setRoot(e.target.value)}
-          placeholder={t("diskOrganizeFolder")}
-          style={{ flex: 1, padding: "7px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg2)", color: "var(--text)", fontSize: 13 }}
-        />
-        <button className="btn small" onClick={doPreview} disabled={busy}>
-          {busy ? <Spinner /> : t("diskOrganizePreview")}
-        </button>
-      </div>
-
-      {log && (
-        <div style={{ marginBottom: 10, padding: "8px 12px", borderRadius: 6, background: "rgba(80,200,120,0.08)", border: "1px solid var(--green)", color: "var(--green)", fontSize: 13 }}>
-          {log}
-        </div>
-      )}
-
-      {preview && (
-        <>
-          <div className="row" style={{ justifyContent: "space-between", marginBottom: 8 }}>
-            <span className="muted" style={{ fontSize: 13 }}>{preview.items.length} {t("diskFilesWord")} · {preview.total_size_fmt}</span>
-            <div className="row" style={{ gap: 8 }}>
-              <button className="btn small ghost" onClick={toggleAll}>
-                {selected.size === preview.items.length ? t("diskDeselectAll") : t("diskSelectAll")}
-              </button>
-              <button className="btn small" onClick={doApply} disabled={busy || selected.size === 0}>
-                {busy ? <Spinner /> : `${t("diskMoveBtn")} (${selected.size})`}
-              </button>
-            </div>
-          </div>
-          <div style={{ maxHeight: 400, overflowY: "auto" }}>
-            {preview.items.map(it => (
-              <div key={it.src} className="row" style={{ padding: "5px 0", borderBottom: "1px solid var(--border)", gap: 10, alignItems: "center" }}>
-                <input
-                  type="checkbox"
-                  checked={selected.has(it.src)}
-                  onChange={() => {
-                    const next = new Set(selected);
-                    if (next.has(it.src)) next.delete(it.src); else next.add(it.src);
-                    setSelected(next);
-                  }}
-                />
-                <span style={{ fontSize: 18 }}>{it.icon}</span>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.name}</div>
-                  <div className="muted" style={{ fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>→ {it.dest}</div>
-                </div>
-                <span className="muted" style={{ fontSize: 12, flexShrink: 0 }}>{it.sizeFmt}</span>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
     </div>
   );
 }
@@ -743,7 +638,7 @@ export default function DiskAnalyzer() {
       {tab === "largest"    && <LargestTab    path={path} drives={drives} currentRoot={currentRoot} />}
       {tab === "duplicates" && <DuplicatesTab path={path} drives={drives} currentRoot={currentRoot} />}
       {tab === "temp"       && <TempTab />}
-      {tab === "organize"   && <OrganizeTab />}
+      {tab === "organize"   && <Organizer />}
     </>
   );
 }

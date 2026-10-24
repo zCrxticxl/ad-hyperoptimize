@@ -5,10 +5,13 @@
 use serde_json::Value;
 use std::fs;
 
+/// HTML-escape text for element content AND quoted attribute values.
 fn esc(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
 }
 
 fn sev_label(s: u64) -> (&'static str, &'static str) {
@@ -19,6 +22,26 @@ fn sev_label(s: u64) -> (&'static str, &'static str) {
         2 => ("LOW", "#4cc9f0"),
         _ => ("INFO", "#8d99ae"),
     }
+}
+
+/// Writes a new report file. The reports folder is user-writable while this
+/// process may be elevated: a junction in the path or a pre-planted link at
+/// the file name would redirect the write, so both are refused (create_new
+/// never opens an existing file or link).
+fn write_new(path: &std::path::Path, content: &str) -> Result<(), String> {
+    use std::io::Write as _;
+    if crate::diskanalyzer::has_reparse_ancestor(path) {
+        return Err(format!(
+            "refusing to write {}: a folder in the path is a link",
+            path.display()
+        ));
+    }
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .and_then(|mut f| f.write_all(content.as_bytes()))
+        .map_err(|e| format!("{}: {e}", path.display()))
 }
 
 pub fn generate(
@@ -37,11 +60,10 @@ pub fn generate(
         "tool": concat!("AD HyperOptimize v", env!("CARGO_PKG_VERSION")),
         "analysis": analysis, "scan": scan, "security": security, "changeHistory": history,
     });
-    fs::write(
+    write_new(
         &json_path,
-        serde_json::to_string_pretty(&full).map_err(|e| e.to_string())?,
-    )
-    .map_err(|e| e.to_string())?;
+        &serde_json::to_string_pretty(&full).map_err(|e| e.to_string())?,
+    )?;
 
     let score = analysis["healthScore"].as_i64().unwrap_or(0);
     let summary = analysis["summary"].as_str().unwrap_or("");
@@ -122,13 +144,33 @@ td,th{{padding:10px;border-bottom:1px solid #21262d;vertical-align:top;text-alig
         generated = ts.format("%Y-%m-%d %H:%M"),
         os = esc(&os),
         cpu = esc(cpu),
+        summary = esc(summary),
         nf = findings.len(),
-        json_name = json_path.file_name().unwrap_or_default().to_string_lossy(),
+        json_name = esc(&json_path.file_name().unwrap_or_default().to_string_lossy()),
     );
-    fs::write(&html_path, html).map_err(|e| e.to_string())?;
+    write_new(&html_path, &html)?;
 
     Ok(serde_json::json!({
         "htmlPath": html_path.to_string_lossy(),
         "jsonPath": json_path.to_string_lossy(),
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::esc;
+
+    #[test]
+    fn esc_covers_text_and_attribute_contexts() {
+        assert_eq!(esc("a<b>&c"), "a&lt;b&gt;&amp;c");
+        assert_eq!(esc("\"onmouseover=\"x"), "&quot;onmouseover=&quot;x");
+        assert_eq!(esc("it's"), "it&#39;s");
+        assert_eq!(
+            esc("<script>alert('x')</script>"),
+            "&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;"
+        );
+        // `&` first, so existing entities are not double-decoded.
+        assert_eq!(esc("&quot;"), "&amp;quot;");
+        assert_eq!(esc("Müller"), "Müller");
+    }
 }

@@ -78,107 +78,178 @@ fn entry_is_valid(entry: &Value) -> Result<(), String> {
 }
 
 // ── environment variable expansion ─────────────────────────────────────────
-#[cfg(windows)]
-fn expand_env(s: &str) -> String {
-    type VarSource = (&'static str, fn() -> String);
-    let pairs: &[VarSource] = &[
-        ("%SYSTEMROOT%", || {
-            std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".into())
-        }),
-        ("%WINDIR%", || {
-            std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".into())
-        }),
-        ("%PROGRAMFILES%", || {
-            std::env::var("ProgramFiles").unwrap_or_else(|_| "C:\\Program Files".into())
-        }),
-        ("%PROGRAMFILES(X86)%", || {
-            std::env::var("ProgramFiles(x86)").unwrap_or_else(|_| "C:\\Program Files (x86)".into())
-        }),
-        ("%COMMONPROGRAMFILES%", || {
-            std::env::var("CommonProgramFiles")
-                .unwrap_or_else(|_| "C:\\Program Files\\Common Files".into())
-        }),
-        ("%APPDATA%", || std::env::var("APPDATA").unwrap_or_default()),
-        ("%LOCALAPPDATA%", || {
-            std::env::var("LOCALAPPDATA").unwrap_or_default()
-        }),
-        ("%SYSTEMDRIVE%", || {
-            std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into())
-        }),
-    ];
-    let mut result = s.to_string();
-    for (var, f) in pairs {
-        // Case-insensitive replace of ALL occurrences. Chars are compared
-        // one by one (uppercased) instead of slicing byte offsets from a
-        // separately-uppercased string, whose byte layout can diverge from
-        // the original for non-ASCII characters.
-        let val = f();
-        let var_chars: Vec<char> = var.chars().map(|c| c.to_ascii_uppercase()).collect();
-        let mut out = String::with_capacity(result.len());
-        let hay: Vec<char> = result.chars().collect();
-        let mut i = 0usize;
-        while i < hay.len() {
-            if i + var_chars.len() <= hay.len() {
-                let matches = hay[i..i + var_chars.len()]
-                    .iter()
-                    .zip(&var_chars)
-                    .all(|(a, b)| a.to_ascii_uppercase() == *b);
-                if matches {
-                    out.push_str(&val);
-                    i += var_chars.len();
-                    continue;
+
+/// Expand every `%NAME%` reference with `lookup(NAME)`, the same contract as
+/// `ExpandEnvironmentStringsW` (unknown variables stay verbatim). Variable
+/// names are matched case-insensitively by the lookup, like Windows does.
+/// Pure so it is unit-testable on every platform.
+fn expand_env_with(s: &str, lookup: impl Fn(&str) -> Option<String>) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(start) = rest.find('%') {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 1..];
+        match after.find('%') {
+            Some(end) => {
+                let name = &after[..end];
+                match (!name.is_empty()).then(|| lookup(name)).flatten() {
+                    Some(val) => {
+                        out.push_str(&val);
+                        rest = &after[end + 1..];
+                    }
+                    None => {
+                        // Not a variable: keep the first `%` and rescan from
+                        // the second one (it may open a real reference).
+                        out.push('%');
+                        rest = after;
+                    }
                 }
             }
-            out.push(hay[i]);
-            i += 1;
+            None => {
+                out.push('%');
+                rest = after;
+            }
         }
-        result = out;
     }
-    result
+    out.push_str(rest);
+    out
 }
 
-/// Extract the real exe path from a command string like `"C:\path\app.exe" /args`
+/// Expand `%VAR%` references against the process environment. No
+/// `windows`/`winapi` crate is a dependency, so `ExpandEnvironmentStringsW`
+/// is not reachable; scanning for any `%NAME%` and resolving it through the
+/// process environment gives the same result for every defined variable
+/// (ProgramData, USERPROFILE, CommonProgramFiles(x86), ProgramW6432, …).
+/// std's env lookup is case-insensitive on Windows. A few well-known roots
+/// keep a hard fallback in case the elevated environment lacks them.
 #[cfg(windows)]
-fn extract_exe_path(cmd: &str) -> Option<String> {
-    let s = expand_env(cmd.trim());
-    let s = s.trim();
+fn expand_env(s: &str) -> String {
+    expand_env_with(s, |name| {
+        std::env::var(name).ok().or_else(|| {
+            let fallback = match name.to_ascii_uppercase().as_str() {
+                "SYSTEMROOT" | "WINDIR" => "C:\\Windows",
+                "SYSTEMDRIVE" => "C:",
+                "PROGRAMFILES" | "PROGRAMW6432" => "C:\\Program Files",
+                "PROGRAMFILES(X86)" => "C:\\Program Files (x86)",
+                "PROGRAMDATA" | "ALLUSERSPROFILE" => "C:\\ProgramData",
+                "COMMONPROGRAMFILES" | "COMMONPROGRAMW6432" => "C:\\Program Files\\Common Files",
+                "COMMONPROGRAMFILES(X86)" => "C:\\Program Files (x86)\\Common Files",
+                "PUBLIC" => "C:\\Users\\Public",
+                _ => return None,
+            };
+            Some(fallback.to_string())
+        })
+    })
+}
+
+/// True for a fully qualified Windows path (`X:\…` or `\\server\…`); relative
+/// names (`ctfmon.exe`, `shell32.dll`) are resolved through the search path
+/// by Windows and cannot be checked for existence here.
+fn is_qualified_path(p: &str) -> bool {
+    let b = p.as_bytes();
+    (b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && (b[2] == b'\\' || b[2] == b'/'))
+        || p.starts_with("\\\\")
+}
+
+/// Parse the program a command line runs, after env expansion. Returns the
+/// target whose existence decides whether the entry is an orphan:
+/// * `"C:\path\app.exe" /args` → the quoted path;
+/// * `C:\Program Files\App\app.exe /args` → tokens up to the first one that
+///   ends in `.exe` (unquoted paths with spaces);
+/// * otherwise the first whitespace token;
+/// * `rundll32[.exe] <dll>,Entry` → the DLL, since rundll32 itself always
+///   exists.
+///
+/// Returns `None` when the target is not a fully qualified path (bare names
+/// resolve via the search path and cannot be judged missing).
+fn parse_command_target(cmd: &str) -> Option<String> {
+    let s = cmd.trim();
     if s.is_empty() {
         return None;
     }
-
-    // Quoted: "C:\path\app.exe" ...
-    if let Some(stripped) = s.strip_prefix('"') {
-        if let Some(end) = stripped.find('"') {
-            let p = s[1..end + 1].to_string();
-            if !p.is_empty() {
-                return Some(p);
+    let (first, rest): (String, &str) = if let Some(stripped) = s.strip_prefix('"') {
+        let end = stripped.find('"')?;
+        (stripped[..end].to_string(), &stripped[end + 1..])
+    } else {
+        let mut consumed = 0usize;
+        let mut found: Option<usize> = None;
+        for (i, ch) in s.char_indices() {
+            if ch.is_whitespace() {
+                let tok = &s[..i];
+                if tok.to_ascii_lowercase().ends_with(".exe") {
+                    found = Some(i);
+                    break;
+                }
             }
+            consumed = i + ch.len_utf8();
         }
+        let end = match found {
+            Some(i) => i,
+            None if s.to_ascii_lowercase().ends_with(".exe") => consumed,
+            None => s.find(char::is_whitespace).unwrap_or(s.len()),
+        };
+        (s[..end].to_string(), &s[end..])
+    };
+    let first = first.trim().to_string();
+    if first.is_empty() {
+        return None;
     }
 
-    // .exe marker: take everything up to and including .exe
-    let lower = s.to_lowercase();
-    if let Some(pos) = lower.rfind(".exe") {
-        return Some(s[..pos + 4].to_string());
-    }
-    for ext in &[".cmd", ".bat", ".msi", ".vbs"] {
-        if let Some(pos) = lower.find(ext) {
-            return Some(s[..pos + ext.len()].to_string());
-        }
+    let file_name = first
+        .rsplit(['\\', '/'])
+        .next()
+        .unwrap_or(&first)
+        .to_ascii_lowercase();
+    if file_name == "rundll32.exe" || file_name == "rundll32" {
+        let r = rest.trim_start();
+        let dll = if let Some(q) = r.strip_prefix('"') {
+            &q[..q.find('"')?]
+        } else {
+            r.split(',').next().unwrap_or("").trim()
+        };
+        let dll = dll.trim();
+        return is_qualified_path(dll).then(|| dll.to_string());
     }
 
-    // First token if it looks like a path
-    let first = s.split_whitespace().next().unwrap_or(s);
-    if first.contains('\\') {
-        return Some(first.to_string());
-    }
+    is_qualified_path(&first).then_some(first)
+}
 
-    None
+/// Extract the real target path from a command string (see
+/// [`parse_command_target`]), after expanding environment variables.
+#[cfg(windows)]
+fn extract_exe_path(cmd: &str) -> Option<String> {
+    parse_command_target(&expand_env(cmd.trim()))
 }
 
 #[cfg(windows)]
 fn exists(p: &str) -> bool {
     !p.is_empty() && std::path::Path::new(p).exists()
+}
+
+/// True when `p` is on a drive letter whose root currently exists. An
+/// unmounted/removable drive must never make an entry look orphaned.
+#[cfg(windows)]
+fn drive_exists(p: &str) -> bool {
+    let b = p.as_bytes();
+    b.len() >= 2
+        && b[0].is_ascii_alphabetic()
+        && b[1] == b':'
+        && std::path::Path::new(&format!("{}:\\", b[0] as char)).exists()
+}
+
+/// A drive-letter path (`X:\…`). Only these are judged: bare names
+/// (`shell32.dll`) resolve through the search path, and UNC paths would make
+/// the elevated scan touch the network.
+fn is_local_qualified(p: &str) -> bool {
+    let b = p.as_bytes();
+    b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && (b[2] == b'\\' || b[2] == b'/')
+}
+
+/// The single orphan rule for every scanner: a local, fully qualified path
+/// on a drive that is present, and the file or folder is gone.
+#[cfg(windows)]
+fn is_missing(p: &str) -> bool {
+    is_local_qualified(p) && drive_exists(p) && !exists(p)
 }
 
 #[cfg(windows)]
@@ -214,10 +285,7 @@ fn scan_mui_cache(out: &mut Vec<Value>) {
         } else {
             continue; // not an exe entry
         };
-        if !base.contains('\\') {
-            continue;
-        }
-        if exists(&base) {
+        if !is_missing(&base) {
             continue;
         }
 
@@ -265,8 +333,16 @@ fn scan_uninstall(root: &'static str, subpath: &str, out: &mut Vec<Value>) {
         }
         let loc: String = sub.get_value("InstallLocation").unwrap_or_default();
         let loc = expand_env(loc.trim().trim_matches('"'));
-        if loc.is_empty() || exists(&loc) {
+        // A missing folder on an unmounted/removable drive is not an orphan.
+        if !is_missing(&loc) {
             continue;
+        }
+        // The uninstaller itself must be gone too (on a present drive). An
+        // unverifiable command (MsiExec, bare names) never counts as missing.
+        let uninst: String = sub.get_value("UninstallString").unwrap_or_default();
+        match extract_exe_path(&uninst) {
+            Some(target) if is_missing(&target) => {}
+            _ => continue,
         }
         let key_path = format!("{subpath}\\{sub_name}");
         out.push(json!({
@@ -297,7 +373,7 @@ fn scan_app_paths(out: &mut Vec<Value>) {
         };
         let default: String = sub.get_value("").unwrap_or_default();
         let expanded = expand_env(default.trim().trim_matches('"'));
-        if expanded.is_empty() || exists(&expanded) {
+        if !is_missing(&expanded) {
             continue;
         }
         let key_path = format!("{PATH}\\{name}");
@@ -328,7 +404,7 @@ fn scan_shared_dlls(out: &mut Vec<Value>) {
             continue;
         }
         let expanded = expand_env(&name);
-        if !expanded.contains('\\') || exists(&expanded) {
+        if !is_missing(&expanded) {
             continue;
         }
         let fname = std::path::Path::new(&expanded)
@@ -375,7 +451,7 @@ fn scan_shell_extensions(out: &mut Vec<Value>) {
             continue;
         }
         let expanded = expand_env(dll.trim().trim_matches('"'));
-        if expanded.is_empty() || exists(&expanded) {
+        if !is_missing(&expanded) {
             continue;
         }
         out.push(json!({
@@ -404,7 +480,7 @@ fn scan_run_keys(root: &'static str, path: &str, out: &mut Vec<Value>) {
         let Some(exe) = extract_exe_path(&cmd) else {
             continue;
         };
-        if exists(&exe) {
+        if !is_missing(&exe) {
             continue;
         }
         out.push(json!({
@@ -473,45 +549,152 @@ pub fn scan() -> Value {
     json!({ "orphans": [], "total": 0, "counts": {} })
 }
 
-/// Clean the supplied entries (passed verbatim from the UI scan result).
-/// Writes a backup JSON before touching anything.
+/// The fields that decide what a cleanup deletes. A renderer-supplied entry
+/// is only acted on when all of them equal a freshly scanned entry.
+fn same_target(a: &Value, b: &Value) -> bool {
+    ["id", "root", "keyPath", "valueName", "relatedValues"]
+        .iter()
+        .all(|k| a[*k] == b[*k])
+}
+
+/// Map each renderer-supplied entry to the matching entry of a fresh backend
+/// scan. Entries the scanners did not produce right now (forged, stale, or
+/// tampered key path / value name) are rejected with an error.
+fn match_scanned<'a>(entries: &[Value], scanned: &'a [Value]) -> (Vec<&'a Value>, Vec<String>) {
+    let mut ok: Vec<&Value> = Vec::new();
+    let mut errors = Vec::new();
+    for entry in entries {
+        let display = entry["displayName"].as_str().unwrap_or("?");
+        if let Err(m) = entry_is_valid(entry) {
+            errors.push(format!("{display}: {m}"));
+            continue;
+        }
+        match scanned.iter().find(|s| same_target(entry, s)) {
+            Some(s) if !ok.iter().any(|o| std::ptr::eq(*o, s)) => ok.push(s),
+            Some(_) => {} // duplicate selection
+            None => errors.push(format!("{display}: not an orphan in a fresh scan, skipped")),
+        }
+    }
+    (ok, errors)
+}
+
+/// A restorable backup session: every key is exported to its own `.reg`
+/// file under `regclean/<ts>/`, and `finish` writes the `backup_<ts>.json`
+/// manifest that `restore()`/`list_backups()` understand. Shared with the
+/// app uninstaller's leftover cleanup so every registry deletion is
+/// restorable from the same UI.
+#[cfg(windows)]
+pub(crate) struct RegBackup {
+    reg_dir: std::path::PathBuf,
+    backup_path: std::path::PathBuf,
+    manifest: Vec<Value>,
+    exports: usize,
+}
+
+#[cfg(windows)]
+impl RegBackup {
+    pub(crate) fn new() -> Result<Self, String> {
+        let ts = chrono::Local::now().format("%Y%m%d_%H%M%S%6f").to_string();
+        let backup_dir = crate::safety::state_dir()?.join("regclean");
+        let reg_dir = backup_dir.join(&ts);
+        std::fs::create_dir_all(&reg_dir).map_err(|e| format!("backup dir: {e}"))?;
+        Ok(Self {
+            reg_dir,
+            backup_path: backup_dir.join(format!("backup_{ts}.json")),
+            manifest: Vec::new(),
+            exports: 0,
+        })
+    }
+
+    /// Export `root\key_path` (root = "HKLM"/"HKCU") to a fresh `.reg` file.
+    pub(crate) fn export(
+        &mut self,
+        root: &str,
+        key_path: &str,
+    ) -> Result<std::path::PathBuf, String> {
+        if !is_valid_root(root) || !is_valid_key_path(key_path) {
+            return Err("invalid key".into());
+        }
+        let reg_file = self.reg_dir.join(format!("{}.reg", self.exports));
+        self.exports += 1;
+        reg_export(&format!("{root}\\{key_path}"), &reg_file)?;
+        Ok(reg_file)
+    }
+
+    /// Record a completed deletion whose key was exported to `reg_file`.
+    pub(crate) fn record(
+        &mut self,
+        display: &str,
+        root: &str,
+        key_path: &str,
+        value_name: &str,
+        reg_file: &std::path::Path,
+    ) {
+        self.manifest.push(json!({
+            "display": display,
+            "root": root,
+            "keyPath": key_path,
+            "valueName": value_name,
+            "regFile": reg_file.to_string_lossy().into_owned(),
+        }));
+    }
+
+    pub(crate) fn deleted(&self) -> usize {
+        self.manifest.len()
+    }
+
+    /// Write the restore manifest; returns its path.
+    pub(crate) fn finish(self) -> Result<String, String> {
+        let backup_json = json!({
+            "time": chrono::Local::now().to_rfc3339(),
+            "count": self.manifest.len(),
+            "items": self.manifest,
+        });
+        std::fs::write(
+            &self.backup_path,
+            serde_json::to_string_pretty(&backup_json).unwrap(),
+        )
+        .map_err(|e| format!("backup write: {e}"))?;
+        Ok(self.backup_path.to_string_lossy().into_owned())
+    }
+}
+
+/// Delete `root\key_path` with all subkeys via the registry API (no shell,
+/// no wildcard expansion).
+#[cfg(windows)]
+pub(crate) fn delete_key_tree(root: &str, key_path: &str) -> Result<(), String> {
+    if !is_valid_root(root) || !is_valid_key_path(key_path) {
+        return Err("invalid key".into());
+    }
+    let Some(sep) = key_path.rfind('\\') else {
+        return Err("invalid key path".into());
+    };
+    hive(root)
+        .open_subkey_with_flags(&key_path[..sep], KEY_ALL_ACCESS)
+        .and_then(|k| k.delete_subkey_all(&key_path[sep + 1..]))
+        .map_err(|e| e.to_string())
+}
+
+/// Clean the selected entries. The renderer's entries only select: every
+/// one must exactly match an entry of a fresh backend scan, and deletion
+/// acts on that scanned entry, never on renderer data. Each affected key is
+/// exported to a `.reg` file before anything is deleted.
 /// Returns { deleted, errors, backupPath }.
 pub fn clean(entries: Vec<Value>) -> Result<Value, String> {
     if entries.is_empty() {
         return Err("Keine Einträge ausgewählt.".into());
     }
 
-    // Validate every entry up front, before anything is exported or deleted.
-    // Entries the scanners could never have produced are rejected with an
-    // error instead of being acted on.
-    let mut errors: Vec<String> = Vec::new();
-    let mut valid: Vec<&Value> = Vec::new();
-    for entry in &entries {
-        let display = entry["displayName"].as_str().unwrap_or("?");
-        match entry_is_valid(entry) {
-            Ok(()) => valid.push(entry),
-            Err(m) => errors.push(format!("{display}: {m}")),
-        }
-    }
+    let fresh = scan();
+    let scanned: Vec<Value> = fresh["orphans"].as_array().cloned().unwrap_or_default();
+    let (valid, mut errors) = match_scanned(&entries, &scanned);
     if valid.is_empty() {
         return Ok(json!({ "deleted": 0, "errors": errors, "backupPath": "" }));
     }
 
     #[cfg(windows)]
     {
-        // 1. Prepare backup dir + a per-cleanup folder for the .reg exports.
-        let ts = chrono::Local::now().format("%Y%m%d_%H%M%S%6f").to_string();
-        let backup_dir = crate::safety::app_data_dir()
-            .join("regclean")
-            .join("regclean");
-        let reg_dir = backup_dir.join(&ts);
-        std::fs::create_dir_all(&reg_dir).map_err(|e| format!("backup dir: {e}"))?;
-        let backup_path = backup_dir.join(format!("backup_{ts}.json"));
-
-        // 2. Delete, but ONLY after a real .reg export of the affected key
-        //    succeeded, so every deletion is genuinely restorable.
-        let mut deleted: u32 = 0;
-        let mut manifest: Vec<Value> = Vec::new();
+        let mut backup = RegBackup::new()?;
 
         for entry in &valid {
             let root = entry["root"].as_str().unwrap_or("");
@@ -532,25 +715,18 @@ pub fn clean(entries: Vec<Value>) -> Result<Value, String> {
             // Export the affected key to a .reg file BEFORE deleting. If the
             // export fails we skip the deletion entirely, better to leave an
             // orphan than to delete something we can't put back.
-            let reg_file = reg_dir.join(format!("{}.reg", manifest.len()));
-            let full = format!("{root}\\{key_path}");
-            if let Err(e) = reg_export(&full, &reg_file) {
-                errors.push(format!("{display}: backup failed, skipped ({e})"));
-                continue;
-            }
+            let reg_file = match backup.export(root, key_path) {
+                Ok(f) => f,
+                Err(e) => {
+                    errors.push(format!("{display}: backup failed, skipped ({e})"));
+                    continue;
+                }
+            };
 
             let result: Result<(), String> = if value_name.is_empty() {
-                // Delete entire subkey
-                if let Some(sep) = key_path.rfind('\\') {
-                    let parent = &key_path[..sep];
-                    let child = &key_path[sep + 1..];
-                    hive(root)
-                        .open_subkey_with_flags(parent, KEY_ALL_ACCESS)
-                        .and_then(|k| k.delete_subkey_all(child))
-                        .map_err(|e| e.to_string())
-                } else {
-                    Err("invalid key path".into())
-                }
+                // Whole subkey: only scanner-produced Uninstall / App Paths
+                // keys reach here (see match_scanned).
+                delete_key_tree(root, key_path)
             } else if !related.is_empty() {
                 // Delete all related values (MUI cache group); a value that
                 // cannot be deleted must surface instead of silently
@@ -579,33 +755,13 @@ pub fn clean(entries: Vec<Value>) -> Result<Value, String> {
             };
 
             match result {
-                Ok(_) => {
-                    deleted += 1;
-                    manifest.push(json!({
-                        "display": display,
-                        "root": root,
-                        "keyPath": key_path,
-                        "valueName": value_name,
-                        "regFile": reg_file.to_string_lossy().into_owned(),
-                    }));
-                }
+                Ok(_) => backup.record(display, root, key_path, value_name, &reg_file),
                 Err(e) => errors.push(format!("{display}: {e}")),
             }
         }
 
-        // Write the restore manifest (points at the .reg exports).
-        let backup_json = json!({
-            "time": chrono::Local::now().to_rfc3339(),
-            "count": manifest.len(),
-            "items": manifest,
-        });
-        std::fs::write(
-            &backup_path,
-            serde_json::to_string_pretty(&backup_json).unwrap(),
-        )
-        .map_err(|e| format!("backup write: {e}"))?;
-
-        let backup_str = backup_path.to_string_lossy().into_owned();
+        let deleted = backup.deleted();
+        let backup_str = backup.finish()?;
         Ok(json!({ "deleted": deleted, "errors": errors, "backupPath": backup_str }))
     }
     #[cfg(not(windows))]
@@ -634,21 +790,22 @@ fn reg_export(full_key: &str, file: &std::path::Path) -> Result<(), String> {
 /// Restore a previous cleanup from its backup manifest by re-importing every
 /// exported .reg file. Returns { restored, errors }.
 ///
-/// Only manifests inside the app's own `PCOptSuite/regclean` folder are
-/// accepted, and every referenced `.reg` file must live there too, otherwise
-/// this command would be an arbitrary registry-import primitive.
+/// Only manifests inside the protected state folder's `regclean` directory
+/// are accepted, and every referenced `.reg` file must live there too,
+/// otherwise this command would be an arbitrary registry-import primitive.
+/// Backups left in the old user-writable folders are deliberately not
+/// restorable: anyone could have planted a manifest and `.reg` file there.
 pub fn restore(backup_path: String) -> Result<Value, String> {
     #[cfg(windows)]
     {
-        let backup_dir = dirs::config_dir()
-            .unwrap_or_else(|| std::path::PathBuf::from("."))
-            .join("PCOptSuite")
-            .join("regclean");
-        let dir_canon = std::fs::canonicalize(&backup_dir)
-            .map_err(|e| format!("backup folder missing: {e}"))?;
+        let allowed_dirs = [crate::safety::state_dir()?.join("regclean")];
+        let allowed_dirs: Vec<_> = allowed_dirs
+            .iter()
+            .filter_map(|dir| std::fs::canonicalize(dir).ok())
+            .collect();
         let backup_canon =
             std::fs::canonicalize(&backup_path).map_err(|e| format!("cannot read backup: {e}"))?;
-        if !backup_canon.starts_with(&dir_canon) {
+        if !allowed_dirs.iter().any(|dir| backup_canon.starts_with(dir)) {
             return Err("backup manifest must live in the app backup folder.".into());
         }
 
@@ -670,7 +827,7 @@ pub fn restore(backup_path: String) -> Result<Value, String> {
                 errors.push(format!("{display}: backup file missing"));
                 continue;
             };
-            if !reg_canon.starts_with(&dir_canon) {
+            if !allowed_dirs.iter().any(|dir| reg_canon.starts_with(dir)) {
                 errors.push(format!("{display}: backup file outside app folder"));
                 continue;
             }
@@ -690,15 +847,12 @@ pub fn restore(backup_path: String) -> Result<Value, String> {
 
 /// List available cleanup backups (newest first) for the restore UI.
 pub fn list_backups() -> Value {
-    // New backups live under the shared data dir; pre-unification backups
-    // live under the old config_dir location and must stay listable.
-    let mut dirs = vec![crate::safety::app_data_dir().join("regclean")];
-    if let Some(legacy) = dirs::config_dir() {
-        let legacy = legacy.join("PCOptSuite").join("regclean");
-        if legacy != dirs[0] {
-            dirs.push(legacy);
-        }
-    }
+    // Only the protected state folder: restore refuses anything else.
+    let current = match crate::safety::state_dir() {
+        Ok(dir) => dir.join("regclean"),
+        Err(_) => return json!([]),
+    };
+    let dirs = vec![current.clone(), current.join("regclean")];
     let mut out: Vec<Value> = Vec::new();
     for dir in dirs {
         let Ok(rd) = std::fs::read_dir(&dir) else {
@@ -736,7 +890,122 @@ pub fn list_backups() -> Value {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_valid_key_path, is_valid_root};
+    use super::{
+        expand_env_with, is_local_qualified, is_valid_key_path, is_valid_root, match_scanned,
+        parse_command_target,
+    };
+
+    #[test]
+    fn only_local_qualified_paths_can_be_orphans() {
+        assert!(is_local_qualified("C:\\Program Files\\X\\x.dll"));
+        assert!(is_local_qualified("d:/games/x.exe"));
+        // Resolved through the search path: never judged missing.
+        assert!(!is_local_qualified("shell32.dll"));
+        assert!(!is_local_qualified("system32\\x.dll"));
+        // Network paths are not probed from the elevated scan.
+        assert!(!is_local_qualified("\\\\server\\share\\a.exe"));
+        assert!(!is_local_qualified("C:"));
+        assert!(!is_local_qualified(""));
+    }
+    use serde_json::json;
+
+    fn env(name: &str) -> Option<String> {
+        match name.to_ascii_uppercase().as_str() {
+            "PROGRAMDATA" => Some("C:\\ProgramData".into()),
+            "USERPROFILE" => Some("C:\\Users\\me".into()),
+            "COMMONPROGRAMFILES(X86)" => Some("C:\\Program Files (x86)\\Common Files".into()),
+            "WINDIR" => Some("C:\\Windows".into()),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn expand_env_handles_any_variable() {
+        assert_eq!(
+            expand_env_with("%ProgramData%\\x", env),
+            "C:\\ProgramData\\x"
+        );
+        assert_eq!(
+            expand_env_with("%userprofile%\\a;%USERPROFILE%\\b", env),
+            "C:\\Users\\me\\a;C:\\Users\\me\\b"
+        );
+        assert_eq!(
+            expand_env_with("%CommonProgramFiles(x86)%\\y.dll", env),
+            "C:\\Program Files (x86)\\Common Files\\y.dll"
+        );
+        // Unknown variables and stray percent signs stay verbatim.
+        assert_eq!(expand_env_with("%NOPE%\\x", env), "%NOPE%\\x");
+        assert_eq!(
+            expand_env_with("50% off %windir%", env),
+            "50% off C:\\Windows"
+        );
+        assert_eq!(expand_env_with("100%", env), "100%");
+        assert_eq!(expand_env_with("%%", env), "%%");
+        assert_eq!(
+            expand_env_with("Müller %WINDIR%", env),
+            "Müller C:\\Windows"
+        );
+    }
+
+    #[test]
+    fn command_target_parsing() {
+        let p = |s: &str| parse_command_target(s);
+        assert_eq!(
+            p("\"C:\\Program Files\\App\\app.exe\" /min"),
+            Some("C:\\Program Files\\App\\app.exe".into())
+        );
+        assert_eq!(
+            p("C:\\Program Files\\App\\app.exe /min"),
+            Some("C:\\Program Files\\App\\app.exe".into())
+        );
+        assert_eq!(p("C:\\Tools\\x.exe"), Some("C:\\Tools\\x.exe".into()));
+        // The first .exe wins, an .exe in the arguments is not the target.
+        assert_eq!(
+            p("C:\\a\\launcher.exe --run C:\\b\\other.exe"),
+            Some("C:\\a\\launcher.exe".into())
+        );
+        // rundll32 targets the DLL, not rundll32 itself.
+        assert_eq!(
+            p("C:\\Windows\\System32\\rundll32.exe \"C:\\Program Files\\X\\x.dll\",Start"),
+            Some("C:\\Program Files\\X\\x.dll".into())
+        );
+        assert_eq!(
+            p("rundll32.exe C:\\Program Files\\X\\x.dll,Start"),
+            Some("C:\\Program Files\\X\\x.dll".into())
+        );
+        assert_eq!(p("rundll32 shell32.dll,Control_RunDLL"), None);
+        // Bare names / MsiExec can't be judged missing.
+        assert_eq!(p("ctfmon.exe"), None);
+        assert_eq!(p("MsiExec.exe /X{1234}"), None);
+        assert_eq!(p(""), None);
+        assert_eq!(p("\"unterminated"), None);
+        assert_eq!(
+            p("\\\\server\\share\\a.exe"),
+            Some("\\\\server\\share\\a.exe".into())
+        );
+    }
+
+    #[test]
+    fn clean_only_acts_on_freshly_scanned_entries() {
+        let scanned = vec![json!({
+            "id": "abc", "root": "HKCU",
+            "keyPath": "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run",
+            "valueName": "Old", "relatedValues": [], "displayName": "Old",
+        })];
+        // Exact match (display name may differ, it is not a target field).
+        let mut ok = scanned[0].clone();
+        ok["displayName"] = json!("renamed");
+        // Forged: same id but whole-key delete of an arbitrary path.
+        let mut forged = scanned[0].clone();
+        forged["keyPath"] = json!("SOFTWARE\\Microsoft");
+        forged["valueName"] = json!("");
+        let mut other_value = scanned[0].clone();
+        other_value["valueName"] = json!("SecurityHealth");
+        let (valid, errors) = match_scanned(&[ok.clone(), ok, forged, other_value], &scanned);
+        assert_eq!(valid.len(), 1);
+        assert_eq!(valid[0]["valueName"], "Old");
+        assert_eq!(errors.len(), 2);
+    }
 
     #[test]
     fn key_path_validation() {

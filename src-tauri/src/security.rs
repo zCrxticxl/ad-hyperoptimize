@@ -14,20 +14,17 @@ fn sec(script: &str) -> Value {
 
 // ── hosts file backup ─────────────────────────────────────────────────────────
 
-/// The hosts file is modified in place. Before the first modification of a
-/// session we copy the pristine file into the app data dir, so a failed or
-/// corrupted write can always be restored. The backup is only created once
-/// and never overwritten by later changes.
+/// The hosts file is modified in place. Immediately before EVERY write the
+/// current file is copied into the app data dir, so a failed or corrupted
+/// write is restored to the state right before that write. (A one-time
+/// snapshot went stale: restoring it silently discarded every hosts change
+/// made since, by this app or anything else.)
 fn hosts_backup() -> Result<PathBuf, String> {
-    let backup = crate::safety::app_data_dir()
-        .join("hosts")
-        .join("hosts.bak");
-    if !backup.exists() {
-        if let Some(parent) = backup.parent() {
-            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-        }
-        fs::copy(hosts_path(), &backup).map_err(|e| format!("hosts backup failed: {e}"))?;
+    let backup = crate::safety::state_dir()?.join("hosts").join("hosts.bak");
+    if let Some(parent) = backup.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
+    fs::copy(hosts_path(), &backup).map_err(|e| format!("hosts backup failed: {e}"))?;
     Ok(backup)
 }
 
@@ -45,10 +42,15 @@ fn hosts_restore(backup: &Path) -> Result<(), String> {
 pub fn scan() -> Value {
     json!({
         "defender": sec(
-            "Get-MpComputerStatus -ErrorAction Stop | Select-Object AMServiceEnabled,RealTimeProtectionEnabled,AntivirusEnabled,AntivirusSignatureLastUpdated,QuickScanEndTime,IsTamperProtected"
+            // MAPSReporting (cloud-delivered protection) is a preference, not a
+            // status field: it only exists on Get-MpPreference.
+            "$s = Get-MpComputerStatus -ErrorAction Stop | Select-Object AMServiceEnabled,RealTimeProtectionEnabled,AntivirusEnabled,AntivirusSignatureLastUpdated,QuickScanEndTime,IsTamperProtected; $s | Add-Member -NotePropertyName MAPSReporting -NotePropertyValue ((Get-MpPreference -ErrorAction SilentlyContinue).MAPSReporting) -Force; $s"
         ),
         "firewall": sec(
-            "Get-NetFirewallProfile | Select-Object Name,Enabled,DefaultInboundAction,DefaultOutboundAction"
+            // Enabled and the actions are enums (GpoBoolean, Action), which
+            // Windows PowerShell's ConvertTo-Json writes as numbers; the UI
+            // expects a boolean and readable action names.
+            "Get-NetFirewallProfile -ErrorAction Stop | Select-Object Name,@{n='Enabled';e={[string]$_.Enabled -eq 'True'}},@{n='DefaultInboundAction';e={[string]$_.DefaultInboundAction}},@{n='DefaultOutboundAction';e={[string]$_.DefaultOutboundAction}}"
         ),
         "unsigned_drivers": unsigned_drivers(),
         "autoruns": autoruns(),
@@ -138,10 +140,32 @@ fn require_device_id(device_id: &str) -> Result<(), String> {
     }
 }
 
+/// True when `device_id` is one of the unsigned drivers in `scan` (the
+/// `unsigned_drivers()` result). The renderer only selects: disabling or
+/// removing any other device (e.g. the boot disk controller) is refused.
+fn is_flagged_unsigned(scan: &Value, device_id: &str) -> bool {
+    scan["items"].as_array().is_some_and(|items| {
+        items.iter().any(|d| {
+            d["deviceId"]
+                .as_str()
+                .is_some_and(|id| id.eq_ignore_ascii_case(device_id))
+        })
+    })
+}
+
+fn require_flagged_unsigned(device_id: &str) -> Result<(), String> {
+    require_device_id(device_id)?;
+    if is_flagged_unsigned(&unsigned_drivers(), device_id) {
+        Ok(())
+    } else {
+        Err("This device is not an unsigned driver in a fresh scan; nothing was changed.".into())
+    }
+}
+
 /// Reversible: device stays installed but stops loading/binding. Safe first
 /// step, can be undone with enable_unsigned_driver.
 pub fn disable_unsigned_driver(device_id: String) -> Result<String, String> {
-    require_device_id(&device_id)?;
+    require_flagged_unsigned(&device_id)?;
     pnputil(&["/disable-device", &device_id])
 }
 
@@ -157,7 +181,7 @@ pub fn enable_unsigned_driver(device_id: String) -> Result<String, String> {
 /// the same "repair by reinstall" path Device Manager's own Uninstall-device
 /// button uses, not a guaranteed permanent removal.
 pub fn remove_unsigned_driver(device_id: String) -> Result<String, String> {
-    require_device_id(&device_id)?;
+    require_flagged_unsigned(&device_id)?;
     pnputil(&["/remove-device", &device_id])
 }
 
@@ -174,16 +198,18 @@ fn autoruns() -> Value {
         "hklm_run": sec("Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run' -ErrorAction Stop | Select-Object * -ExcludeProperty PS*"),
         "hkcu_run": sec("Get-ItemProperty 'HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run' -ErrorAction Stop | Select-Object * -ExcludeProperty PS*"),
         "startup_folder": sec("Get-ChildItem ([Environment]::GetFolderPath('Startup')) -ErrorAction Stop | Select-Object Name,FullName"),
-        "tasks_nonms": sec("Get-ScheduledTask | Where-Object { $_.TaskPath -notlike '\\Microsoft\\*' } | Select-Object TaskName,TaskPath,State | Select-Object -First 60"),
+        "tasks_nonms": sec("Get-ScheduledTask | Where-Object { $_.TaskPath -notlike '\\Microsoft\\*' } | Select-Object -First 60 TaskName,TaskPath,@{n='State';e={$_.State.ToString()}}"),
         "winlogon_shell": sec("Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon' | Select-Object Shell,Userinit"),
     })
 }
 
 const HO_PREFIX: &str = "# [ADHYPER] ";
 
+/// From the Windows API, never `%WINDIR%`: the elevated app inherits the
+/// caller's environment, and a redirected path would make it read and
+/// overwrite (through a planted junction) a file of the caller's choice.
 fn hosts_path() -> String {
-    let windir = std::env::var("WINDIR").unwrap_or_else(|_| "C:\\Windows".into());
-    format!("{windir}\\System32\\drivers\\etc\\hosts")
+    format!("{}\\drivers\\etc\\hosts", crate::ps::system_dir())
 }
 
 fn hosts_entries() -> Value {
@@ -273,34 +299,16 @@ pub fn hosts_enable_entries(entries: Vec<String>) -> Result<String, String> {
 }
 
 // ── Scheduled task disable/enable ─────────────────────────────────────────────
+// Delegates to schedtasks::toggle so this entry point gets the same admin
+// check, validation (quotes, wildcards, typographic quotes) and journal-
+// backed undo instead of a second, weaker implementation.
 
 pub fn disable_scheduled_task(task_path: String, task_name: String) -> Result<String, String> {
-    toggle_scheduled_task(task_path, task_name, false)
+    crate::schedtasks::toggle(task_path, task_name, false).map(|_| "OK".to_string())
 }
 
 pub fn enable_scheduled_task(task_path: String, task_name: String) -> Result<String, String> {
-    toggle_scheduled_task(task_path, task_name, true)
-}
-
-/// Shared, validated implementation, task path/name come from the renderer
-/// and are embedded in single-quoted PS strings.
-fn toggle_scheduled_task(
-    task_path: String,
-    task_name: String,
-    enable: bool,
-) -> Result<String, String> {
-    if !crate::ps::is_safe_ident(&task_path) || !crate::ps::is_safe_ident(&task_name) {
-        return Err("Invalid scheduled task path or name".into());
-    }
-    let action = if enable {
-        "Enable-ScheduledTask"
-    } else {
-        "Disable-ScheduledTask"
-    };
-    ps::run(&format!(
-        "{action} -TaskPath '{task_path}' -TaskName '{task_name}' -ErrorAction Stop | Out-Null; 'OK'"
-    ))
-    .map(|s| s.trim().to_string())
+    crate::schedtasks::toggle(task_path, task_name, true).map(|_| "OK".to_string())
 }
 
 // ── Defender toggles ──────────────────────────────────────────────────────────
@@ -327,31 +335,167 @@ fn ensure_defender_unlocked() -> Result<(), String> {
     Ok(())
 }
 
+/// Apply a Defender preference change with a write-ahead journal entry whose
+/// revert restores the value captured before the change.
+fn journaled_defender_change(
+    tweak_id: &str,
+    tweak_name: &str,
+    apply: &str,
+    revert: &str,
+    done_msg: &str,
+) -> Result<String, String> {
+    use crate::safety::{self, ChangeItem, JournalEntry};
+    let entry_id = safety::append_entry(JournalEntry {
+        id: format!(
+            "{tweak_id}-{}",
+            chrono::Local::now().format("%Y%m%d%H%M%S%6f")
+        ),
+        tweak_id: tweak_id.into(),
+        tweak_name: tweak_name.into(),
+        origin: None,
+        time: chrono::Local::now().to_rfc3339(),
+        items: vec![ChangeItem::Command {
+            applied: format!("powershell -Command {apply}"),
+            revert: format!("powershell -Command {revert}"),
+        }],
+        reverted: false,
+        backup_files: vec![],
+        completed: false,
+        attempted: 1,
+        reverted_items: 0,
+        untrusted: false,
+    })?;
+    let result = ps::run(apply);
+    safety::with_journal(|entries| {
+        let entry = entries
+            .iter_mut()
+            .find(|e| e.id == entry_id)
+            .ok_or("Defender journal entry missing")?;
+        entry.completed = result.is_ok();
+        // Set-MpPreference -ErrorAction Stop is all-or-nothing: on failure
+        // nothing changed, so the entry must not offer an undo.
+        entry.reverted = result.is_err();
+        Ok(())
+    })?;
+    result.map(|_| done_msg.to_string())
+}
+
+/// Parse the captured DisableRealtimeMonitoring preference.
+fn parse_ps_bool(s: &str) -> Option<bool> {
+    match s.trim() {
+        t if t.eq_ignore_ascii_case("true") => Some(true),
+        t if t.eq_ignore_ascii_case("false") => Some(false),
+        _ => None,
+    }
+}
+
+/// Parse the captured MAPSReporting preference (0 = off, 1 = basic,
+/// 2 = advanced). Only these values are ever written back.
+fn parse_maps_reporting(s: &str) -> Option<u8> {
+    match s.trim() {
+        "0" => Some(0),
+        "1" => Some(1),
+        "2" => Some(2),
+        _ => None,
+    }
+}
+
 pub fn defender_set_realtime(enabled: bool) -> Result<String, String> {
     if !enabled {
         ensure_defender_unlocked()?;
     }
-    let cmd = if enabled {
-        "Set-MpPreference -DisableRealtimeMonitoring $false -ErrorAction Stop; 'Real-Time Protection enabled'"
+    let prev_disabled = ps::run("(Get-MpPreference -ErrorAction Stop).DisableRealtimeMonitoring")
+        .ok()
+        .and_then(|s| parse_ps_bool(&s))
+        .ok_or("could not read the current Real-Time Protection setting; nothing changed")?;
+    let msg = if enabled {
+        "Real-Time Protection enabled"
     } else {
-        "Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction Stop; 'Real-Time Protection disabled'"
+        "Real-Time Protection disabled"
     };
-    ps::run(cmd).map(|s| s.trim().to_string())
+    if prev_disabled != enabled {
+        // Already in the requested state; nothing to change or journal.
+        return Ok(msg.into());
+    }
+    let ps_bool = |b: bool| if b { "$true" } else { "$false" };
+    journaled_defender_change(
+        "defenderRealtime",
+        if enabled {
+            "Defender: Real-Time Protection on"
+        } else {
+            "Defender: Real-Time Protection off"
+        },
+        &format!(
+            "Set-MpPreference -DisableRealtimeMonitoring {} -ErrorAction Stop",
+            ps_bool(!enabled)
+        ),
+        &format!(
+            "Set-MpPreference -DisableRealtimeMonitoring {} -ErrorAction Stop",
+            ps_bool(prev_disabled)
+        ),
+        msg,
+    )
 }
 
 pub fn defender_set_cloud(enabled: bool) -> Result<String, String> {
     if !enabled {
         ensure_defender_unlocked()?;
     }
-    let val = if enabled { "2" } else { "0" };
-    ps::run(&format!(
-        "Set-MpPreference -MAPSReporting {} -ErrorAction Stop; '{}'",
-        val,
+    let prev = ps::run("(Get-MpPreference -ErrorAction Stop).MAPSReporting")
+        .ok()
+        .and_then(|s| parse_maps_reporting(&s))
+        .ok_or("could not read the current Cloud Protection setting; nothing changed")?;
+    let msg = if enabled {
+        "Cloud Protection enabled"
+    } else {
+        "Cloud Protection disabled"
+    };
+    // Already in the requested state. Enabling keeps a user's existing
+    // non-zero level (basic stays basic).
+    if (prev != 0) == enabled {
+        return Ok(msg.into());
+    }
+    let val = if enabled { 2 } else { 0 };
+    journaled_defender_change(
+        "defenderCloud",
         if enabled {
-            "Cloud Protection enabled"
+            "Defender: Cloud Protection on"
         } else {
-            "Cloud Protection disabled"
-        }
-    ))
-    .map(|s| s.trim().to_string())
+            "Defender: Cloud Protection off"
+        },
+        &format!("Set-MpPreference -MAPSReporting {val} -ErrorAction Stop"),
+        // Restores the captured level instead of a hardcoded 2.
+        &format!("Set-MpPreference -MAPSReporting {prev} -ErrorAction Stop"),
+        msg,
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_scanned_unsigned_devices_can_be_targeted() {
+        let scan = json!({ "count": 1, "items": [
+            { "device": "X", "deviceId": "ROOT\\LEGACY_X\\0000" }
+        ]});
+        assert!(is_flagged_unsigned(&scan, "ROOT\\LEGACY_X\\0000"));
+        assert!(is_flagged_unsigned(&scan, "root\\legacy_x\\0000"));
+        assert!(!is_flagged_unsigned(&scan, "PCI\\VEN_144D&DEV_A80A\\4&2"));
+        assert!(!is_flagged_unsigned(
+            &json!({ "error": "x" }),
+            "ROOT\\LEGACY_X\\0000"
+        ));
+    }
+
+    #[test]
+    fn parses_captured_defender_values() {
+        assert_eq!(parse_ps_bool("True\r\n"), Some(true));
+        assert_eq!(parse_ps_bool("false"), Some(false));
+        assert_eq!(parse_ps_bool(""), None);
+        assert_eq!(parse_maps_reporting("1\n"), Some(1));
+        assert_eq!(parse_maps_reporting("2"), Some(2));
+        assert_eq!(parse_maps_reporting("3"), None);
+        assert_eq!(parse_maps_reporting("0; calc"), None);
+    }
 }

@@ -21,9 +21,14 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: './src-tauri -> target'
+      # No rust-cache in the release job: a cache restored from another
+      # (PR/branch) run must never feed a signed release build.
+
+      # Third-party install scripts run BEFORE the signing certificate is in
+      # the certificate store, so a compromised dependency's lifecycle
+      # script cannot use or export it.
+      - name: Install frontend dependencies
+        run: npm ci
 
       - name: Import Windows code-signing certificate
         shell: pwsh
@@ -44,6 +49,7 @@ jobs:
             $password = ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -Force -AsPlainText
             $certificate = Import-PfxCertificate -FilePath $certPath -CertStoreLocation Cert:\CurrentUser\My -Password $password
             if (!$certificate -or !$certificate.Thumbprint) { throw 'Certificate import did not return a thumbprint.' }
+            "WINDOWS_CERT_THUMBPRINT=$($certificate.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
             $configPath = 'src-tauri/tauri.conf.json'
             $config = Get-Content $configPath -Raw | ConvertFrom-Json
@@ -56,9 +62,6 @@ jobs:
           } finally {
             Remove-Item -LiteralPath $certPath -Force -ErrorAction SilentlyContinue
           }
-
-      - name: Install frontend dependencies
-        run: npm ci
 
       # Release notes come from the matching CHANGELOG.md section (single source
       # of truth, same content the app shows). Never fails: on any problem it
@@ -135,6 +138,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           RELEASE_NOTES: ${{ github.event.head_commit.message }}
+          TAG_NAME: ${{ github.ref_name }}
         run: |
           $ErrorActionPreference = 'Stop'
           # Version of truth = tauri.conf.json, NOT the git tag name.
@@ -143,7 +147,8 @@ jobs:
           # producing an infinite "update available" loop.
           $conf    = Get-Content "src-tauri/tauri.conf.json" -Raw | ConvertFrom-Json
           $version = $conf.version
-          $tag     = "${{ github.ref_name }}"
+          # Tag via env var, never an inline expression expansion in the script body.
+          $tag     = $env:TAG_NAME
           if ($tag.TrimStart('v') -ne $version) {
             Write-Error "Tag '$tag' does not match tauri.conf.json version '$version' — aborting to avoid a mismatched release."
             exit 1
@@ -222,3 +227,17 @@ jobs:
           # ── 8. Upload ─────────────────────────────────────────────────────
           gh release upload $tag "latest.json" --clobber
           Write-Host "✓ latest.json uploaded to $tag"
+
+      # Always remove the signing certificate (and its private key) from the
+      # runner's store, also when an earlier step failed or was cancelled.
+      - name: Remove code-signing certificate
+        if: always()
+        shell: pwsh
+        run: |
+          $thumb = $env:WINDOWS_CERT_THUMBPRINT
+          if ([string]::IsNullOrWhiteSpace($thumb)) { Write-Host 'No signing certificate was imported.'; exit 0 }
+          $item = Get-Item -LiteralPath "Cert:\CurrentUser\My\$thumb" -ErrorAction SilentlyContinue
+          if ($item) {
+            Remove-Item -LiteralPath "Cert:\CurrentUser\My\$thumb" -DeleteKey -Force -ErrorAction Stop
+            Write-Host 'Signing certificate removed.'
+          }

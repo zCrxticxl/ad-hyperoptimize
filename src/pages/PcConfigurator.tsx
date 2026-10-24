@@ -94,9 +94,8 @@ export default function PcConfigurator() {
   const curGpuScore = gpuScoreOf(hw).score;
   const curRamScore = ramScoreOf(hw);
   const curStorageScore = storageScoreOf(hw);
-  // DDR5 starts at JEDEC 4800, but high-end DDR4 OC kits reach 5000+;
-  // only speeds typical of DDR5 (5600+) are unambiguous.
-  const inferredRamType: "DDR4" | "DDR5" = hw.ram.speedMhz >= 5600 ? "DDR5" : "DDR4";
+  const inferredRamType: "DDR4" | "DDR5" | null = hw.ram.ramType
+    ?? (hw.ram.speedMhz >= 5600 ? "DDR5" : hw.ram.speedMhz > 0 && hw.ram.speedMhz < 4000 ? "DDR4" : null);
 
   const cpuObj = CPUS.find((c) => c.id === selCpu) ?? null;
   const gpuObj = GPUS.find((g) => g.id === selGpu) ?? null;
@@ -111,9 +110,9 @@ export default function PcConfigurator() {
   const effectiveMobo = cfgMode === "build" ? buildMoboObj : forcedMoboObj;
 
   const cpuOptions: Cpu[] = cfgMode === "build" ? (buildMoboObj ? compatibleCpus(buildMoboObj.socket) : []) : CPUS;
-  const effectiveRamType: "DDR4" | "DDR5" =
-    cfgMode === "build" ? (buildMoboObj?.ramType ?? "DDR5") : effectiveMobo?.ramType ?? inferredRamType;
-  const ramOptions: RamKit[] = compatibleRam(effectiveRamType);
+  const effectiveRamType: "DDR4" | "DDR5" | null =
+    cfgMode === "build" ? (buildMoboObj?.ramType ?? null) : effectiveMobo?.ramType ?? inferredRamType;
+  const ramOptions: RamKit[] = effectiveRamType ? compatibleRam(effectiveRamType) : [];
 
   const effCpuScore = cpuObj?.score ?? curCpuScore;
   const effGpuScore = gpuObj?.score ?? curGpuScore;
@@ -182,6 +181,11 @@ export default function PcConfigurator() {
     );
   }
 
+  // RAM and storage scores are always heuristics (capacity/type), CPU and GPU
+  // only when the part was not found in the catalog (fallback scoring).
+  const isEstimate = (key: string) =>
+    key === "ram" || key === "storage" || (key === "cpu" && !matchedCpu) || (key === "gpu" && !matchedGpu);
+
   function ComponentRow({ cr }: { cr: ComponentRating }) {
     return (
       <div style={{ marginBottom: 14 }}>
@@ -190,7 +194,10 @@ export default function PcConfigurator() {
           <Badge cls={RATING_CLS[cr.rating]}>{t(RATING_KEY[cr.rating] as any)}</Badge>
         </div>
         <Bar pct={cr.score} />
-        <div className="muted" style={{ fontSize: 12, marginTop: 3 }}>{t("pcconfScoreLabel")}: {Math.round(cr.score)}/100</div>
+        <div className="muted" style={{ fontSize: 12, marginTop: 3 }}>
+          {t("pcconfScoreLabel")}: {isEstimate(cr.key) ? "~" : ""}{Math.round(cr.score)}/100
+          {isEstimate(cr.key) && <> · {t("pcconfEstimateTag")}</>}
+        </div>
       </div>
     );
   }
@@ -359,7 +366,7 @@ export default function PcConfigurator() {
                     { key: "storage", label: t("pcconfComponentStorage"), weight: 5, cur: curStorageScore, eff: effStorageScore },
                   ].map((c) => (
                     <div key={c.key} className="row" style={{ justifyContent: "space-between", padding: "3px 0" }}>
-                      <span>{c.label} ({c.weight}%)</span>
+                      <span>{c.label} ({c.weight}%){isEstimate(c.key) && <span className="muted"> · {t("pcconfEstimateTag")}</span>}</span>
                       <span>
                         {Math.round(c.cur)} →{" "}
                         <b style={{ color: c.eff > c.cur ? "var(--green)" : c.eff < c.cur ? "var(--red)" : "var(--text)" }}>

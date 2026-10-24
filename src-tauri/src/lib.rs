@@ -1,14 +1,19 @@
 mod analysis;
-mod autoopt;
 mod bench;
 mod bootopt;
+mod broker;
 mod cache;
 mod cleanup;
+// Privilege inventory of all commands (broker phase 1); test-only until the
+// broker uses it at runtime.
+#[cfg(test)]
+mod commands;
 #[cfg(windows)]
 mod ctxmenu;
 mod debloater;
 mod diskanalyzer;
 mod drivers;
+mod frametime;
 mod gameboost;
 mod gamedb;
 mod gameprofile;
@@ -18,6 +23,9 @@ mod hwmonitor;
 mod hwprofile;
 mod latency;
 mod monitor;
+mod optimizer;
+mod optregistry;
+mod organizer;
 mod perftweaks;
 mod powerplan;
 mod privacy;
@@ -33,6 +41,7 @@ mod security;
 mod services;
 mod softwareinstaller;
 mod startup;
+mod statestore;
 mod tweaks;
 mod uninstaller;
 mod updates;
@@ -109,9 +118,11 @@ async fn cmd_start_monitor(app: AppHandle, state: State<'_, AppState>) -> Result
         .map_err(|e| e.to_string())?
 }
 
-#[tauri::command]
-fn cmd_stop_monitor(state: State<'_, AppState>) {
-    monitor::stop(&state.monitor);
+#[tauri::command(async)]
+async fn cmd_stop_monitor(app: AppHandle) {
+    // stop() joins the monitor thread, never block the main thread on it.
+    let monitor = app.state::<AppState>().monitor.clone();
+    let _ = tauri::async_runtime::spawn_blocking(move || monitor::stop(&monitor)).await;
 }
 
 // ---- optimization engine ----
@@ -122,18 +133,39 @@ async fn cmd_list_tweaks() -> Value {
         .unwrap_or_default()
 }
 
+/// Admin helper status: whether this build has one and whether it is
+/// connected (docs/audit-2026-10/elevation-design.md, phase 3).
+#[tauri::command(async)]
+fn cmd_broker_status() -> Value {
+    serde_json::json!({ "available": broker::AVAILABLE, "connected": broker::connected() })
+}
+
+/// Starts the elevated helper (UAC prompt) and connects to it.
+#[tauri::command(async)]
+async fn cmd_broker_unlock() -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(broker::unlock)
+        .await
+        .map_err(|_| "broker task panicked".to_string())?
+}
+
 #[tauri::command(async)]
 async fn cmd_apply_tweak(id: String) -> Result<Value, String> {
-    tauri::async_runtime::spawn_blocking(move || tweaks::apply(&id))
-        .await
-        .map_err(|_| "apply task panicked".to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        broker::route(broker::Request::ApplyTweak { id: id.clone() })
+            .unwrap_or_else(|| tweaks::apply(&id))
+    })
+    .await
+    .map_err(|_| "apply task panicked".to_string())?
 }
 
 #[tauri::command(async)]
 async fn cmd_revert_tweak(id: String) -> Result<Value, String> {
-    tauri::async_runtime::spawn_blocking(move || tweaks::revert(&id))
-        .await
-        .map_err(|_| "revert task panicked".to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        broker::route(broker::Request::RevertTweak { id: id.clone() })
+            .unwrap_or_else(|| tweaks::revert(&id))
+    })
+    .await
+    .map_err(|_| "revert task panicked".to_string())?
 }
 
 #[tauri::command(async)]
@@ -145,9 +177,14 @@ async fn cmd_history() -> Value {
 
 #[tauri::command(async)]
 async fn cmd_revert_entry(entry_id: String) -> Result<Value, String> {
-    tauri::async_runtime::spawn_blocking(move || tweaks::revert_entry(&entry_id))
-        .await
-        .map_err(|_| "revert task panicked".to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        broker::route(broker::Request::RevertEntry {
+            entry_id: entry_id.clone(),
+        })
+        .unwrap_or_else(|| tweaks::revert_entry(&entry_id))
+    })
+    .await
+    .map_err(|_| "revert task panicked".to_string())?
 }
 
 // ---- safety / restore points ----
@@ -180,25 +217,51 @@ async fn cmd_launch_rstrui() -> Result<String, String> {
 }
 
 // ---- auto optimizer ----
+// ---- system health check / verified optimization ----
 #[tauri::command(async)]
-async fn cmd_autoopt_scan() -> Value {
-    tauri::async_runtime::spawn_blocking(autoopt::scan)
+async fn cmd_health_scan() -> Value {
+    tauri::async_runtime::spawn_blocking(optimizer::scan)
         .await
         .unwrap_or_default()
 }
 
-#[tauri::command(async)]
-async fn cmd_autoopt_score() -> Value {
-    tauri::async_runtime::spawn_blocking(autoopt::score)
-        .await
-        .unwrap_or_default()
+/// Opens one of a fixed set of Windows Settings pages. The page name is
+/// matched against an allowlist, never passed through.
+#[tauri::command]
+fn cmd_open_windows_settings(page: String) -> Result<(), String> {
+    let uri = match page.as_str() {
+        "display-advanced" => "ms-settings:display-advanced",
+        "display-advancedgraphics" => "ms-settings:display-advancedgraphics",
+        _ => return Err(format!("unknown settings page '{page}'")),
+    };
+    std::process::Command::new(format!(r"{}\explorer.exe", ps::windows_dir()))
+        .arg(uri)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("could not open Windows Settings: {e}"))
 }
 
 #[tauri::command(async)]
-async fn cmd_autoopt_apply(items: Vec<Value>) -> Value {
-    tauri::async_runtime::spawn_blocking(move || autoopt::apply_selected(items))
-        .await
-        .unwrap_or_default()
+async fn cmd_reset_retired() -> Value {
+    tauri::async_runtime::spawn_blocking(|| {
+        broker::route_value(broker::Request::ResetRetired {})
+            .unwrap_or_else(optimizer::reset_retired)
+    })
+    .await
+    .unwrap_or_default()
+}
+
+#[tauri::command(async)]
+async fn cmd_optimize_apply(ids: Vec<String>, restore_point: bool) -> Value {
+    tauri::async_runtime::spawn_blocking(move || {
+        broker::route_value(broker::Request::OptimizeApply {
+            ids: ids.clone(),
+            restore_point,
+        })
+        .unwrap_or_else(|| optimizer::apply(ids, restore_point))
+    })
+    .await
+    .unwrap_or_default()
 }
 
 // ---- cleanup ----
@@ -278,6 +341,44 @@ async fn cmd_security_remove_driver(device_id: String) -> Result<String, String>
 }
 
 // ---- benchmarks ----
+// Frame-time captures (PresentMon / CapFrameX / FrameView CSV) are only
+// parsed; nothing is executed.
+#[tauri::command(async)]
+async fn cmd_fps_import(
+    csv: String,
+    file_name: String,
+    game: String,
+    state: String,
+    note: String,
+) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        frametime::import(csv, file_name, game, state, note)
+    })
+    .await
+    .map_err(|_| "fps import task panicked".to_string())?
+}
+
+#[tauri::command(async)]
+async fn cmd_fps_runs() -> Value {
+    tauri::async_runtime::spawn_blocking(frametime::list)
+        .await
+        .unwrap_or_default()
+}
+
+#[tauri::command(async)]
+async fn cmd_fps_delete(id: String) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || frametime::delete(id))
+        .await
+        .map_err(|_| "fps task panicked".to_string())?
+}
+
+#[tauri::command(async)]
+async fn cmd_fps_compare(game: String) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || frametime::compare(game))
+        .await
+        .map_err(|_| "fps task panicked".to_string())?
+}
+
 #[tauri::command(async)]
 async fn cmd_run_benchmark(kind: String) -> Result<Value, String> {
     tauri::async_runtime::spawn_blocking(move || bench::run(&kind))
@@ -338,16 +439,25 @@ async fn cmd_profile_list() -> Value {
 
 #[tauri::command(async)]
 async fn cmd_profile_apply(id: String, with_bench: bool) -> Result<Value, String> {
-    tauri::async_runtime::spawn_blocking(move || profiles::apply(&id, with_bench))
-        .await
-        .map_err(|_| "profile task panicked".to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        broker::route(broker::Request::ProfileApply {
+            id: id.clone(),
+            with_bench,
+        })
+        .unwrap_or_else(|| profiles::apply(&id, with_bench))
+    })
+    .await
+    .map_err(|_| "profile task panicked".to_string())?
 }
 
 #[tauri::command(async)]
 async fn cmd_profile_revert(id: String) -> Result<Value, String> {
-    tauri::async_runtime::spawn_blocking(move || profiles::revert(&id))
-        .await
-        .map_err(|_| "profile task panicked".to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        broker::route(broker::Request::ProfileRevert { id: id.clone() })
+            .unwrap_or_else(|| profiles::revert(&id))
+    })
+    .await
+    .map_err(|_| "profile task panicked".to_string())?
 }
 
 // ---- startup manager ----
@@ -388,7 +498,9 @@ async fn cmd_proc_priority(pid: u32, priority: String) -> Result<Value, String> 
 #[tauri::command(async)]
 async fn cmd_proc_affinity(pid: u32, mask: String) -> Result<Value, String> {
     // Decimal string: 64-bit masks exceed JS number precision (>2^53).
-    let mask: u64 = mask.parse().map_err(|_| "invalid affinity mask".to_string())?;
+    let mask: u64 = mask
+        .parse()
+        .map_err(|_| "invalid affinity mask".to_string())?;
     tauri::async_runtime::spawn_blocking(move || procmgr::set_affinity(pid, mask))
         .await
         .map_err(|_| "process task panicked".to_string())?
@@ -455,16 +567,22 @@ async fn cmd_privacy_scan() -> Value {
 
 #[tauri::command(async)]
 async fn cmd_privacy_apply(id: String) -> Result<Value, String> {
-    tauri::async_runtime::spawn_blocking(move || privacy::apply(id))
-        .await
-        .map_err(|_| "privacy task panicked".to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        broker::route(broker::Request::PrivacyApply { id: id.clone() })
+            .unwrap_or_else(|| privacy::apply(id))
+    })
+    .await
+    .map_err(|_| "privacy task panicked".to_string())?
 }
 
 #[tauri::command(async)]
 async fn cmd_privacy_revert(id: String) -> Result<Value, String> {
-    tauri::async_runtime::spawn_blocking(move || privacy::revert(id))
-        .await
-        .map_err(|_| "privacy task panicked".to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        broker::route(broker::Request::PrivacyRevert { id: id.clone() })
+            .unwrap_or_else(|| privacy::revert(id))
+    })
+    .await
+    .map_err(|_| "privacy task panicked".to_string())?
 }
 
 // ---- services manager ----
@@ -580,23 +698,36 @@ async fn cmd_schedtask_toggle(path: String, name: String, enable: bool) -> Resul
 // ---- debloater ----
 #[tauri::command(async)]
 async fn cmd_debloater_uwp_list() -> Value {
-    tauri::async_runtime::spawn_blocking(debloater::list_uwp)
-        .await
-        .unwrap_or_default()
+    tauri::async_runtime::spawn_blocking(|| {
+        broker::route_value(broker::Request::DebloaterUwpList {})
+            .unwrap_or_else(debloater::list_uwp)
+    })
+    .await
+    .unwrap_or_default()
 }
 
 #[tauri::command(async)]
 async fn cmd_debloater_remove_uwp(package_full_name: String) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || debloater::remove_uwp(package_full_name))
-        .await
-        .map_err(|_| "debloater task panicked".to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        broker::route_string(broker::Request::DebloaterRemoveUwp {
+            package_full_name: package_full_name.clone(),
+        })
+        .unwrap_or_else(|| debloater::remove_uwp(package_full_name))
+    })
+    .await
+    .map_err(|_| "debloater task panicked".to_string())?
 }
 
 #[tauri::command(async)]
 async fn cmd_debloater_remove_provisioned(package_name: String) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || debloater::remove_uwp_provisioned(package_name))
-        .await
-        .map_err(|_| "debloater task panicked".to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        broker::route_string(broker::Request::DebloaterRemoveProvisioned {
+            package_name: package_name.clone(),
+        })
+        .unwrap_or_else(|| debloater::remove_uwp_provisioned(package_name))
+    })
+    .await
+    .map_err(|_| "debloater task panicked".to_string())?
 }
 
 #[tauri::command(async)]
@@ -608,16 +739,22 @@ async fn cmd_debloater_tweaks_list() -> Value {
 
 #[tauri::command(async)]
 async fn cmd_debloater_tweak_apply(id: String) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || debloater::apply_tweak(id))
-        .await
-        .map_err(|_| "debloater task panicked".to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        broker::route_string(broker::Request::DebloaterApply { id: id.clone() })
+            .unwrap_or_else(|| debloater::apply_tweak(id))
+    })
+    .await
+    .map_err(|_| "debloater task panicked".to_string())?
 }
 
 #[tauri::command(async)]
 async fn cmd_debloater_tweak_revert(id: String) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || debloater::revert_tweak(id))
-        .await
-        .map_err(|_| "debloater task panicked".to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        broker::route_string(broker::Request::DebloaterRevert { id: id.clone() })
+            .unwrap_or_else(|| debloater::revert_tweak(id))
+    })
+    .await
+    .map_err(|_| "debloater task panicked".to_string())?
 }
 
 // ---- driver manager ----
@@ -686,13 +823,6 @@ async fn cmd_gameboost_running_games() -> Value {
 }
 
 #[tauri::command(async)]
-async fn cmd_gameboost_boost_process(pid: u32) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || gameboost::boost_process(pid))
-        .await
-        .map_err(|_| "game booster task panicked".to_string())?
-}
-
-#[tauri::command(async)]
 async fn cmd_gameboost_kill_background(pids: Vec<u32>) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || gameboost::kill_background(pids))
         .await
@@ -717,16 +847,12 @@ async fn cmd_gameboost_stop(state: State<'_, AppState>) -> Result<String, String
     Ok(r)
 }
 
+/// `active` also covers a boost started before an app restart, whose PID is
+/// no longer known; without it the page offered no way to stop that boost.
 #[tauri::command]
-fn cmd_gameboost_get_status(state: State<'_, AppState>) -> Option<u32> {
-    *state.boosted_pid.lock().unwrap_or_else(|e| e.into_inner())
-}
-
-#[tauri::command(async)]
-async fn cmd_gameboost_gpu_perf(enable: bool) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || gameboost::set_gpu_max_perf(enable))
-        .await
-        .map_err(|_| "game booster task panicked".to_string())?
+fn cmd_gameboost_get_status(state: State<'_, AppState>) -> Value {
+    let pid = *state.boosted_pid.lock().unwrap_or_else(|e| e.into_inner());
+    serde_json::json!({ "pid": pid, "active": pid.is_some() || gameboost::boost_active() })
 }
 
 #[tauri::command(async)]
@@ -752,7 +878,10 @@ async fn cmd_uninstaller_list() -> Value {
 }
 
 #[tauri::command(async)]
-async fn cmd_uninstall_app(uninstall_string: String, from_hkcu: Option<bool>) -> Result<String, String> {
+async fn cmd_uninstall_app(
+    uninstall_string: String,
+    from_hkcu: Option<bool>,
+) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
         uninstaller::uninstall_app(uninstall_string, from_hkcu.unwrap_or(false))
     })
@@ -804,17 +933,10 @@ async fn cmd_gpu_tweak_revert(id: String, driver_key: String) -> Result<String, 
 
 // ---- nvidia control panel ----
 #[tauri::command(async)]
-async fn cmd_nv_get_settings() -> Value {
-    tauri::async_runtime::spawn_blocking(gputweaks::nv_get_settings)
+async fn cmd_nv_status() -> Value {
+    tauri::async_runtime::spawn_blocking(gputweaks::nv_status)
         .await
         .unwrap_or_default()
-}
-
-#[tauri::command(async)]
-async fn cmd_nv_set_setting(setting: String, value: String) -> Result<Value, String> {
-    tauri::async_runtime::spawn_blocking(move || gputweaks::nv_set_setting(setting, value))
-        .await
-        .map_err(|_| "nvidia task panicked".to_string())?
 }
 
 #[tauri::command(async)]
@@ -855,27 +977,52 @@ async fn cmd_regclean_restore(backup_path: String) -> Result<Value, String> {
 
 // ---- disk organizer ----
 #[tauri::command(async)]
-async fn cmd_disk_organize_preview(folder: String, recurse: bool) -> Value {
-    tauri::async_runtime::spawn_blocking(move || diskanalyzer::organize_preview(folder, recurse))
+async fn cmd_organizer_folders() -> Value {
+    tauri::async_runtime::spawn_blocking(organizer::folders)
         .await
         .unwrap_or_default()
 }
 
 #[tauri::command(async)]
-async fn cmd_disk_organize_apply(items: Vec<Value>) -> Value {
-    tauri::async_runtime::spawn_blocking(move || diskanalyzer::organize_apply(items))
+async fn cmd_organizer_preview(folder: String, by_month: bool) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || organizer::preview(folder, by_month))
+        .await
+        .map_err(|_| "organizer task panicked".to_string())?
+}
+
+#[tauri::command(async)]
+async fn cmd_organizer_apply(
+    folder: String,
+    by_month: bool,
+    srcs: Vec<String>,
+) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || organizer::apply(folder, by_month, srcs))
+        .await
+        .map_err(|_| "organizer task panicked".to_string())?
+}
+
+#[tauri::command(async)]
+async fn cmd_organizer_runs() -> Value {
+    tauri::async_runtime::spawn_blocking(organizer::runs)
         .await
         .unwrap_or_default()
 }
 
-// ---- analysis / report ----
+#[tauri::command(async)]
+async fn cmd_organizer_undo(run_id: String) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || organizer::undo(run_id))
+        .await
+        .map_err(|_| "organizer task panicked".to_string())?
+}
+
 #[tauri::command(async)]
 async fn cmd_analyze(force: bool) -> Value {
     // v2: findings now carry `code`+`params` for i18n (old cached "analysis"
     // entries lack these fields and crash the localizer), bump the cache key
-    // so stale pre-v2 files on disk are ignored instead of served.
+    // so stale pre-v2 files on disk are ignored instead of served. v3: the
+    // heavy-startup finding no longer links the startup-delay tweak.
     tauri::async_runtime::spawn_blocking(move || {
-        cache::get_or("analysis_v2", force, || {
+        cache::get_or("analysis_v3", force, || {
             let scan = cache::data_or("scan", force, crate::scan::full_scan);
             let security = cache::data_or("security", force, crate::security::scan);
             let cleanup = cache::data_or("cleanup", force, crate::cleanup::scan);
@@ -892,7 +1039,7 @@ async fn cmd_generate_report() -> Result<Value, String> {
         let scan = cache::data_or("scan", false, crate::scan::full_scan);
         let security = cache::data_or("security", false, crate::security::scan);
         let cleanup = cache::data_or("cleanup", false, crate::cleanup::scan);
-        let analysis = cache::data_or("analysis_v2", false, || {
+        let analysis = cache::data_or("analysis_v3", false, || {
             crate::analysis::analyze(&scan, &security, &cleanup)
         });
         let history = crate::tweaks::history();
@@ -910,18 +1057,26 @@ async fn cmd_game_list() -> serde_json::Value {
         .unwrap_or_default()
 }
 
-#[tauri::command]
-fn cmd_game_switcher_status(state: State<'_, AppState>) -> serde_json::Value {
-    gameprofile::cmd_game_switcher_status(&state.game_switcher)
+#[tauri::command(async)]
+async fn cmd_game_switcher_status(app: AppHandle) -> serde_json::Value {
+    let st = app.state::<AppState>().game_switcher.clone();
+    tauri::async_runtime::spawn_blocking(move || gameprofile::cmd_game_switcher_status(&st))
+        .await
+        .unwrap_or_default()
 }
 
-#[tauri::command]
-fn cmd_game_switcher_configure(
-    state: State<'_, AppState>,
+#[tauri::command(async)]
+async fn cmd_game_switcher_configure(
+    app: AppHandle,
     enabled: bool,
     default_preset: String,
 ) -> serde_json::Value {
-    gameprofile::cmd_game_switcher_configure(&state.game_switcher, enabled, default_preset)
+    let st = app.state::<AppState>().game_switcher.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        gameprofile::cmd_game_switcher_configure(&st, enabled, default_preset)
+    })
+    .await
+    .unwrap_or_default()
 }
 
 #[tauri::command(async)]
@@ -933,91 +1088,282 @@ async fn cmd_game_apply_preset(game_id: String, preset: String) -> serde_json::V
     .unwrap_or_default()
 }
 
-#[tauri::command]
-fn cmd_game_revert(state: State<'_, AppState>) -> serde_json::Value {
-    gameprofile::cmd_game_revert(&state.game_switcher)
+#[tauri::command(async)]
+async fn cmd_game_revert(app: AppHandle) -> serde_json::Value {
+    // Reverting runs powercfg; keep it off the main thread.
+    let st = app.state::<AppState>().game_switcher.clone();
+    tauri::async_runtime::spawn_blocking(move || gameprofile::cmd_game_revert(&st))
+        .await
+        .unwrap_or_default()
 }
 
 // ---- misc ----
-#[tauri::command]
-fn cmd_clear_cache() -> Result<String, String> {
-    let n = cache::clear()?;
+#[tauri::command(async)]
+async fn cmd_clear_cache() -> Result<String, String> {
+    let n = tauri::async_runtime::spawn_blocking(cache::clear)
+        .await
+        .map_err(|_| "cache clear task panicked".to_string())??;
     Ok(format!("Cleared {n} cached scans"))
 }
 
 #[tauri::command(async)]
 fn cmd_open_path(path: String) -> Result<(), String> {
-    // Start-Process opens URLs, files and folders via their default handler
-    // (browser / file association / Explorer). It is spawned with the value as
-    // a single single-quoted argument through ps::run, PowerShell performs no
-    // cmd-style percent/operator expansion inside single quotes, so
-    // percent-encoded URLs (&, %, =, ?) pass through verbatim and the
-    // renderer-supplied value cannot break out of the argument.
-    validate_open_path(&path)?;
-    let safe = path.replace('\'', "''");
-    crate::ps::run(&format!("Start-Process '{safe}'")).map(|_| ())
+    // This process is elevated and `path` is renderer-supplied (social and
+    // buy links, report/backup files, registry-derived install locations).
+    // Nothing is ever executed: no PowerShell, no Start-Process, no
+    // ShellExecute on an arbitrary file. Everything goes to explorer.exe as
+    // one Command argument; explorer hands the request to the running
+    // (unelevated) shell instance, so browsers/viewers do not inherit the
+    // admin token. See classify_open_target for what is allowed.
+    let reports = crate::safety::app_data_dir().join("reports");
+    let arg = match classify_open_target(&path, &reports)? {
+        OpenTarget::Url(u) => u,
+        OpenTarget::Dir(p) | OpenTarget::ReportHtml(p) => p,
+        OpenTarget::RevealFile(p) => format!("/select,{p}"),
+    };
+    // explorer.exe's exit code is meaningless (often 1 on success), so the
+    // child is detached instead of waited on. Its path comes from the API,
+    // not from %SystemRoot%, which the caller of an elevated app controls.
+    std::process::Command::new(std::path::Path::new(&ps::windows_dir()).join("explorer.exe"))
+        .arg(arg)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("explorer: {e}"))
 }
 
-/// `path` is renderer-supplied (including registry-derived install locations
-/// and percent-encoded buy links), so reject anything that could alter the
-/// single-quoted PowerShell argument: control characters (newline injection)
-/// and anything that is neither an http(s) URL nor an absolute local path
-/// (drive letter or UNC).
-fn validate_open_path(path: &str) -> Result<(), String> {
+/// What cmd_open_path may do with a renderer-supplied value.
+#[derive(Debug, PartialEq)]
+enum OpenTarget {
+    /// An `https://` URL, opened in the default browser.
+    Url(String),
+    /// An existing local directory, opened in Explorer.
+    Dir(String),
+    /// A `.html` report inside the app's own reports directory, opened with
+    /// its default handler (the browser). The only file ever "opened".
+    ReportHtml(String),
+    /// Any other existing local file: only revealed (`/select,`), never
+    /// opened or executed.
+    RevealFile(String),
+}
+
+/// Strip the `\\?\` prefix std::fs::canonicalize adds; a canonical path that
+/// resolves to a UNC location (`\\?\UNC\…`, e.g. via a symlink) is refused.
+fn strip_verbatim(p: &std::path::Path) -> Option<String> {
+    let s = p.to_string_lossy();
+    match s.strip_prefix(r"\\?\") {
+        Some(rest) if rest.len() >= 2 && rest.as_bytes()[1] == b':' => Some(rest.to_string()),
+        Some(_) => None,
+        None => Some(s.into_owned()),
+    }
+}
+
+/// Classify `path` for cmd_open_path:
+/// * `https://` URLs only (no http, no other scheme), without whitespace,
+///   quotes or commas (explorer splits its arguments on commas);
+/// * otherwise an absolute `X:\…` local path that exists: UNC, `\\?\`,
+///   device and NTFS stream (`:` after the drive) forms are rejected;
+/// * existing directory → open; `.html` file inside `reports_dir` → open
+///   with the default handler; any other file → reveal only.
+fn classify_open_target(path: &str, reports_dir: &std::path::Path) -> Result<OpenTarget, String> {
     if path.is_empty() || path.len() > 4096 {
         return Err("invalid path".into());
     }
-    if path.bytes().any(|b| b < 0x20) {
+    if path.chars().any(char::is_control) {
         return Err("path contains control characters".into());
     }
-    let upper = path.to_ascii_uppercase();
-    let is_url = upper.starts_with("HTTP://") || upper.starts_with("HTTPS://");
-    let is_unc = upper.starts_with("\\\\");
-    if is_unc && upper.contains('@') {
-        return Err("UNC paths with embedded credentials are not allowed".into());
+    // Explorer parses `,` as an argument separator and `"` as quoting.
+    if path.contains([',', '"']) {
+        return Err("path contains unsupported characters".into());
     }
-    let is_abs = (upper.len() >= 3
-        && upper.as_bytes()[0].is_ascii_alphabetic()
-        && upper.as_bytes()[1] == b':'
-        && upper.as_bytes()[2] == b'\\')
-        || is_unc;
-    if !is_url && !is_abs {
-        return Err("path must be an http(s) URL or an absolute local path".into());
+    let lower = path.to_ascii_lowercase();
+    if lower.starts_with("https://") {
+        if path.len() <= "https://".len() || path.chars().any(char::is_whitespace) {
+            return Err("invalid URL".into());
+        }
+        return Ok(OpenTarget::Url(path.to_string()));
     }
-    Ok(())
+    if lower.contains("://") || lower.starts_with("http:") {
+        return Err("only https:// URLs can be opened".into());
+    }
+
+    let b = path.as_bytes();
+    let is_abs_drive = b.len() >= 3
+        && b[0].is_ascii_alphabetic()
+        && b[1] == b':'
+        && (b[2] == b'\\' || b[2] == b'/');
+    if !is_abs_drive {
+        return Err("path must be an https:// URL or an absolute local path".into());
+    }
+    // NTFS stream syntax / device forms: no `:` after the drive letter.
+    if path[2..].contains(':') {
+        return Err("invalid path".into());
+    }
+    let p = std::path::Path::new(path);
+    let meta = std::fs::metadata(p).map_err(|_| "path does not exist".to_string())?;
+    let canon = std::fs::canonicalize(p).map_err(|e| format!("cannot resolve path: {e}"))?;
+    let canon_str = strip_verbatim(&canon).ok_or("network paths cannot be opened")?;
+
+    if meta.is_dir() {
+        return Ok(OpenTarget::Dir(canon_str));
+    }
+    if !meta.is_file() {
+        return Err("not a file or directory".into());
+    }
+    let is_html = canon
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("html"));
+    let in_reports = std::fs::canonicalize(reports_dir)
+        .map(|r| canon.parent() == Some(r.as_path()))
+        .unwrap_or(false);
+    if is_html && in_reports {
+        Ok(OpenTarget::ReportHtml(canon_str))
+    } else {
+        Ok(OpenTarget::RevealFile(canon_str))
+    }
+}
+
+/// Runs every read-only scan the UI calls on page load against the real
+/// system and fails on PowerShell parser errors (a broken generated script
+/// only shows up at runtime). Read-only, but slow and system-dependent, so it
+/// is opt-in: `cargo test --locked -- --ignored read_only_scans`.
+#[cfg(all(test, windows))]
+mod smoke {
+    #[test]
+    #[ignore]
+    fn read_only_scans_have_no_powershell_parser_errors() {
+        type Scan = fn() -> serde_json::Value;
+        let scans: Vec<(&str, Scan)> = vec![
+            ("bootopt", crate::bootopt::scan),
+            ("cleanup", crate::cleanup::scan),
+            ("debloater uwp", crate::debloater::list_uwp),
+            ("debloater tweaks", crate::debloater::list_tweaks),
+            ("gputweaks", crate::gputweaks::scan),
+            ("health check", crate::optimizer::scan),
+            ("hwprofile", crate::hwprofile::hw_profile),
+            ("msi", crate::perftweaks::msi_list),
+            ("powerplan", crate::powerplan::list_plans),
+            ("privacy", crate::privacy::scan),
+            ("processes", crate::procmgr::list),
+            ("profiles", crate::profiles::list),
+            ("regclean", crate::regclean::scan),
+            ("schedtasks", crate::schedtasks::list),
+            ("security", crate::security::scan),
+            ("services", crate::services::list),
+            ("startup", crate::startup::list),
+            ("tweaks", crate::tweaks::list_with_status),
+            ("uninstaller", crate::uninstaller::list_apps),
+        ];
+        let markers = [
+            "ParserError",
+            "ParseException",
+            "MissingEndParenthesis",
+            "UnexpectedToken",
+            "MissingEndCurlyBrace",
+            "MissingCatchOrFinally",
+        ];
+        let mut broken = Vec::new();
+        for (name, scan) in scans {
+            let out = scan().to_string();
+            if let Some(m) = markers.iter().find(|m| out.contains(*m)) {
+                broken.push(format!("{name}: {m}"));
+            }
+        }
+        assert!(broken.is_empty(), "scans with parser errors: {broken:?}");
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::validate_open_path;
+    use super::{classify_open_target, OpenTarget};
 
+    #[cfg(debug_assertions)]
     #[test]
-    fn open_path_accepts_urls_and_abs_paths() {
-        assert!(validate_open_path("https://discord.gg/vFaKsVuxKP").is_ok());
-        assert!(validate_open_path("http://example.com/x").is_ok());
-        // percent-encoded query links (PcConfigurator buy buttons)
-        assert!(
-            validate_open_path(
-                "https://www.bestbuy.com/site/searchpage.jsp?st=NVIDIA%20GeForce%20RTX%205090&_dyncharset=UTF-8"
-            )
-            .is_ok()
-        );
-        assert!(validate_open_path(r"C:\Program Files (x86)\App & More").is_ok());
-        assert!(validate_open_path(
-            r"C:\Users\Me\AppData\Roaming\PCOptSuite\reports\report-1.html"
-        )
-        .is_ok());
-        assert!(validate_open_path(r"\\server\share\folder").is_ok());
+    fn debug_launch_skips_admin_relaunch() {
+        assert!(!super::should_auto_elevate());
+    }
+
+    fn no_reports() -> std::path::PathBuf {
+        std::env::temp_dir().join("adho-open-path-no-such-reports-dir")
     }
 
     #[test]
-    fn open_path_rejects_injection() {
-        assert!(validate_open_path("").is_err());
-        assert!(validate_open_path("calc.exe").is_err()); // relative
-        assert!(validate_open_path("not a url").is_err());
-        assert!(validate_open_path("https://x.com/a\ncalc").is_err()); // newline
-        assert!(validate_open_path("https://x.com/a\rcalc").is_err());
-        assert!(validate_open_path(&"x".repeat(4097)).is_err());
+    fn open_path_accepts_https_urls() {
+        for u in [
+            "https://discord.gg/vFaKsVuxKP",
+            "https://www.buymeacoffee.com/zCrxticxl",
+            // percent-encoded query links (PcConfigurator buy buttons)
+            "https://www.bestbuy.com/site/searchpage.jsp?st=NVIDIA%20GeForce%20RTX%205090&_dyncharset=UTF-8",
+        ] {
+            assert_eq!(
+                classify_open_target(u, &no_reports()),
+                Ok(OpenTarget::Url(u.to_string()))
+            );
+        }
+    }
+
+    #[test]
+    fn open_path_rejects_unsafe_targets() {
+        for bad in [
+            "",
+            "calc.exe",
+            "not a url",
+            "http://example.com/x",
+            "file:///C:/Windows/System32/calc.exe",
+            "ms-settings:privacy",
+            "https://x.com/a\ncalc",
+            "https://x.com/a b",
+            "https://x.com/a\"b",
+            "https://",
+            r"\\server\share\folder",
+            r"\\?\C:\Windows",
+            r"\\.\C:\Windows",
+            r"C:\Windows::$INDEX_ALLOCATION",
+            r"C:\x\file.txt:stream",
+            r"C:\a,b",
+            r"C:\definitely\not\existing\adho-xyz",
+        ] {
+            assert!(
+                classify_open_target(bad, &no_reports()).is_err(),
+                "should reject {bad:?}"
+            );
+        }
+        assert!(classify_open_target(&"x".repeat(4097), &no_reports()).is_err());
+    }
+
+    #[test]
+    fn open_path_dirs_open_files_are_only_revealed() {
+        let base = std::env::temp_dir().join("adho-open-path-test");
+        let reports = base.join("reports");
+        std::fs::create_dir_all(&reports).unwrap();
+        let exe = base.join("evil.exe");
+        let html_out = base.join("x.html");
+        let html_in = reports.join("report-1.html");
+        for f in [&exe, &html_out, &html_in] {
+            std::fs::write(f, b"x").unwrap();
+        }
+        let s = |p: &std::path::Path| p.to_string_lossy().into_owned();
+
+        if cfg!(windows) {
+            assert!(matches!(
+                classify_open_target(&s(&base), &reports),
+                Ok(OpenTarget::Dir(_))
+            ));
+            // An executable is never opened, only revealed.
+            assert!(matches!(
+                classify_open_target(&s(&exe), &reports),
+                Ok(OpenTarget::RevealFile(_))
+            ));
+            // HTML outside the reports dir: reveal only.
+            assert!(matches!(
+                classify_open_target(&s(&html_out), &reports),
+                Ok(OpenTarget::RevealFile(_))
+            ));
+            assert!(matches!(
+                classify_open_target(&s(&html_in), &reports),
+                Ok(OpenTarget::ReportHtml(_))
+            ));
+        }
+        std::fs::remove_dir_all(&base).unwrap();
     }
 }
 
@@ -1133,13 +1479,6 @@ async fn cmd_net_tweak(adapter: String, keyword: String, value: u32) -> Result<S
 }
 
 #[tauri::command(async)]
-async fn cmd_net_tweak_all_gaming() -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(perftweaks::net_tweak_all_gaming)
-        .await
-        .map_err(|_| "perf tweak task panicked".to_string())?
-}
-
-#[tauri::command(async)]
 async fn cmd_net_reset_all() -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(perftweaks::net_reset_all)
         .await
@@ -1151,13 +1490,6 @@ async fn cmd_ram_info() -> Value {
     tauri::async_runtime::spawn_blocking(perftweaks::ram_info)
         .await
         .unwrap_or_default()
-}
-
-#[tauri::command(async)]
-async fn cmd_ram_flush_standby() -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(perftweaks::ram_flush_standby)
-        .await
-        .map_err(|_| "perf tweak task panicked".to_string())?
 }
 
 #[tauri::command(async)]
@@ -1194,21 +1526,21 @@ async fn cmd_pagefile_disable() -> Result<String, String> {
         .map_err(|_| "perf tweak task panicked".to_string())?
 }
 
+#[tauri::command(async)]
+async fn cmd_perf_open_entries() -> Value {
+    tauri::async_runtime::spawn_blocking(perftweaks::open_entries)
+        .await
+        .unwrap_or_default()
+}
+
+#[tauri::command(async)]
+async fn cmd_perf_undo(entry_id: String) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || perftweaks::undo(entry_id))
+        .await
+        .map_err(|_| "perf tweak task panicked".to_string())?
+}
+
 // ---- hw monitor ----
-#[tauri::command(async)]
-async fn cmd_hw_temps() -> Value {
-    tauri::async_runtime::spawn_blocking(hwmonitor::temps)
-        .await
-        .unwrap_or_default()
-}
-
-#[tauri::command(async)]
-async fn cmd_hw_smart() -> Value {
-    tauri::async_runtime::spawn_blocking(hwmonitor::smart)
-        .await
-        .unwrap_or_default()
-}
-
 #[tauri::command(async)]
 async fn cmd_hw_full() -> Value {
     tauri::async_runtime::spawn_blocking(hwmonitor::full)
@@ -1276,13 +1608,17 @@ async fn cmd_defender_set_cloud(enabled: bool) -> Result<String, String> {
         .map_err(|_| "defender task panicked".to_string())?
 }
 
+const fn should_auto_elevate() -> bool {
+    !cfg!(debug_assertions)
+}
+
 fn ensure_admin() {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x0800_0000; // no console/PowerShell flash
 
-        let is_admin = std::process::Command::new("powershell")
+        let is_admin = std::process::Command::new(ps::powershell_exe())
             .args([
                 "-NoProfile",
                 "-NonInteractive",
@@ -1306,8 +1642,8 @@ fn ensure_admin() {
             let Some(exe) = std::env::current_exe().ok() else {
                 return;
             };
-            // Escape single quotes in path, hide the spawning shell entirely
-            let path = exe.to_string_lossy().replace('\'', "''");
+            // Quote the path as a PS literal (ASCII + typographic quotes), hide the spawning shell entirely
+            let path = crate::ps::quote_single(&exe.to_string_lossy());
             // Relaunch elevated and block on the UAC outcome before this
             // unelevated instance shows any window. `Start-Process -Verb RunAs`
             // throws if the user declines UAC; the try/catch maps that to a
@@ -1315,7 +1651,7 @@ fn ensure_admin() {
             // elevated window appears (no lingering second, unelevated window);
             // on cancellation we fall through and keep running unelevated with
             // the in-app admin hint.
-            let approved = std::process::Command::new("powershell")
+            let approved = std::process::Command::new(ps::powershell_exe())
                 .args([
                     "-NoProfile",
                     "-NonInteractive",
@@ -1323,7 +1659,7 @@ fn ensure_admin() {
                     "Hidden",
                     "-Command",
                     &format!(
-                        "try {{ Start-Process -FilePath '{}' -Verb RunAs -ErrorAction Stop; exit 0 }} \
+                        "try {{ Start-Process -FilePath {} -Verb RunAs -ErrorAction Stop; exit 0 }} \
                          catch {{ exit 1 }}",
                         path
                     ),
@@ -1341,7 +1677,21 @@ fn ensure_admin() {
 }
 
 pub fn run() {
-    ensure_admin();
+    // Elevated broker launch (`--broker <pipe> <ui-pid> <nonce>`): serve the UI
+    // that started it and exit, no window. Off unless built with the feature.
+    #[cfg(all(windows, feature = "broker"))]
+    if let Some(args) = broker::args_from(std::env::args()) {
+        std::process::exit(broker::pipe::serve(&args));
+    }
+    // `--broker-selftest`: launch the helper (UAC), ping it, report, exit.
+    // End-to-end check of phase 3 without the UI; debug builds have a console.
+    #[cfg(all(windows, feature = "broker"))]
+    if std::env::args().any(|a| a == "--broker-selftest") {
+        std::process::exit(broker::selftest());
+    }
+    if should_auto_elevate() {
+        ensure_admin();
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
@@ -1364,6 +1714,8 @@ pub fn run() {
             cmd_stop_monitor,
             // tweaks
             cmd_list_tweaks,
+            cmd_broker_status,
+            cmd_broker_unlock,
             cmd_apply_tweak,
             cmd_revert_tweak,
             cmd_history,
@@ -1417,17 +1769,15 @@ pub fn run() {
             cmd_msi_set,
             cmd_net_adapters,
             cmd_net_tweak,
-            cmd_net_tweak_all_gaming,
             cmd_net_reset_all,
             cmd_ram_info,
-            cmd_ram_flush_standby,
             cmd_pagefile_info,
             cmd_pagefile_set_auto,
             cmd_pagefile_set_custom,
             cmd_pagefile_disable,
+            cmd_perf_open_entries,
+            cmd_perf_undo,
             // hw monitor
-            cmd_hw_temps,
-            cmd_hw_smart,
             cmd_hw_full,
             cmd_hw_profile,
             // debloater
@@ -1448,12 +1798,10 @@ pub fn run() {
             // game booster
             cmd_gameboost_background_procs,
             cmd_gameboost_running_games,
-            cmd_gameboost_boost_process,
             cmd_gameboost_kill_background,
             cmd_gameboost_start,
             cmd_gameboost_stop,
             cmd_gameboost_get_status,
-            cmd_gameboost_gpu_perf,
             cmd_gameboost_quick_boost,
             cmd_gameboost_quick_boost_revert,
             // privacy
@@ -1490,8 +1838,7 @@ pub fn run() {
             cmd_gpu_scan,
             cmd_gpu_tweak_apply,
             cmd_gpu_tweak_revert,
-            cmd_nv_get_settings,
-            cmd_nv_set_setting,
+            cmd_nv_status,
             cmd_nv_open_panel,
             // registry clean
             cmd_regclean_scan,
@@ -1509,13 +1856,20 @@ pub fn run() {
             cmd_disk_temp_age,
             cmd_disk_delete,
             cmd_disk_move,
-            cmd_disk_organize_preview,
-            cmd_disk_organize_apply,
+            cmd_organizer_folders,
+            cmd_organizer_preview,
+            cmd_organizer_apply,
+            cmd_organizer_runs,
+            cmd_organizer_undo,
             // sched tasks
             cmd_schedtasks_list,
             cmd_schedtask_toggle,
             // benchmarks / profiles
             cmd_run_benchmark,
+            cmd_fps_import,
+            cmd_fps_runs,
+            cmd_fps_delete,
+            cmd_fps_compare,
             cmd_bench_history,
             cmd_profile_list,
             cmd_profile_apply,
@@ -1527,9 +1881,10 @@ pub fn run() {
             cmd_analyze,
             cmd_generate_report,
             // auto optimizer
-            cmd_autoopt_scan,
-            cmd_autoopt_score,
-            cmd_autoopt_apply,
+            cmd_health_scan,
+            cmd_optimize_apply,
+            cmd_reset_retired,
+            cmd_open_windows_settings,
             // game profiles / auto-switcher
             cmd_game_list,
             cmd_game_switcher_status,

@@ -1,0 +1,271 @@
+# System Health Check & Verified Optimization Engine
+
+This document covers branch `audit/2026-10-overhaul`, commits `5f15d49` (engine) and `bf51a00` (UI).
+
+## What it does
+
+The engine follows six steps:
+
+1. **Detect.** Read the Windows build, edition and servicing status, the CPU (model, cores, hybrid and dual-CCD X3D traits by model name), the GPUs and their driver dates, RAM, storage types, free space on the system drive, power plans, page file and Defender state. It also reads the live state of every catalog tweak.
+2. **Analyse.** Compare each tweak against the rules in `optregistry.rs`.
+3. **Diagnose.** Give each tweak one verdict:
+   - correctly configured
+   - recommended
+   - optional
+   - not applicable
+   - review (applied but unsuitable or harmful)
+   - applied without proven benefit
+   - no longer in effect (drift)
+   - failed (unfinished)
+   - already covered
+   - state not readable
+4. **Recommend.** Only items that are applicable and offerable (conditional or maintenance evidence) and not already in place. A disabled setting is never recommended just because it is disabled.
+5. **Repair.** *Optimize My PC* shows a preview and applies only what the user approves. Every item is re-checked against a fresh scan before it is applied, and it goes through the journaled engine, which captures the originals.
+6. **Verify.** After applying, the engine reads each setting back. Each result is one of:
+   - verified
+   - verified, needs restart
+   - already optimized
+   - skipped
+   - failed
+   - could not be verified
+
+   A command whose effect Windows cannot report is never shown as verified.
+
+No measurement of game performance is made or claimed. The UI says so after every run and links to the Benchmark tool for before/after comparisons.
+
+## Where each capability lives now
+
+| Capability | Location |
+|---|---|
+| System Health Check | Dashboard → System Health Check (new) |
+| One-click optimization | Optimize → Optimize My PC (replaces Auto-Optimizer, same id `autoopt`) |
+| Per-tweak control | Optimize → Optimize. Shows review / recommended / gaming / system by default; Advanced lists all other tweaks with their classification, searchable, still applicable after an explicit warning |
+| SFC / DISM | Dashboard → Windows repair (renamed from Health Check) |
+| Privacy one-click items of the old Auto-Optimizer | Privacy Center ("apply all"). Privacy is no longer presented as a performance optimization |
+| Old Auto-Optimizer page | Removed (`src/pages/AutoOptimizer.tsx`). The backend `autoopt` commands remain registered but have no UI |
+
+## Real-system scan (developer PC, read-only)
+
+The scan was run with `cargo test --locked -- --ignored real_health_scan` (registry, WMI and powercfg reads only).
+
+**System:** Windows 11 25H2 build 26200.9457, AMD Ryzen 7 5800X 8-Core Processor (8C/16T), NVIDIA GeForce RTX 4080, 32 GB RAM, Ultimate Performance power plan, system drive 7.7 % free, HDD present.
+
+**Summary:** 7 correctly configured, 2 recommended, 2 optional, 5 to review, 2 not applicable or not present, 0 failed, 1 attention item.
+
+**Concrete findings on this PC:**
+- **Game Mode is off** (`AutoGameModeEnabled=0`). It is recommended and offered as one-click.
+- **Hibernation is on** (`hiberfil.sys` is 12.8 GB) while C: has 7.8 % free. Disabling it is recommended but is not one-click.
+- **Low disk space** on C: is flagged as an attention item, with a link to Cleanup.
+- **Earlier tweaks to review:**
+  - SysMain off is unsuitable because an HDD is present.
+  - Background apps off is a Windows-10-only setting.
+  - DisablePagingExecutive is outdated.
+  - Xbox services forced off is potentially harmful.
+  - Cortana off is outdated.
+
+Two detection bugs were found by checking this scan against the real registry, and both are fixed:
+- A missing Game Mode value was read as "off".
+- Unelevated `Test-Path` cannot see `hiberfil.sys`, so it reported no file. The engine uses file metadata instead.
+
+## Per-tweak table
+
+Column meanings:
+- *Previous status* is the classification from the first audit ([optimization-audit.md](optimization-audit.md)).
+- *Evidence* is the applicability or evidence note shown in the app.
+- *Verification* is the live state read on the developer PC and the resulting verdict.
+
+| Tweak | Previous status | Evidence | Changes | New classification | Verification |
+|---|---|---|---|---|---|
+| `power_high_performance` | CONDITIONALLY USEFUL | Desktops only. Not offered on laptops or systems without the High performance plan (Modern Standby). | Live state from the active scheme (was journal-only); desktop + plan present only; Ultimate counts as configured | Conditionally beneficial | not_applied (read from Windows) → correctly configured |
+| `game_dvr_off` | VERIFIED | Helps when background recording/capture was enabled. Turn it back on if you use Game Bar clips. | One-click when capture is enabled | Conditionally beneficial · one-click | applied (read from Windows) → correctly configured |
+| `mmcss_gaming` | CONDITIONALLY USEFUL | Only affects threads registered with the multimedia scheduler; most games do not register. | Classified; offered only when applicable | No proven benefit | applied (read from Windows) → applied, no proven benefit |
+| `startup_delay_off` | VERIFIED | Changes how Windows looks or behaves; not a performance change. | Classified; offered only when applicable | No proven benefit | applied (read from Windows) → applied, no proven benefit |
+| `visual_fx_performance` | INEFFECTIVE | Changes how Windows looks or behaves; not a performance change. | Fixed: also writes UserPreferencesMask (VisualFXSetting alone only selected the dialog option) | No proven benefit | partial (read from Windows) → applied, no proven benefit |
+| `telemetry_minimal` | VERIFIED | Feedback Hub diagnostics stop working. | Classified; offered only when applicable | No proven benefit | partial (read from Windows) → applied, no proven benefit |
+| `advertising_id_off` | VERIFIED | Reduces data collection or ads; not a performance change. | Classified; offered only when applicable | No proven benefit | applied (read from Windows) → applied, no proven benefit |
+| `sysmain_off` | CONDITIONALLY USEFUL | Prefetching costs little on SSDs and still helps on hard disks; not offered when a hard disk is present. | Not applicable when an HDD is present | No proven benefit | applied (read from Windows) → review (applied, unsuitable) |
+| `hibernate_off` | VERIFIED | Offered only on desktops whose system drive is low on space. Not a performance change. | Live state (registry, else hiberfil.sys presence; was journal-only); offered only on desktops with < 15 % free | System maintenance | not_applied (read from Windows) → recommended |
+| `menu_delay_fast` | VERIFIED | Changes how Windows looks or behaves; not a performance change. | Classified; offered only when applicable | No proven benefit | applied (read from Windows) → applied, no proven benefit |
+| `content_suggestions_off` | CONDITIONALLY USEFUL | Reduces data collection or ads; not a performance change. | Classified; offered only when applicable | No proven benefit | applied (read from Windows) → applied, no proven benefit |
+| `background_apps_off` | OBSOLETE (Win11) | Windows 11 removed this global setting; it only works on Windows 10. | Windows 10 only | Outdated | applied (read from Windows) → review (applied, unsuitable) |
+| `mouse_accel_off` | VERIFIED | Useful for mouse-aimed games. Changes how the desktop cursor feels, so it is never applied automatically. | Recommended for mouse aiming, never automatic (changes input feel) | Conditionally beneficial | applied (read from Windows) → correctly configured |
+| `game_mode_on` | VERIFIED | Only relevant when Game Mode was turned off; it is on by default. | Missing value now read as Windows default (on); one-click repair only when actually off | Conditionally beneficial · one-click | not_applied (read from Windows) → recommended |
+| `fse_optimizations_off` | UNVERIFIED | Per-game compatibility settings are the reliable control. | Classified; offered only when applicable | Unverified | partial (read from Windows) → applied, no proven benefit |
+| `hags_on` | CONDITIONALLY USEFUL | Needs a GPU and driver that support it (WDDM 2.7+). Support cannot be confirmed before restart, so it is never applied automatically. | Dedicated GPU required; never one-click (support unconfirmable before restart) | Conditionally beneficial | applied (read from Windows) → correctly configured |
+| `priority_separation` | INEFFECTIVE | 0x26 is the same scheduling as the Windows client default. | Classified; offered only when applicable | No proven benefit | applied (read from Windows) → applied, no proven benefit |
+| `power_throttling_off` | CONDITIONALLY USEFUL | Power throttling targets background apps; a foreground game is not throttled. Harmful on laptops and hybrid CPUs. | Desktop, non-hybrid only; never recommended | No proven benefit | applied (read from Windows) → applied, no proven benefit |
+| `mmcss_games_task` | CONDITIONALLY USEFUL | Only affects threads that register with the MMCSS "Games" task. | Classified; offered only when applicable | No proven benefit | applied (read from Windows) → applied, no proven benefit |
+| `mpo_off` | CONDITIONALLY USEFUL | Only if you actually see those symptoms. Reportedly ignored on newer Windows builds. | Classified; offered only when applicable | Conditionally beneficial | not_applied (read from Windows) → optional |
+| `gamebar_popups_off` | VERIFIED | Changes how Windows looks or behaves; not a performance change. | Classified; offered only when applicable | No proven benefit | applied (read from Windows) → applied, no proven benefit |
+| `transparency_off` | VERIFIED | Changes how Windows looks or behaves; not a performance change. | Classified; offered only when applicable | No proven benefit | applied (read from Windows) → applied, no proven benefit |
+| `min_animate_off` | VERIFIED | Changes how Windows looks or behaves; not a performance change. | Classified; offered only when applicable | No proven benefit | applied (read from Windows) → applied, no proven benefit |
+| `start_websearch_off` | VERIFIED | Also removes File Explorer search suggestions. | Classified; offered only when applicable | No proven benefit | applied (read from Windows) → applied, no proven benefit |
+| `lockscreen_ads_off` | VERIFIED | Reduces data collection or ads; not a performance change. | Classified; offered only when applicable | No proven benefit | partial (read from Windows) → applied, no proven benefit |
+| `widgets_off` | NEEDS FIX → fixed text | Changes how Windows looks or behaves; not a performance change. | Classified; offered only when applicable | No proven benefit | partial (read from Windows) → applied, no proven benefit |
+| `delivery_opt_off` | VERIFIED | Updates for several PCs on one network may download more data. | Classified; offered only when applicable | No proven benefit | applied (read from Windows) → applied, no proven benefit |
+| `wer_off` | VERIFIED | Crash reports for troubleshooting are no longer created. | Classified; offered only when applicable | No proven benefit | applied (read from Windows) → applied, no proven benefit |
+| `activity_history_off` | VERIFIED | Reduces data collection or ads; not a performance change. | Classified; offered only when applicable | No proven benefit | applied (read from Windows) → applied, no proven benefit |
+| `usb_suspend_off` | NEEDS FIX → **fixed** | Only for that problem; desktops only. Applies to the current power plan. | Desktop only; troubleshooting | Conditionally beneficial | not_applied (read from Windows) → optional |
+| `fast_startup_off` | VERIFIED | Only for those cases. Already implied by disabling hibernation. | Marked redundant when hibernation is off | System maintenance | applied (read from Windows) → correctly configured |
+| `disable_paging_executive` | OBSOLETE | No measurable effect with modern memory management. | Classified; offered only when applicable | Outdated | applied (read from Windows) → review (applied, unsuitable) |
+| `core_parking_off` | CONDITIONALLY USEFUL / risky | Defeats the core parking AMD dual-CCD X3D and Intel hybrid CPUs rely on to keep games on the right cores; High performance plans already unpark cores. | Excluded on dual-CCD X3D and hybrid CPUs; never recommended | Potentially harmful | unknown (not readable) → not recommended |
+| `ntfs_last_access_off` | INEFFECTIVE | Since Windows 10 1803 last-access updates are system-managed and already off on most volumes. | Classified; offered only when applicable | Outdated | not_applied (read from Windows) → not recommended |
+| `ntfs_8dot3_off` | CONDITIONALLY USEFUL | Windows already disables short names on new non-system volumes; old installers may need them. | Classified; offered only when applicable | No proven benefit | applied (read from Windows) → applied, no proven benefit |
+| `xbox_services_off` | INEFFECTIVE | The services are already manual-start; forcing them off can break Game Pass and Xbox sign-in. | Reclassified harmful (Game Pass / Xbox sign-in) | Potentially harmful | partial (read from Windows) → review (applied, unsuitable) |
+| `remote_registry_off` | INEFFECTIVE | Already disabled by default on Windows 10/11 client editions. | Classified; offered only when applicable | No proven benefit | applied (read from Windows) → applied, no proven benefit |
+| `cortana_off` | OBSOLETE | The Cortana app was retired. | Classified; offered only when applicable | Outdated | applied (read from Windows) → review (applied, unsuitable) |
+| `edge_prelaunch_off` | VERIFIED | Edge will show "managed by your organization". | Classified; offered only when applicable | No proven benefit | not_applied (read from Windows) → not recommended |
+| `search_highlights_off` | NEEDS FIX → fixed text | Changes how Windows looks or behaves; not a performance change. | Classified; offered only when applicable | No proven benefit | partial (read from Windows) → applied, no proven benefit |
+| `auto_play_off` | VERIFIED | Stops media and USB drives from starting programs on insert (security hygiene). | Classified; offered only when applicable | No proven benefit | applied (read from Windows) → applied, no proven benefit |
+| `svc_fax_off` | VERIFIED (trivial) | Fax is manual-start and idle when unused. | Classified; offered only when applicable | No proven benefit | unsupported (read from Windows) → not present |
+| `svc_geolocation_off` | INEFFECTIVE | Already manual-start by default. | Classified; offered only when applicable | No proven benefit | not_applied (read from Windows) → not recommended |
+| `svc_wmp_network_off` | VERIFIED (trivial) | Often absent on Windows 11. | Classified; offered only when applicable | No proven benefit | applied (read from Windows) → applied, no proven benefit |
+| `svc_maps_off` | VERIFIED (trivial) | Stops offline map updates. | Classified; offered only when applicable | No proven benefit | applied (read from Windows) → applied, no proven benefit |
+| `svc_link_tracking_off` | VERIFIED (trivial) | Breaks repair of moved-file shortcuts on network shares. | Classified; offered only when applicable | No proven benefit | applied (read from Windows) → applied, no proven benefit |
+| `svc_wisvc_off` | VERIFIED (trivial) | Breaks Windows Insider builds. | Classified; offered only when applicable | No proven benefit | applied (read from Windows) → applied, no proven benefit |
+| `svc_diag_tracking_off` | VERIFIED (relabelled) | Diagnostics Hub collector used by Visual Studio; idle otherwise. | Classified; offered only when applicable | No proven benefit | unsupported (read from Windows) → not present |
+| `wsearch_manual` | CONDITIONALLY USEFUL | Slows or breaks Start menu, Outlook and Settings search. | Classified; offered only when applicable | No proven benefit | applied (read from Windows) → applied, no proven benefit |
+| `nagle_off` | INEFFECTIVE | TCPNoDelay is not read by Windows; games set Nagle per socket, and most shooters (incl. Rainbow Six Siege) use UDP. | Classified; offered only when applicable | No proven benefit | unknown (not readable) → not recommended |
+| `tcp_timed_wait_low` | INEFFECTIVE | Only matters for servers exhausting ports. | Classified; offered only when applicable | No proven benefit | not_applied (read from Windows) → not recommended |
+| `irp_stack_high` | INEFFECTIVE | Only affects the SMB file-sharing server. | Classified; offered only when applicable | No proven benefit | not_applied (read from Windows) → not recommended |
+| `qos_bandwidth_free` | INEFFECTIVE | Windows does not reserve 20 % bandwidth; this is a long-standing myth. | Classified; offered only when applicable | No proven benefit | not_applied (read from Windows) → not recommended |
+| `tcp_autotuning_normal` | INEFFECTIVE | Only relevant when auto-tuning was changed from Normal. | Live state via Get-NetTCPSetting (was journal-only); one-click repair when not Normal | System maintenance · one-click | applied (read from Windows) → correctly configured |
+| `net_rss_on` | INEFFECTIVE | Only relevant when RSS was turned off. | Live state via Get-NetOffloadGlobalSetting (was journal-only); one-click repair when disabled | System maintenance · one-click | applied (read from Windows) → correctly configured |
+
+## Test coverage
+
+| Area | Tests |
+|---|---|
+| Registry completeness (every catalog tweak exactly once) | `optregistry::every_catalog_tweak_has_exactly_one_entry` |
+| Harmful, outdated, unverified and unproven tweaks are never recommended or one-click | `optregistry::harmful_outdated_and_unverified_are_never_recommended`, `optimizer::harmful_and_unproven_tweaks_are_never_recommended` |
+| One-click never needs a restart or changes input feel | `optregistry::one_click_only_offers_offerable_tweaks` |
+| Eligibility (laptop, no High performance plan, X3D, Win10-only, low disk) | `optregistry::eligibility_rules` |
+| Hardware detection rules (X3D, hybrid, dedicated GPU) | `optimizer::cpu_and_gpu_model_rules` |
+| Diagnosis of applied, unapplied, unsupported, unknown, drift, failure, equivalents and redundancy | `optimizer::applied_states_are_classified`, `journal_drift_and_failures`, `equivalents_and_redundancy` |
+| Missing admin rights | `optimizer::one_click_requires_admin_when_needed` |
+| Verification never reports unconfirmed success | `optimizer::verification_never_reports_unconfirmed_success` |
+| Windows servicing and system checks (EOS, disk, page file, Defender, power saver, laptop exception) | `optimizer::servicing_and_system_checks` |
+| Game Mode default, live-state parsing | `tweaks::game_mode_missing_value_means_windows_default_on`, `live_flag_needs_a_single_value` |
+| Real system, read-only (opt-in) | `optimizer::real_health_scan`; the health scan is also covered by `smoke::read_only_scans_have_no_powershell_parser_errors` |
+
+## Not tested
+
+- **Applying and undoing on a real system.** No optimization was applied on the developer PC during this work.
+  - The apply → read-back path has unit-test coverage for its decision logic only.
+  - Requirement: run *Optimize My PC* on a disposable Windows 10 22H2 and Windows 11 24H2/25H2 VM (English and German). Check each result category, then undo from the history and rescan.
+- **The UI with a live backend.** The pages were checked in the browser with the real scan data of this PC injected; apply and undo buttons were not exercised.
+  - Requirement: start the elevated dev app, open Dashboard → System Health Check, and apply and undo one recommended item.
+- **Hybrid-CPU and X3D detection** uses model names; it was checked only against test strings.
+- **Performance impact.** Not measured. A credible comparison needs:
+  - a fixed scene (for Rainbow Six Siege, the built-in benchmark)
+  - PresentMon or CapFrameX capture
+  - at least 3 runs per state
+  - average FPS, 1 % lows and frametime variance
+
+---
+
+## Retired tweaks (commit `84f9b85`, verdict fix in `bc83bdd`)
+
+### Which tweaks
+26 tweaks change nothing measurable or can harm:
+
+| Kind | Tweaks |
+|---|---|
+| Myths and Windows defaults | Nagle, QoS 20 %, IRPStackSize, TCPTimedWaitDelay, Win32PrioritySeparation 0x26, the MMCSS profile and Games task |
+| Outdated | DisablePagingExecutive, NTFS last access, background apps (Windows 10 only), Cortana |
+| Harmful on common hardware | core parking off, Xbox services off |
+| Idle services | Fax, WMP network sharing, Maps, link tracking, Insider, Diagnostics Hub, geolocation, Remote Registry |
+| Other | SysMain off, Windows Search to manual, 8.3 names off, power throttling off, fullscreen optimizations off |
+
+Privacy and look-and-feel tweaks are **not** retired, because they have a real (non-performance) effect.
+
+### How retirement works
+- **Can no longer be applied.** The tweak engine rejects them, the profiles no longer contain them, and search hides them.
+- **Shown only while still active.** They appear in the card "Settings with no benefit". *Reset all* restores each one from its captured original values: the journal undo, or else the engine's force-revert, which verifies the change.
+- **Every reset is read back.** The outcome is one of:
+  - verified
+  - already at the Windows default — only for Remote Registry, geolocation and Xbox services, whose target *is* the default
+  - skipped (needs admin rights)
+  - failed (honest: still active)
+  - unverifiable
+- **Duplicate in the Debloater:** "Cortana off" also exists there with its own state. A reset also restores the Debloater's captured state, never its guessed default.
+
+### Result on the developer PC
+The user's own *Reset all* reset 15 of 16 active retired tweaks. Two cases were left over:
+
+| Case | Cause | Fix |
+|---|---|---|
+| FSE showed as active | Detection error: a companion value is 0 by default. The state is now decided by `FSEBehaviorMode = 2`. | `bc83bdd` |
+| Cortana stayed active | It is re-applied by the Debloater's duplicate. | Reset now covers it (`bc83bdd`) |
+
+## Gaming setup checks (commit `bc83bdd`)
+
+| Check | Method | Developer PC |
+|---|---|---|
+| Refresh rate below maximum | `EnumDisplayDevices`/`EnumDisplaySettings` per active display: current Hz vs. highest Hz at the same resolution (≥ 10 Hz gap = warning) | OK: 240 Hz at 1920×1080 |
+| XMP/EXPO | `Win32_PhysicalMemory.ConfiguredClockSpeed` vs. speed encoded in the part number (`ram_rated_from_part`) | OK: 3600 MT/s = rated (CMK32GX4M2Z3600C18) |
+| Optimizations for windowed games | `HKCU\Software\Microsoft\DirectX\UserGpuPreferences\DirectXUserGlobalSettings` → `SwapEffectUpgradeEnable` (Windows 11 22H2+) | Info: Windows default (not set) |
+| VRR for all games | same value → `VRROptimizeEnable` | Info: off |
+| Resizable BAR (NVIDIA) | `%SystemRoot%\System32\nvidia-smi.exe -q -d MEMORY`: BAR1 total ≥ 90 % of VRAM | OK: BAR1 16384 MiB / VRAM 16376 MiB |
+
+The checks only read; they never change anything. Where Windows controls a setting, an allowlisted button opens the matching Settings page (`ms-settings:display-advanced`, `ms-settings:display-advancedgraphics`).
+
+Tests:
+- `ram_part_numbers_reveal_rated_speed`
+- `xmp_check_compares_configured_with_rated`
+- `refresh_check_flags_displays_below_maximum`
+- `directx_user_settings_are_parsed`
+- `rebar_is_read_from_nvidia_smi`
+- `fse_state_is_decided_by_behavior_mode`
+- `reset_is_only_verified_when_windows_confirms`
+
+## Second cleanup pass: other catalogs (commits `8309a36` … `f1b2290`)
+
+The retire + reset pattern now also covers the Performance Tweaks, Privacy Center and Debloater catalogs.
+
+### What changed
+
+| Catalog | Item | Change | Reason |
+|---|---|---|---|
+| Performance Tweaks | Flush standby cache (`ram_flush_standby`) | Removed (command, elevated inline C#, button). The RAM card stays read-only and says why. | Standby memory is reclaimable cache; purging it frees nothing a game could not already get, and the next file reads come from disk. It changed no persistent setting, so there is nothing to reset. |
+| Privacy Center | `prv_ceip_off` | Retired | The SQM Customer Experience Improvement Program was replaced by Windows diagnostic data in Windows 10; the policy is inert. |
+| Privacy Center | `prv_maps_update_off` | Retired | Microsoft retired the Windows Maps app; there are no offline map updates left to stop. |
+| Debloater | `cortana_off` | Withdrawn | The Cortana app was retired. |
+| Debloater | `taskbar_widgets_off` | Withdrawn → Optimize `widgets_off` | `ShellFeedsTaskbarViewMode` only hid News and Interests on Windows 10; Windows 11 Widgets ignore it. |
+| Debloater | `gamedvr_off` | Withdrawn → Optimize `game_dvr_off` | Also forced `FSEBehaviorMode = 2` (the retired fullscreen tweak). `game_dvr_off` changes only recording. |
+| Debloater | `telemetry_off`, `diagtrack_stop`, `activity_history`, `feedback_off`, `error_reporting_off`, `advertising_id`, `app_suggestions` | Withdrawn → Privacy Center | Same registry values or services as the Privacy Center items, which are now the single source. |
+| Debloater | `location_off` | Kept, cross-referenced | Sets the Settings consent switch; the Privacy Center's `prv_location_off` disables the `lfsvc` service instead, a different mechanism. |
+| Hardware profile | Risk verdicts for `priority_separation`, `mmcss_games_task`, `power_throttling_off`, `disable_paging_executive`, `sysmain_off`, `core_parking_off` | Removed | Retired tweaks cannot be applied; a risk badge suggested otherwise. |
+
+Debloater items still offered: `bing_search`, `lock_screen_ads`, `location_off`, `clipboard_sync_off`, `xbox_gamebar`.
+
+### Rules
+
+- **Privacy Center (retired):** `apply` rejects them. The scan still checks them and returns active ones in a separate `retired` list, outside the catalog score. Reset uses the journal entry with the captured original; without one the page says so and offers no reset. No guessed default.
+- **Debloater (withdrawn):** `apply_tweak` rejects them. One is listed only while the Debloater holds its captured pre-apply state. Reset restores exactly that state. Without a captured state, `revert_tweak` refuses: the fallback `undo` would impose a guessed default and could undo a change that the Privacy Center or Optimize made to the same value.
+- **Reset all (health check):** `DEBLOATER_DUPLICATES` now also pairs `fse_optimizations_off` with the Debloater's `gamedvr_off`. That reset restores everything `gamedvr_off` captured, so Game DVR also returns to its value before that tweak.
+- **Reset verdict:** `classify_reset` lets the read-back decide. When the Debloater duplicate already restored the setting, the engine finds nothing to undo and returns an error; Windows still confirms the original, so the result is *verified*. An engine error with the setting still active stays *failed*. This also fixes the same case for Cortana from `bc83bdd`.
+
+### Tests
+
+| Rule | Test |
+|---|---|
+| Privacy retired items exist and keep an exact undo target | `privacy::retired_items_exist_and_keep_an_exact_undo_target` |
+| Privacy retired items listed only while active | `privacy::retired_items_are_listed_only_while_active` |
+| Privacy retired items cannot be applied | `privacy::retired_items_cannot_be_applied` |
+| Withdrawn Debloater ids exist and point to an offered single source | `debloater::withdrawn_tweaks_exist_and_point_to_a_live_single_source` |
+| The requested items are withdrawn; items without a twin stay | `debloater::requested_cleanup_is_withdrawn` |
+| Withdrawn items listed only with a captured state | `debloater::withdrawn_tweaks_are_listed_only_with_a_captured_state` |
+| Withdrawn items cannot be applied | `debloater::withdrawn_tweaks_cannot_be_applied` |
+| `gamedvr_off` keeps its FSE capture for an exact reset | `debloater::gamedvr_reset_restores_the_fse_values_it_changed` |
+| Duplicates pair retired tweaks with withdrawn Debloater ids | `optimizer::debloater_duplicates_pair_retired_tweaks_with_real_debloater_ids` |
+| Reset verdict comes from the read-back | `optimizer::reset_trusts_the_readback_not_the_engine_message` |
+| No risk verdict for retired ids; active verdicts kept | `hwprofile::retired_tweaks_get_no_risk_verdict`, `hwprofile::active_tweaks_keep_their_verdicts` |
+
+### Not tested
+
+Nothing in this pass ran on Windows. The cloud session only built the frontend and ran the platform-independent Rust tests (see HANDOFF.md). Needs Windows verification:
+- Privacy Center: with `prv_ceip_off` applied through the app, the item shows under "No longer offered", and Reset removes it.
+- Debloater: an item applied with an older version shows under "No longer offered", and Reset restores the captured state.
+- Reset all with `fse_optimizations_off` set only by the Debloater's `gamedvr_off` reports *verified*.
+

@@ -39,7 +39,8 @@ jobs:
       # tauri-build reads the built frontend, so produce it first.
       - run: npm ci
       - run: npm run build
+      - run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
       - name: cargo check (backend compiles)
         run: cargo check --manifest-path src-tauri/Cargo.toml --locked
-      - name: cargo clippy (lints, non-blocking)
-        run: cargo clippy --manifest-path src-tauri/Cargo.toml || echo "clippy reported warnings"
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked -- -D warnings

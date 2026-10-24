@@ -165,22 +165,19 @@ pub fn check_winget_package(package_id: String) -> Value {
     if !allowed.contains(&package_id.as_str()) {
         return json!({ "available": false, "error": "not whitelisted" });
     }
+    let winget = ps::quote_single(&ps::winget_exe());
+    let pid_q = ps::quote_single(&package_id);
     let script = format!(
         r#"
-$pidEsc = '{package_id}'.Replace("'", "''")
-$out = winget upgrade --id $pidEsc --source winget --accept-source-agreements 2>&1 | Out-String
-if ($out -match 'No applicable update') {{
-    [PSCustomObject]@{{ available=$false; current=''; newVersion='' }}
-}} elseif ($out -match [regex]::Escape($pidEsc) + '\s+([\S]+)\s+([\S]+)') {{
+$pidEsc = {pid_q}
+$out = & {winget} upgrade --id $pidEsc --exact --source winget --accept-source-agreements 2>&1 | Out-String
+$exitCode = $LASTEXITCODE
+if ($out -match [regex]::Escape($pidEsc) + '\s+([^\s]+)\s+([^\s]+)') {{
     [PSCustomObject]@{{ available=$true; current=$Matches[1]; newVersion=$Matches[2] }}
+}} elseif ($exitCode -ne 0 -and $exitCode -ne -1978335212) {{
+    [PSCustomObject]@{{ available=$false; current=''; newVersion=''; error=($out.Trim()) }}
 }} else {{
-    # try install to see if it's not installed at all
-    $show = winget show --id '{package_id}' --source winget --accept-source-agreements 2>&1 | Out-String
-    if ($show -match 'Version:\s+([\S]+)') {{
-        [PSCustomObject]@{{ available=$true; current='unknown'; newVersion=$Matches[1] }}
-    }} else {{
-        [PSCustomObject]@{{ available=$false; current=''; newVersion='' }}
-    }}
+    [PSCustomObject]@{{ available=$false; current=''; newVersion='' }}
 }}
 "#
     );
@@ -188,6 +185,24 @@ if ($out -match 'No applicable update') {{
         Ok(v) => v,
         Err(e) => json!({ "available": false, "error": e }),
     }
+}
+
+/// winget APPINSTALLER_CLI_ERROR_* codes (as signed 32-bit exit codes).
+/// 0x8A150014: no installed package matched (upgrade) / no package found.
+const WINGET_NO_PACKAGE_FOUND: i64 = -1978335212;
+/// 0x8A15002B: installed, no newer version available.
+const WINGET_UPDATE_NOT_APPLICABLE: i64 = -1978335189;
+/// 0x8A150061: install of a package that is already installed.
+const WINGET_ALREADY_INSTALLED: i64 = -1978335135;
+
+/// Exit codes of the upgrade-or-install step that mean "done". "No package
+/// found" is not among them: it used to count as success, so installing a
+/// driver package that was not installed reported success and did nothing.
+fn winget_install_ok(code: i64) -> bool {
+    matches!(
+        code,
+        0 | WINGET_UPDATE_NOT_APPLICABLE | WINGET_ALREADY_INSTALLED
+    )
 }
 
 /// Install or upgrade a whitelisted driver package via winget.
@@ -202,14 +217,16 @@ pub fn install_via_winget(package_id: String) -> Result<String, String> {
     if !allowed.contains(&package_id.as_str()) {
         return Err(format!("Package ID not whitelisted: {package_id}"));
     }
-    // Try upgrade first, fall back to install. Every branch reports the real
+    // Try upgrade first; only "no installed package" (exit code, not the
+    // localized text) falls back to install. Every branch reports the real
     // winget exit code so failures are never presented as success.
+    let winget = ps::quote_single(&ps::winget_exe());
     let script = format!(
         r#"
-$upg = winget upgrade --id '{package_id}' --source winget --accept-package-agreements --accept-source-agreements 2>&1
+$upg = & {winget} upgrade --id '{package_id}' --exact --source winget --accept-package-agreements --accept-source-agreements 2>&1
 $upgCode = $LASTEXITCODE
-if ($upg -match 'No applicable update|already installed') {{
-    $inst = winget install --id '{package_id}' --source winget --accept-package-agreements --accept-source-agreements 2>&1
+if ($upgCode -eq {WINGET_NO_PACKAGE_FOUND}) {{
+    $inst = & {winget} install --id '{package_id}' --exact --source winget --accept-package-agreements --accept-source-agreements 2>&1
     $instCode = $LASTEXITCODE
     "EXIT:$instCode`n" + ($inst -join "`n")
 }} else {{
@@ -220,18 +237,12 @@ if ($upg -match 'No applicable update|already installed') {{
     ps::run_long(&script)
         .map(|s| {
             let out = s.trim();
-            // winget "success" exit codes (documented in winget's
-            // APPINSTALLER_CLI_ERROR_* constants):
-            //   0             = done
-            //   -1978335212   = 0x8A150014, already installed / no update available
-            //   -1978335189   = 0x8A15002B, package not found on this source
-            // Any other code (including 0x8A15000B-class update-blocked states)
-            // is reported as an error, honest over optimistic.
             let exit_ok = out
                 .lines()
                 .next()
-                .map(|l| matches!(l, "EXIT:0" | "EXIT:-1978335212" | "EXIT:-1978335189"))
-                .unwrap_or(false);
+                .and_then(|l| l.strip_prefix("EXIT:"))
+                .and_then(|c| c.trim().parse::<i64>().ok())
+                .is_some_and(winget_install_ok);
             if exit_ok {
                 Ok(out
                     .lines()
@@ -262,18 +273,31 @@ pub fn open_vendor_url(url: String) -> Result<String, String> {
     if !trusted.iter().any(|p| url.starts_with(p)) || !ps::is_safe_ident(&url) {
         return Err("URL not trusted".into());
     }
-    ps::run(&format!("Start-Process '{url}'")).map(|_| format!("Opened {url}"))
+    // Through explorer.exe (like cmd_open_path): the running shell opens the
+    // browser unelevated. Start-Process here started it with the admin token.
+    // explorer's exit code is meaningless, so the child is not waited on.
+    std::process::Command::new(std::path::Path::new(&ps::windows_dir()).join("explorer.exe"))
+        .arg(&url)
+        .spawn()
+        .map(|_| format!("Opened {url}"))
+        .map_err(|e| format!("explorer: {e}"))
 }
 
-/// Update driver directly via Windows Device Manager (devcon-style via PnPUtil).
+/// Rescan hardware (`pnputil /scan-devices`): Windows re-enumerates devices
+/// and binds drivers already in the driver store. It does not search Windows
+/// Update; newer drivers come from Windows Update or the vendor.
 pub fn update_via_pnputil() -> Result<String, String> {
-    // pnputil /scan-devices forces WU to search for updated drivers for all devices
-    let script = r#"
-$r = pnputil /scan-devices 2>&1
-if ($LASTEXITCODE -eq 0) { "Driver scan via Windows Update triggered. Open Windows Update to install." }
-else { "Error: " + ($r -join ' ') }
-"#;
-    ps::run_long(script).map(|s| s.trim().to_string())
+    let (status, stdout, stderr) = ps::exec_capture("pnputil.exe", &["/scan-devices"])?;
+    if status.success() {
+        Ok("Hardware rescan done: new or changed devices were detected and drivers already on this PC were bound. Newer drivers come from Windows Update or the vendor.".into())
+    } else {
+        let detail = if stderr.trim().is_empty() {
+            stdout.trim().to_string()
+        } else {
+            stderr.trim().to_string()
+        };
+        Err(format!("pnputil /scan-devices failed: {detail}"))
+    }
 }
 
 pub fn open_device_manager() -> Result<String, String> {
@@ -281,6 +305,23 @@ pub fn open_device_manager() -> Result<String, String> {
 }
 
 pub fn open_windows_update() -> Result<String, String> {
-    ps::run("Start-Process 'ms-settings:windowsupdate-action'")
+    std::process::Command::new(std::path::Path::new(&ps::windows_dir()).join("explorer.exe"))
+        .arg("ms-settings:windowsupdate-action")
+        .spawn()
         .map(|_| "Opened Windows Update".into())
+        .map_err(|e| format!("explorer: {e}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_package_is_not_reported_as_installed() {
+        assert!(winget_install_ok(0));
+        assert!(winget_install_ok(WINGET_UPDATE_NOT_APPLICABLE));
+        assert!(winget_install_ok(WINGET_ALREADY_INSTALLED));
+        assert!(!winget_install_ok(WINGET_NO_PACKAGE_FOUND));
+        assert!(!winget_install_ok(1));
+    }
 }

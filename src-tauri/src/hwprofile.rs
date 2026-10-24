@@ -66,8 +66,10 @@ try {
     $sticks  = @(Get-CimInstance Win32_PhysicalMemory -ErrorAction Stop)
     $totalMb = [math]::Round(($sticks | Measure-Object Capacity -Sum).Sum / 1MB)
     $speedMhz = ($sticks | Select-Object -First 1).Speed
-    $out.ram = @{ totalMb=[int]$totalMb; speedMhz=[int]$speedMhz; sticks=$sticks.Count }
-} catch { $out.ram = @{ totalMb=0; speedMhz=0; sticks=0 } }
+    $smbiosType = [int](($sticks | Select-Object -First 1).SMBIOSMemoryType)
+    $ramType = if ($smbiosType -eq 34) { 'DDR5' } elseif ($smbiosType -eq 26) { 'DDR4' } else { '' }
+    $out.ram = @{ totalMb=[int]$totalMb; speedMhz=[int]$speedMhz; sticks=$sticks.Count; ramType=$ramType }
+} catch { $out.ram = @{ totalMb=0; speedMhz=0; sticks=0; ramType='' } }
 
 # ── Storage (three-tier detection) ────────────────────────────────────────────
 $hasNvme = $false; $hasSsd = $false; $hasHdd = $false
@@ -299,11 +301,6 @@ fn compute_profile(mut data: Value) -> Value {
             "Critical: Low RAM (<8 GB)",
             "Every freed megabyte matters. Kill all non-essential background processes before launching your game. Consider a RAM upgrade for lasting improvement.");
     }
-    if is_integrated && !is_arc {
-        w!("game_booster", "no_discrete_gpu", "warning",
-            "No Discrete GPU",
-            "Game Booster's GPU Performance Mode requires a dedicated GPU. CPU and process priority optimizations still apply.");
-    }
     if cpu_tier == "budget" {
         w!("game_booster", "budget_cpu_priority", "info",
             "Budget CPU, Priority Boost Helps",
@@ -319,12 +316,12 @@ fn compute_profile(mut data: Value) -> Value {
     if is_laptop {
         w!("power_plan", "laptop_battery_drain", "warning",
             "Laptop, High Performance Drains Battery",
-            "High Performance and Ultimate Performance plans disable CPU frequency scaling. This can reduce battery life by 30-60%. Use only while plugged in.");
+            "High Performance and Ultimate Performance keep the CPU at higher clocks and shorten battery life. Use them only while plugged in.");
     }
     if cpu_tier == "budget" {
         w!("power_plan", "budget_cpu_plan", "info",
-            "Budget CPU, Power Plan is High Impact",
-            "Low-end CPUs downclock aggressively on Balanced plan. Switching to High Performance ensures sustained base clocks, high impact for budget hardware.");
+            "Budget CPU, Compare Power Plans",
+            "Low-end CPUs may clock down more on Balanced. If games stutter, compare Balanced and High Performance with the FPS measurement before keeping either.");
     }
     if !is_laptop && gpu_tier != "high" {
         w!("power_plan", "desktop_custom_plan_thermal_stack", "warning",
@@ -336,7 +333,7 @@ fn compute_profile(mut data: Value) -> Value {
     if has_hdd && !has_ssd {
         w!("dashboard", "hdd_only", "warning",
             "No SSD Detected",
-            "An SSD provides 5-10× faster Windows boot and load times. Upgrading to an SSD is the single highest-impact hardware improvement for most systems.");
+            "Windows boot and game load times are much shorter on an SSD. Upgrading to an SSD is the single highest-impact hardware improvement for most systems.");
     }
     if ram_total > 0 && ram_total < 8192 {
         w!("dashboard", "low_ram", "warning",
@@ -374,6 +371,8 @@ fn compute_profile(mut data: Value) -> Value {
     }
 
     // ─── Per-tweak hardware risk engine ──────────────────────────────────────
+    // Retired tweaks (optregistry::RETIRED) get no verdict: they can no longer
+    // be applied, so a risk badge for them would only suggest otherwise.
     // Maps specific tweak IDs (from tweaks.rs + gputweaks.rs catalogs) to a
     // hardware-aware risk verdict. Severity "danger" means: this exact tweak
     // is a known cause of REGRESSION (lower FPS / instability) on this exact
@@ -397,22 +396,12 @@ fn compute_profile(mut data: Value) -> Value {
     // OEM/SFF builds) this raises baseline temp until the card hits its
     // thermal limit and boost-clocks DROP below what adaptive boosting
     // would have given, net result: fewer FPS than stock.
-    if is_laptop && (is_nvidia || is_amd_gpu) {
-        // Laptop-specific message takes priority over the generic desktop
-        // thermal-throttle one below, laptop GPUs are TDP-capped, which is
-        // the more relevant/specific explanation for this hardware class.
-        risk!("nv_power_max_perf", "danger",
-            "Laptop GPU, Power/Thermal Limited",
-            "Laptop GPUs are capped by a manufacturer TDP limit, not just clock speed. Forcing max clock cannot exceed that cap, it only adds heat, which throttles the CPU/GPU pair via shared cooling. Expect no FPS gain and possible loss.");
-    } else if is_nvidia && gpu_not_high {
-        risk!("nv_power_max_perf", "danger",
-            "Thermal Throttle Risk on This GPU",
-            "Locks your GPU at maximum clock permanently. On this card/cooling combo this usually raises baseline temperature until the GPU hits its thermal limit mid-game and throttles BELOW stock boost clocks, net result is often lower FPS, not higher. Only beneficial on high-end cards with strong cooling (large air/AIO). Test with a benchmark before/after; revert if FPS drops or temps exceed ~80°C.");
-    }
+    // nv_power_max_perf gets no verdict: current drivers ignore its values
+    // (gputweaks::is_legacy_noop), so "locks the GPU at max clock" was false.
     if is_nvidia && gpu_not_high {
         risk!("nv_dynamic_pstate_off", "danger",
             "Thermal Throttle Risk on This GPU",
-            "Functionally overlaps with 'Maximum Performance', both force the GPU off its adaptive power curve. Combining them (or even just one, on this GPU tier) is the most common cause of FPS regressions reported on mid/budget cards. Apply only one at a time, monitor temps, revert if FPS drops.");
+            "Forces the GPU off its adaptive power curve. On mid/budget cards this is a common cause of reported FPS regressions. Monitor temps and revert if FPS drops.");
     }
 
     // ── Hardware-accelerated GPU scheduling ─────────────────────────────────
@@ -425,50 +414,22 @@ fn compute_profile(mut data: Value) -> Value {
             "Disabling compute preemption changes driver scheduling behavior that varies a lot by GPU generation. On older RX 400/500-series cards this can increase stutter instead of reducing it. Test before/after.");
     }
 
-    // ── CPU scheduler tweaks, risk on low core counts ──────────────────────
+    // ── Network offloads, risk on low core counts ───────────────────────────
     if cpu_tier == "budget" {
-        risk!("priority_separation", "warning",
-            "Aggressive Scheduler Bias on Low Core Count",
-            "Win32PrioritySeparation 0x26 gives the foreground app a hard 3:1 quanta bias. On 2-core/4-thread CPUs this can starve background services (audio, anti-cheat helpers, drivers) instead of helping, the opposite of the intended effect. Watch for audio crackle or input stutter after applying.");
         risk!("net_offload_disable", "warning",
             "Budget CPU, Offload Disabling Increases CPU Load",
             "Disabling NIC offloads (TCP checksum, LSO, RSS) moves that work from the network card back onto the CPU. On a low core-count CPU under load (game + voice chat + overlay) this can add enough overhead to cost more frame time than the latency it saves. Test before/after with a frame-time graph, not just ping.");
-        risk!("mmcss_games_task", "warning",
-            "Maximum MMCSS Priority on Low Core Count",
-            "GPU Priority 8 + CPU Priority 6 increases scheduling priority for any MMCSS-registered process. On budget CPUs (≤4 threads) this can cause contention with system threads and reduce, not improve, frame consistency.");
     }
 
-    // ── Power throttling / heat & battery ───────────────────────────────────
-    if is_laptop {
-        risk!("power_throttling_off", "warning",
-            "Laptop, Heat & Battery Impact",
-            "Disabling EcoQoS power throttling stops Windows from parking background processes onto efficiency cores. On a laptop this raises sustained power draw and heat, which can trigger CPU thermal throttling under combined CPU+GPU load, possibly netting lower sustained FPS than with throttling enabled. Use only plugged in, monitor CPU temps.");
-    }
-
-    // ── Low RAM, pagefile / RAM-dependent tweaks ───────────────────────────
+    // ── Low RAM, pagefile ───────────────────────────────────────────────────
     if ram_tier == "low" {
         risk!("pagefile_disable", "danger",
             "Low RAM, Disabling Pagefile Risks Crashes",
             "With under 8 GB RAM, the pagefile is not optional headroom, it's actively used. Disabling it on this system risks out-of-memory crashes and application instability. Keep at minimum 'System Managed'.");
-        risk!("disable_paging_executive", "danger",
-            "Low RAM, Keep Kernel in RAM Not Recommended",
-            "This tweak's own rationale only applies to systems with ≥8 GB RAM. On this system it pins kernel/driver pages permanently in RAM, removing headroom you don't have, increases the chance of paging thrash and crashes instead of reducing latency.");
-    }
-
-    // ── SysMain/Superfetch, helps HDDs, hurts nothing on SSD but is a no-op ─
-    // The tweak's own catalog name says "(SSD systems)", disabling it on an
-    // HDD-only system removes the prefetching that masks slow seek times.
-    if has_hdd && !has_ssd {
-        risk!("sysmain_off", "danger",
-            "HDD Detected, SysMain/Superfetch Helps You",
-            "This tweak is intended for SSD systems. Your system drive is a mechanical HDD, where SysMain's prefetching actively hides slow seek/access times. Disabling it on an HDD-only system will make app launches and boot feel slower, not faster.");
     }
 
     // ── Laptop power-draw tweaks, heat & battery, not 'free' performance ───
     if is_laptop {
-        risk!("core_parking_off", "warning",
-            "Laptop, Battery & Heat Impact",
-            "Keeps every CPU core powered at all times instead of parking idle cores. On a laptop this raises sustained power draw and heat, can shorten battery life noticeably and, under combined CPU+GPU load, contribute to thermal throttling that cancels out the latency gain this tweak aims for.");
         risk!("usb_suspend_off", "warning",
             "Laptop, Battery Impact",
             "Keeps all USB devices fully powered, never suspended. Fine on AC power; on battery this is a measurable, continuous drain for the questionable benefit of avoiding mouse/headset micro-stutter most users never notice.");
@@ -500,4 +461,45 @@ fn compute_profile(mut data: Value) -> Value {
     data["tweakRisks"] = Value::Object(tweak_risks);
 
     data
+}
+
+#[cfg(test)]
+mod tests {
+    use super::compute_profile;
+    use serde_json::json;
+
+    /// The worst case for every hardware rule at once: budget dual-core
+    /// laptop, older GPU, 4 GB RAM, HDD only.
+    fn worst_case() -> serde_json::Value {
+        json!({
+            "cpu": { "name": "Intel Celeron N4020", "cores": 2 },
+            "gpu": { "name": "NVIDIA GeForce GTX 950M", "vramMb": 2048 },
+            "ram": { "totalMb": 4096 },
+            "storage": { "hasNvme": false, "hasSsd": false, "hasHdd": true },
+            "isLaptop": true,
+            "isWifi": true,
+        })
+    }
+
+    #[test]
+    fn retired_tweaks_get_no_risk_verdict() {
+        let profile = compute_profile(worst_case());
+        let risks = profile["tweakRisks"].as_object().unwrap();
+        assert!(!risks.is_empty());
+        for id in risks.keys() {
+            assert!(
+                !crate::optregistry::is_retired(id),
+                "verdict for retired {id}"
+            );
+        }
+    }
+
+    #[test]
+    fn active_tweaks_keep_their_verdicts() {
+        let profile = compute_profile(worst_case());
+        let risks = &profile["tweakRisks"];
+        for id in ["pagefile_disable", "usb_suspend_off", "net_offload_disable"] {
+            assert!(risks.get(id).is_some(), "{id} lost its verdict");
+        }
+    }
 }

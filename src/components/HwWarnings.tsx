@@ -105,7 +105,7 @@ export function RiskBadge({ id }: { id: string }) {
     // Absence of a risk record is NOT evidence of safety, word it honestly.
     return (
       <span
-        title={t("hwNoKnownIssue")}
+        title={t("hwNoKnownIssueHint")}
         style={{
           fontSize: 11,
           fontWeight: 700,
@@ -118,7 +118,7 @@ export function RiskBadge({ id }: { id: string }) {
           whiteSpace: "nowrap",
         }}
       >
-        ✓ {t("hwNoKnownIssue")}
+        {t("hwNoKnownIssue")}
       </span>
     );
   }

@@ -15,17 +15,12 @@ fn bloat_catalog() -> HashMap<(String, String), &'static str> {
             "Updates the appcompat telemetry database, pure data collection for Microsoft."),
         ("\\microsoft\\windows\\application experience\\", "startupapptask",
             "Scans startup programs for Microsoft analysis after login."),
-        // Autochk
-        ("\\microsoft\\windows\\autochk\\", "proxy",
-            "Forwards Autochk results (disk errors) to Microsoft (telemetry)."),
         // CEIP
         ("\\microsoft\\windows\\customer experience improvement program\\", "consolidator",
             "CEIP telemetry: Sends system usage data to Microsoft. Runs hourly."),
         ("\\microsoft\\windows\\customer experience improvement program\\", "usbceip",
             "Sends USB device data as part of the Customer Experience Improvement Program."),
         // Disk
-        ("\\microsoft\\windows\\diskdiagnostic\\", "microsoft-windows-diskdiagnosticdatacollector",
-            "Collects disk diagnostic data and forwards it to Microsoft."),
         ("\\microsoft\\windows\\diskfootprint\\", "diagnostics",
             "Profiles disk I/O patterns in the background, generates load with no user benefit."),
         // WinSAT
@@ -39,34 +34,12 @@ fn bloat_catalog() -> HashMap<(String, String), &'static str> {
         // NetTrace
         ("\\microsoft\\windows\\nettrace\\", "gathernetworkinfo",
             "Collects detailed network diagnostic data, background overhead with no discernible benefit."),
-        // Power Efficiency
-        ("\\microsoft\\windows\\power efficiency diagnostics\\", "analyzesystem",
-            "Runs power efficiency analysis and sends results to Microsoft."),
-        // Family Safety
-        ("\\microsoft\\windows\\shell\\", "familysafetyrefreshtask",
-            "Updates Family Safety / parental control policies from the Microsoft server."),
         // WER
         ("\\microsoft\\windows\\windows error reporting\\", "queuereporting",
             "Sends queued error reports to Microsoft. Unnecessary when Windows Error Reporting is disabled."),
-        // Windows Update
-        ("\\microsoft\\windows\\windowsupdate\\", "automatic app update",
-            "Automatically updates Store apps in the background, separate from normal Windows Update."),
-        ("\\microsoft\\windows\\windowsupdate\\", "scheduled start",
-            "Starts Windows Update scans on a fixed schedule. Effect is limited on Win11: the Update Orchestrator and trigger-start of wuauserv run scans independently of this task."),
-        // Workplace Join
-        ("\\microsoft\\windows\\workplace join\\", "automatic-device-join",
-            "Automatically registers the device in Azure AD / Workplace Join (enterprise feature)."),
         // PushToInstall
         ("\\microsoft\\windows\\pushtoinstall\\", "logincheck",
             "Checks Push-to-Install Store tasks at login, irrelevant for non-enterprise."),
-        // MUI language packs
-        ("\\microsoft\\windows\\mui\\", "lpremove",
-            "Automatically removes unused language packs, may unintentionally delete language packs."),
-        // Subscription / license
-        ("\\microsoft\\windows\\subscription\\", "enablelicenseacquisition",
-            "Attempts to reload Windows activation licenses in the background."),
-        ("\\microsoft\\windows\\subscription\\", "licenseacquisition",
-            "License reload task, unnecessary on correctly activated systems."),
         // Device Census
         ("\\microsoft\\windows\\device information\\", "device",
             "Sends detailed device inventory data to Microsoft (Device Census)."),
@@ -77,9 +50,6 @@ fn bloat_catalog() -> HashMap<(String, String), &'static str> {
             "Feedback/telemetry client task (Siuf): uploads user feedback diagnostics in the background."),
         ("\\microsoft\\windows\\feedback\\siuf\\", "dmclientonscenariodownload",
             "Feedback/telemetry client task (Siuf, scenario download): downloads feedback-scenario payloads."),
-        // Clip
-        ("\\microsoft\\windows\\clip\\", "license validation",
-            "Microsoft Store license validation, runs periodically in the background."),
     ];
 
     entries
@@ -92,7 +62,7 @@ pub fn list() -> Value {
     let catalog = bloat_catalog();
 
     let script = r#"
-$tasks = Get-ScheduledTask -ErrorAction SilentlyContinue | ForEach-Object {
+$tasks = Get-ScheduledTask -ErrorAction Stop | ForEach-Object {
     $created = $null
     $ds = "$($_.Date)"
     if ($ds) { try { $created = [datetime]::Parse($ds).ToUniversalTime().ToString("o") } catch { } }
@@ -144,7 +114,7 @@ $tasks | ConvertTo-Json -Compress -Depth 2
             let key = (path.to_lowercase(), name.to_lowercase());
             let reason = catalog.get(&key).copied().unwrap_or("");
             let is_bloat = !reason.is_empty();
-            let enabled = matches!(state.as_str(), "Ready" | "Running");
+            let enabled = matches!(state.as_str(), "Ready" | "Running" | "Queued");
             // All inbox Windows tasks live under \Microsoft\; anything else
             // (vendor folders or root-level entries) is third-party installed.
             let origin = if path.to_lowercase().starts_with("\\microsoft\\") {
@@ -176,6 +146,17 @@ $tasks | ConvertTo-Json -Compress -Depth 2
     json!({ "tasks": tasks, "bloatCount": bloat_count })
 }
 
+/// Validate a task path or name that is embedded in single-quoted PS strings.
+/// Rejects quote/expansion characters (is_safe_ident), wildcards, and the
+/// typographic quotes U+2018..=U+201F, which PowerShell's tokenizer treats as
+/// real quote delimiters (a name containing U+2019 would otherwise close the
+/// surrounding '...' literal and inject script).
+pub(crate) fn is_valid_task_ident(s: &str) -> bool {
+    crate::ps::is_safe_ident(s)
+        && !s.contains(['*', '?', '[', ']'])
+        && !s.chars().any(|c| ('\u{2018}'..='\u{201F}').contains(&c))
+}
+
 pub fn toggle(path: String, name: String, enable: bool) -> Result<Value, String> {
     if !crate::ps::is_admin() {
         return Err("Scheduled Tasks ändern benötigt Adminrechte.".into());
@@ -184,22 +165,135 @@ pub fn toggle(path: String, name: String, enable: bool) -> Result<Value, String>
     // renderer, reject anything that could terminate the quotes.
     // Task paths/names never contain wildcards; blocking them here keeps
     // wildcard-expanding cmdlets (Test-Path, schtasks quoting) safe.
-    if !crate::ps::is_safe_ident(&path)
-        || !crate::ps::is_safe_ident(&name)
-        || path.contains(['*', '?', '[', ']'])
-        || name.contains(['*', '?', '[', ']'])
-    {
+    if !is_valid_task_ident(&path) || !is_valid_task_ident(&name) {
         return Err("Invalid task path or name".into());
+    }
+    let query = format!(
+        "(Get-ScheduledTask -TaskPath '{path}' -TaskName '{name}' -ErrorAction Stop).State.ToString()"
+    );
+    let previous = crate::ps::run(&query)?;
+    let previously_enabled = previous.trim() != "Disabled";
+    if previously_enabled == enable {
+        return Ok(json!({ "name": name, "path": path, "enabled": enable, "alreadySet": true }));
     }
     let action = if enable {
         "Enable-ScheduledTask"
     } else {
         "Disable-ScheduledTask"
     };
-    let script = format!(
-        r#"{action} -TaskPath '{path}' -TaskName '{name}' -ErrorAction Stop | Out-Null; "OK""#
+    let undo = if enable {
+        "Disable-ScheduledTask"
+    } else {
+        "Enable-ScheduledTask"
+    };
+    let apply_script =
+        format!("{action} -TaskPath '{path}' -TaskName '{name}' -ErrorAction Stop | Out-Null");
+    let revert_script = format!(
+        "powershell -Command {undo} -TaskPath '{path}' -TaskName '{name}' -ErrorAction Stop | Out-Null"
     );
-    crate::ps::run(&script)
-        .map(|_| json!({ "name": name, "path": path, "enabled": enable }))
-        .map_err(|e| format!("Toggle fehlgeschlagen: {e}"))
+    let entry_id = crate::safety::append_entry(crate::safety::JournalEntry {
+        id: format!("task-{}", chrono::Local::now().format("%Y%m%d%H%M%S%6f")),
+        tweak_id: format!("task:{path}{name}"),
+        tweak_name: format!("Scheduled task: {name}"),
+        origin: None,
+        time: chrono::Local::now().to_rfc3339(),
+        items: vec![crate::safety::ChangeItem::Command {
+            applied: format!("powershell -Command {apply_script}"),
+            revert: revert_script,
+        }],
+        reverted: false,
+        backup_files: vec![],
+        completed: false,
+        attempted: 1,
+        reverted_items: 0,
+        untrusted: false,
+    })?;
+    let result = crate::ps::run(&apply_script).and_then(|_| {
+        let state = crate::ps::run(&query)?;
+        if (state.trim() != "Disabled") == enable {
+            Ok(())
+        } else {
+            Err(format!("Scheduled task {name} did not change state"))
+        }
+    });
+    if let Err(error) = result {
+        // Typical: access denied for tasks owned by SYSTEM/TrustedInstaller.
+        // Unchanged state: close the entry (nothing to undo, nothing
+        // unfinished); otherwise restore the previous state.
+        let unchanged = crate::ps::run(&query)
+            .is_ok_and(|now| (now.trim() != "Disabled") == previously_enabled);
+        let closed = if unchanged {
+            crate::safety::with_journal(|entries| {
+                if let Some(entry) = entries.iter_mut().find(|entry| entry.id == entry_id) {
+                    entry.reverted = true;
+                }
+                Ok(())
+            })
+            .map(|_| ())
+        } else {
+            crate::tweaks::revert_entry(&entry_id).map(|_| ())
+        };
+        return Err(match closed {
+            Ok(()) => format!("Toggle fehlgeschlagen: {error}"),
+            Err(re) => format!(
+                "Toggle fehlgeschlagen: {error}; Wiederherstellung unvollständig ({re}); restore token: {entry_id}"
+            ),
+        });
+    }
+    crate::safety::with_journal(|entries| {
+        let entry = entries
+            .iter_mut()
+            .find(|entry| entry.id == entry_id)
+            .ok_or("Scheduled task journal entry missing")?;
+        entry.completed = true;
+        Ok(())
+    })?;
+    Ok(json!({ "name": name, "path": path, "enabled": enable, "entryId": entry_id }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{bloat_catalog, is_valid_task_ident};
+
+    #[test]
+    fn task_ident_rejects_quotes_wildcards_and_smart_quotes() {
+        assert!(is_valid_task_ident("\\Microsoft\\Windows\\Maps\\"));
+        assert!(is_valid_task_ident("MapsUpdateTask"));
+        for bad in [
+            "a'b",
+            "a\"b",
+            "a$b",
+            "a`b",
+            "a*b",
+            "a?b",
+            "a[b",
+            "a]b",
+            "",
+            "a\u{2018}b",
+            "a\u{2019}; calc; \u{2018}b",
+            "a\u{201A}b",
+            "a\u{201B}b",
+            "a\u{201C}b",
+            "a\u{201D}b",
+            "a\u{201E}b",
+            "a\u{201F}b",
+        ] {
+            assert!(!is_valid_task_ident(bad), "{bad:?}");
+        }
+        assert!(is_valid_task_ident("a\u{2014}b"));
+    }
+
+    #[test]
+    fn update_and_license_tasks_are_not_bloat_candidates() {
+        let names = [
+            "scheduled start",
+            "automatic app update",
+            "license validation",
+            "licenseacquisition",
+            "automatic-device-join",
+        ];
+        assert!(!bloat_catalog()
+            .keys()
+            .any(|(_, name)| names.contains(&name.as_str())));
+    }
 }
