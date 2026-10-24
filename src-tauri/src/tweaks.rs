@@ -1259,7 +1259,7 @@ const SERVICE_ABSENT: &str = "__ABSENT__";
 /// PowerShell 5.1's Set-Service rejects it, so it is applied via sc.exe.
 const DELAYED_AUTO: &str = "AutomaticDelayedStart";
 
-fn service_get_start(name: &str) -> Result<String, String> {
+pub(crate) fn service_get_start(name: &str) -> Result<String, String> {
     if !crate::ps::is_safe_ident(name) {
         return Err(format!(
             "refusing to query service with unsafe name '{name}'"
