@@ -24,9 +24,10 @@ dirs = "5"
 sha2 = "0.10"
 rayon = "1.10"
 rand = "0.8"
-# Pin: time >=0.3.44 conflicts with cookie 0.18.1 (E0119 in expiration.rs).
-# Remove once cookie ships a fix and tauri picks it up.
-time = "=0.3.41"
+# Exact pin: 0.3.47 fixes RUSTSEC-2026-0009 and builds with the current
+# cookie/tauri versions (the older 0.3.44+ conflict with cookie 0.18.1 no
+# longer occurs). Bump deliberately, with a full build, not implicitly.
+time = "=0.3.47"
 
 [features]
 # Elevated helper process (docs/audit-2026-10/elevation-design.md, phase 2).
