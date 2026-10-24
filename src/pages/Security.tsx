@@ -35,8 +35,10 @@ function HostsCard({ count, hoDisabledCount }: { count: number; hoDisabledCount:
     setLoading(true);
     setErr("");
     try {
+      // Backend shape: { active, disabled } or { error } when unreadable.
       const d = await api.hostsListAll();
-      setData(d);
+      if (d?.error) throw new Error(String(d.error));
+      setData({ active: d?.active ?? [], hoDisabled: d?.disabled ?? [] });
     } catch (e: any) {
       setErr(String(e));
     } finally {
@@ -322,8 +324,10 @@ export default function Security({ mode, admin, go }: { mode: Mode; admin: boole
   ];
 
   const susDrivers   = (sec.unsigned_drivers?.items ?? []) as any[];
-  const startupItems: any[] = Array.isArray(sec.autoruns?.startup_folder) ? sec.autoruns.startup_folder : [];
-  const taskItems: any[]    = Array.isArray(sec.autoruns?.tasks_nonms)     ? sec.autoruns.tasks_nonms     : [];
+  // PowerShell emits a single result as a bare object, an error as {error}.
+  const rows = (v: any): any[] => Array.isArray(v) ? v : v && typeof v === "object" && !v.error ? [v] : [];
+  const startupItems: any[] = rows(sec.autoruns?.startup_folder);
+  const taskItems: any[]    = rows(sec.autoruns?.tasks_nonms);
   // Startup-folder entries are files, not scheduled tasks: they are listed
   // separately and managed in the Startup tool, never via the task API.
   const susAutoruns = taskItems;

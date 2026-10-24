@@ -76,6 +76,7 @@ Severity:
 | `App.tsx`, `main.tsx`, hooks, `api.ts`, `lib/health.ts`, `OptCard`, `RetiredCard`, `Optimize`, `OptimizeMyPc`, `Dashboard`, `SystemCheck` | ~1700 | reviewed |
 | `PrivacyCenter`, `Debloater`, `PerfTweaks` | ~1220 | reviewed |
 | `GpuTweaks`, `BootOptimizer`, `NvidiaControlPanel`, `PowerPlan`, `Profiles`, `GameProfiles`, `GameBooster`, `Cleanup`, `RegClean`, `DiskAnalyzer` | ~3030 | reviewed |
+| `Security`, `ServicesManager`, `ScheduledTasks`, `Startup`, `Processes`, `DriverManager`, `Updates`, `SoftwareInstaller`, `AppUninstaller`, `CtxMenuCleaner` | ~3390 | reviewed |
 
 ## Findings
 
@@ -180,3 +181,8 @@ Severity:
 | 97 | `BootOptimizer.tsx` rating | Low | A boot duration of 0 (field missing in the event) was rated "Excellent". | fixed: ≤ 0 is "unknown" |
 | 98 | `GpuTweaks.tsx`, `BootOptimizer.tsx`, `DiskAnalyzer.tsx`, `RegClean.tsx` | Info | Leftover hard-coded English UI strings ("apply anyway", "Cancel", "↻ Rescan", "(Risk: …)", the Temp-tab hint, "restored"/"errors"); `GpuTweaks` keeps an unused `log` state. | open (low): move into i18n |
 | 99 | `diskanalyzer.rs:organize_apply` | Info | Organizer moves are not journaled, so there is no undo (the confirmation says so). | open: a move log with "move back" would be possible |
+| 100 | `Security.tsx` HostsCard | Medium | The backend returns `{active, disabled}`; the card read `data.hoDisabled.length`. A click on "Manage" threw a TypeError and the hosts management never opened. An unreadable hosts file (`{error}`) failed the same way. | fixed: maps `disabled`, shows the error |
+| 101 | `security.rs:scan` firewall + autorun tasks | Medium | `Get-NetFirewallProfile.Enabled` (GpoBoolean) and `Get-ScheduledTask.State` are enums, which Windows PowerShell's `ConvertTo-Json` writes as numbers. The page compares with `true`/`"True"` and `"Disabled"`, so the firewall profiles were most likely all shown as "Off" and every task as enabled (the button always offered "Disable"). `schedtasks.rs` already converts with `ToString()`. Not verified on Windows. | fixed: `Enabled` as a boolean, actions and `State` as strings; `analysis.rs` keeps accepting both forms |
+| 102 | `Security.tsx` autoruns | Low | A single non-Microsoft task or a single startup file arrives as a bare object (PowerShell unrolls one-element arrays); `Array.isArray` dropped it. | fixed: single objects are read as one row |
+| 103 | `AppUninstaller.tsx` | Low | "No leftovers found" appeared right after the uninstaller was launched, before any scan. | fixed: only after a scan |
+| 104 | `CtxMenuCleaner.tsx` | Low | A failed list left the page on an endless spinner (unhandled rejection). | fixed |

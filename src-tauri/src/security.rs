@@ -47,7 +47,10 @@ pub fn scan() -> Value {
             "$s = Get-MpComputerStatus -ErrorAction Stop | Select-Object AMServiceEnabled,RealTimeProtectionEnabled,AntivirusEnabled,AntivirusSignatureLastUpdated,QuickScanEndTime,IsTamperProtected; $s | Add-Member -NotePropertyName MAPSReporting -NotePropertyValue ((Get-MpPreference -ErrorAction SilentlyContinue).MAPSReporting) -Force; $s"
         ),
         "firewall": sec(
-            "Get-NetFirewallProfile | Select-Object Name,Enabled,DefaultInboundAction,DefaultOutboundAction"
+            // Enabled and the actions are enums (GpoBoolean, Action), which
+            // Windows PowerShell's ConvertTo-Json writes as numbers; the UI
+            // expects a boolean and readable action names.
+            "Get-NetFirewallProfile -ErrorAction Stop | Select-Object Name,@{n='Enabled';e={[string]$_.Enabled -eq 'True'}},@{n='DefaultInboundAction';e={[string]$_.DefaultInboundAction}},@{n='DefaultOutboundAction';e={[string]$_.DefaultOutboundAction}}"
         ),
         "unsigned_drivers": unsigned_drivers(),
         "autoruns": autoruns(),
@@ -195,7 +198,7 @@ fn autoruns() -> Value {
         "hklm_run": sec("Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run' -ErrorAction Stop | Select-Object * -ExcludeProperty PS*"),
         "hkcu_run": sec("Get-ItemProperty 'HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run' -ErrorAction Stop | Select-Object * -ExcludeProperty PS*"),
         "startup_folder": sec("Get-ChildItem ([Environment]::GetFolderPath('Startup')) -ErrorAction Stop | Select-Object Name,FullName"),
-        "tasks_nonms": sec("Get-ScheduledTask | Where-Object { $_.TaskPath -notlike '\\Microsoft\\*' } | Select-Object TaskName,TaskPath,State | Select-Object -First 60"),
+        "tasks_nonms": sec("Get-ScheduledTask | Where-Object { $_.TaskPath -notlike '\\Microsoft\\*' } | Select-Object -First 60 TaskName,TaskPath,@{n='State';e={$_.State.ToString()}}"),
         "winlogon_shell": sec("Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon' | Select-Object Shell,Userinit"),
     })
 }

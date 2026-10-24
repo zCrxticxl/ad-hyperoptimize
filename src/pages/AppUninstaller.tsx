@@ -265,7 +265,7 @@ export default function AppUninstaller({ admin }: { admin: boolean }) {
                     </div>
                   )}
 
-                  {wasLaunched && appLeft.length === 0 && scanning !== app.name && (
+                  {wasLaunched && leftovers[app.name] !== undefined && appLeft.length === 0 && scanning !== app.name && (
                     <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
                       {t("uninstNoLeftovers")}
                     </div>
