@@ -2,7 +2,11 @@ mod analysis;
 mod bench;
 mod bootopt;
 mod cache;
+// Privilege inventory of all commands (broker phase 1); test-only until the
+// broker uses it at runtime.
 mod cleanup;
+#[cfg(test)]
+mod commands;
 #[cfg(windows)]
 mod ctxmenu;
 mod debloater;

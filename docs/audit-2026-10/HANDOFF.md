@@ -107,7 +107,7 @@ Earlier note on the cloud session, kept for context. The second cleanup pass (`8
 4. **CI and supply chain:**
    - Pin GitHub Actions to commit SHAs.
    - Bump `time` (RUSTSEC-2026-0009) and check the new `cargo audit` job.
-5. **Structural security (HIGH):** the whole WebView runs elevated, so all 163 commands are reachable from the renderer. The design is written: `docs/audit-2026-10/elevation-design.md` (recommended: on-demand elevated helper `--broker` over an ACL-protected named pipe, typed allowlist, five migration phases). Owner decisions are recorded in section 8 of that document (option B, UAC once per session, journal readable without admin, drop unused commands). **Starts after the Windows validation (item 6).**
+5. **Structural security (HIGH):** the whole WebView runs elevated, so all 163 commands are reachable from the renderer. The design is written: `docs/audit-2026-10/elevation-design.md` (recommended: on-demand elevated helper `--broker` over an ACL-protected named pipe, typed allowlist, five migration phases). Owner decisions are recorded in section 8 of that document (option B, UAC once per session, journal readable without admin, drop unused commands). Phase 1 (inventory, unused commands removed) is done; see section 9 of that document. Next: phase 2, broker skeleton behind a cargo feature.
 6. **Windows validation** (owner or Windows VM): run the matrix from `REPORT.md` section G and the "Not tested" list in `optimization-engine.md`.
    - Apply/undo via Optimize My PC.
    - Reset all.

@@ -1,6 +1,6 @@
 # Design: unelevated UI with an elevated broker
 
-Status: **decided, not implemented.** The owner answered the open questions (section 8). Implementation starts after the Windows validation of the current branch.
+Status: **decided; phase 1 done, phases 2–5 open.** The owner answered the open questions (section 8). Implementation starts after the Windows validation of the current branch.
 
 ## 1. Current state
 
@@ -170,4 +170,39 @@ Each phase on its own branch, with the full gate (fmt, check, test, clippy) on W
 | 3. Journal | **Readable without admin rights.** Users get read access to the journal and history in the state folder; writing stays admin-only. The UI shows the undo history without starting the broker. |
 | 4. Unused commands | **Remove them when unused** (class X; first candidates: the `autoopt` handlers without a page). Each removal is checked against `src/api.ts` and the pages. |
 | 5. Order | **Windows validation first**, then phases 1–5. |
+
+## 9. Progress
+
+### Phase 1: done (`a891773`, inventory commit after it)
+
+- **Class X removed:** 8 commands no page calls:
+  - `cmd_autoopt_scan`, `cmd_autoopt_score`, `cmd_autoopt_apply` and the `autoopt` module
+  - `cmd_gameboost_boost_process`: set any PID to High without validation
+  - `cmd_gameboost_gpu_perf`
+  - `cmd_net_tweak_all_gaming`
+  - `cmd_hw_temps`, `cmd_hw_smart`
+
+  163 → 155 commands.
+- **Inventory:** `src-tauri/src/commands.rs` lists all 155 commands:
+
+  | Class | Count | Runs in |
+  |---|---|---|
+  | Read | 56 | UI |
+  | User | 14 | UI |
+  | ReadAdmin | 9 | broker |
+  | Privileged | 76 | broker |
+
+  Entries marked "verify" still need a check as a standard user: `cmd_health_scan`, `cmd_scan_driver_updates`, `cmd_powerplan_set`, `cmd_timer_set`, `cmd_hw_full`.
+- **Tests:**
+  - `every_registered_command_is_classified_exactly_once`, compared against `generate_handler!`
+  - `every_defined_command_is_registered`
+  - `mutating_commands_are_not_reads`
+- **Behaviour change:** none apart from the removed commands, which nothing called.
+
+### Next: phase 2 (broker skeleton)
+
+- `--broker` mode
+- named pipe with a DACL for the user's SID
+- PID and nonce checks; `hello` / `ping`
+- behind a `broker` cargo feature, so release builds stay unchanged
 
