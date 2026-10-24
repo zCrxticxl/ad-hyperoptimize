@@ -65,9 +65,31 @@ const CATS: &[Category] = &[
     },
 ];
 
+/// Cleanup roots of a category: (path, per-user). Machine roots are built
+/// from the Windows API / HKLM, never from the environment: the elevated app
+/// inherits `%WINDIR%`/`%TEMP%` from its caller, and `HKCU\Environment`
+/// (user-writable) could point "User Temp" at `C:\Windows\System32`.
+fn cat_roots(id: &str) -> Vec<(PathBuf, bool)> {
+    let machine = |p: PathBuf| (p, false);
+    let user = |p: PathBuf| (p, true);
+    match id {
+        "win_temp" | "wu_cache" => cat_paths(id).into_iter().map(machine).collect(),
+        "crash_dumps" => {
+            let mut v = cat_paths(id);
+            let queue = v.pop();
+            v.into_iter().map(user).chain(queue.map(machine)).collect()
+        }
+        _ => cat_paths(id).into_iter().map(user).collect(),
+    }
+}
+
 fn cat_paths(id: &str) -> Vec<PathBuf> {
     let local = dirs::cache_dir().unwrap_or_default(); // %LOCALAPPDATA%
-    let windir = std::env::var("WINDIR").unwrap_or_else(|_| "C:\\Windows".into());
+    let windir = crate::ps::windows_dir();
+    #[cfg(windows)]
+    let program_data = crate::statestore::program_data_dir().unwrap_or_default();
+    #[cfg(not(windows))]
+    let program_data = PathBuf::from("C:\\ProgramData");
     match id {
         "win_temp" => vec![PathBuf::from(format!("{windir}\\Temp"))],
         "user_temp" => vec![std::env::temp_dir()],
@@ -82,7 +104,7 @@ fn cat_paths(id: &str) -> Vec<PathBuf> {
         "thumb_cache" => vec![local.join("Microsoft\\Windows\\Explorer")],
         "crash_dumps" => vec![
             local.join("CrashDumps"),
-            PathBuf::from("C:\\ProgramData\\Microsoft\\Windows\\WER\\ReportQueue"),
+            program_data.join("Microsoft\\Windows\\WER\\ReportQueue"),
         ],
         "chrome_cache" => vec![local.join("Google\\Chrome\\User Data\\Default\\Cache")],
         "edge_cache" => vec![local.join("Microsoft\\Edge\\User Data\\Default\\Cache")],
@@ -125,10 +147,31 @@ fn walk(root: &Path, min_age: Duration, files: &mut Vec<(PathBuf, u64)>) {
     }
 }
 
+/// True when `root` (canonical) lies strictly inside `home` (canonical).
+fn is_inside(root: &Path, home: &Path) -> bool {
+    root != home && root.starts_with(home)
+}
+
+/// A per-user root must resolve to a folder inside this user's profile (the
+/// profile path comes from the account, not from redirectable variables);
+/// machine roots are fixed. Anything else is never walked or cleaned.
+fn root_allowed(root: &Path, per_user: bool) -> bool {
+    if !per_user {
+        return true;
+    }
+    let Some(home) = dirs::home_dir() else {
+        return false;
+    };
+    match (fs::canonicalize(root), fs::canonicalize(home)) {
+        (Ok(r), Ok(h)) => is_inside(&r, &h) && !crate::diskanalyzer::is_protected(root),
+        _ => false,
+    }
+}
+
 fn collect(id: &str, min_age_hours: u64) -> Vec<(PathBuf, u64)> {
     let mut files = Vec::new();
-    for root in cat_paths(id) {
-        if root.exists() {
+    for (root, per_user) in cat_roots(id) {
+        if root.exists() && root_allowed(&root, per_user) {
             walk(&root, Duration::from_secs(min_age_hours * 3600), &mut files);
         }
     }
@@ -161,8 +204,8 @@ pub fn clean(category_ids: Vec<String>) -> Value {
         let Some(c) = CATS.iter().find(|c| c.id == id) else {
             continue;
         };
-        for root in cat_paths(c.id) {
-            if !root.exists() {
+        for (root, per_user) in cat_roots(c.id) {
+            if !root.exists() || !root_allowed(&root, per_user) {
                 continue;
             }
             let mut files = Vec::new();
@@ -532,5 +575,37 @@ mod tests {
         assert!(!junction_deleted, "deleted a junction as a file");
         assert!(keep_exists);
         assert!(!direct);
+    }
+}
+
+#[cfg(test)]
+mod root_tests {
+    use super::{cat_paths, cat_roots, is_inside, CATS};
+    use std::path::Path;
+
+    #[test]
+    fn per_user_roots_must_stay_inside_the_profile() {
+        let home = Path::new("Users").join("me");
+        let temp = home.join("AppData").join("Local").join("Temp");
+        assert!(is_inside(&temp, &home));
+        assert!(!is_inside(&home, &home));
+        assert!(!is_inside(&Path::new("Windows").join("System32"), &home));
+        assert!(!is_inside(
+            &Path::new("Users").join("me2").join("Temp"),
+            &home
+        ));
+    }
+
+    #[test]
+    fn every_category_root_is_classified() {
+        for c in CATS {
+            assert_eq!(cat_roots(c.id).len(), cat_paths(c.id).len(), "{}", c.id);
+        }
+        // Machine roots: Windows Temp, the update cache and the WER queue.
+        let machine = |id: &str| cat_roots(id).iter().filter(|(_, u)| !u).count();
+        assert_eq!(machine("win_temp"), 1);
+        assert_eq!(machine("wu_cache"), 1);
+        assert_eq!(machine("crash_dumps"), 1);
+        assert_eq!(machine("user_temp"), 0);
     }
 }
