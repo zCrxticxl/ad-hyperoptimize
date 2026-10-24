@@ -120,24 +120,34 @@ impl System {
     }
 }
 
-/// Microsoft lifecycle end-of-servicing for Home/Pro editions; Enterprise and
-/// Education get 12 more months. Returns (version label, end date).
+/// Microsoft lifecycle end of servicing for a feature update. Enterprise,
+/// Education and IoT Enterprise get their own (longer) date; Home, Pro, Pro
+/// Education and Pro for Workstations share the shorter one. LTSC editions
+/// follow a separate 5–10 year lifecycle and are not judged here (None).
+/// Returns (version label, end date).
 pub fn windows_servicing(build: u32, edition: &str) -> Option<(&'static str, chrono::NaiveDate)> {
-    let (label, y, mo, d) = match build {
-        19045 => ("Windows 10 22H2", 2025, 10, 14),
-        22621 => ("Windows 11 22H2", 2024, 10, 8),
-        22631 => ("Windows 11 23H2", 2025, 11, 11),
-        26100 => ("Windows 11 24H2", 2026, 10, 13),
-        26200 => ("Windows 11 25H2", 2027, 10, 12),
+    let e = edition.to_ascii_lowercase();
+    // EnterpriseS, EnterpriseSN, IoTEnterpriseS, IoTEnterpriseSK: LTSC.
+    let ltsc = e.starts_with("enterprises") || e.starts_with("iotenterprises");
+    if ltsc {
+        return None;
+    }
+    let long = e.starts_with("enterprise")
+        || e.starts_with("education")
+        || e.starts_with("iotenterprise")
+        || e == "serverrdsh";
+    let (label, short, long_end) = match build {
+        19044 => ("Windows 10 21H2", (2023, 6, 13), (2024, 6, 11)),
+        19045 => ("Windows 10 22H2", (2025, 10, 14), (2025, 10, 14)),
+        22000 => ("Windows 11 21H2", (2023, 10, 10), (2024, 10, 8)),
+        22621 => ("Windows 11 22H2", (2024, 10, 8), (2025, 10, 14)),
+        22631 => ("Windows 11 23H2", (2025, 11, 11), (2026, 11, 10)),
+        26100 => ("Windows 11 24H2", (2026, 10, 13), (2027, 10, 12)),
+        26200 => ("Windows 11 25H2", (2027, 10, 12), (2028, 10, 10)),
         _ => return None,
     };
-    let enterprise = edition.contains("Enterprise") || edition.contains("Education");
-    let year = if enterprise && build != 19045 {
-        y + 1
-    } else {
-        y
-    };
-    chrono::NaiveDate::from_ymd_opt(year, mo, d).map(|date| (label, date))
+    let (y, m, d) = if long { long_end } else { short };
+    chrono::NaiveDate::from_ymd_opt(y, m, d).map(|date| (label, date))
 }
 
 // ── Diagnosis (pure) ─────────────────────────────────────────────────────────
@@ -1641,11 +1651,29 @@ mod tests {
             ..Default::default()
         };
         assert!(ids(&win11).is_empty());
-        let r24h2_ent = windows_servicing(26100, "Enterprise").unwrap().1;
+        let date = |y, m, d| chrono::NaiveDate::from_ymd_opt(y, m, d).unwrap();
+        let end = |build, edition| windows_servicing(build, edition).map(|(_, d)| d);
+        assert_eq!(end(26100, "Enterprise"), Some(date(2027, 10, 12)));
+        assert_eq!(end(26100, "Professional"), Some(date(2026, 10, 13)));
+        assert_eq!(end(26200, "Education"), Some(date(2028, 10, 10)));
+        assert_eq!(end(22631, "EnterpriseN"), Some(date(2026, 11, 10)));
+        // Pro Education follows the Home/Pro lifecycle.
         assert_eq!(
-            r24h2_ent,
-            chrono::NaiveDate::from_ymd_opt(2027, 10, 13).unwrap()
+            end(22631, "ProfessionalEducation"),
+            Some(date(2025, 11, 11))
         );
+        // Windows 10 22H2 ends on the same day for every edition.
+        assert_eq!(end(19045, "Enterprise"), Some(date(2025, 10, 14)));
+        // LTSC has its own lifecycle: never flagged from the GA dates.
+        assert_eq!(end(26100, "EnterpriseS"), None);
+        assert_eq!(end(19044, "IoTEnterpriseS"), None);
+        // Older, already unsupported releases are flagged too.
+        let win11_21h2 = System {
+            build: 22000,
+            edition: "Core".into(),
+            ..Default::default()
+        };
+        assert!(ids(&win11_21h2).contains(&"windows_eos".to_string()));
         let bad = System {
             build: 26200,
             system_free_pct: Some(5.0),

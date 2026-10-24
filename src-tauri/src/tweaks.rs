@@ -1403,30 +1403,6 @@ fn service_default(name: &str) -> Option<&'static str> {
     }
 }
 
-/// Tweaks with a plausible, measurable performance effect. The UI's beginner
-/// mode shows only these. Situational/advanced tweaks (risk "High": core
-/// parking, power throttling, USB suspend, SysMain, WSearch, MPO) and
-/// tweaks with no measurable gain stay available in expert mode only.
-fn may_help_performance(id: &str) -> bool {
-    matches!(
-        id,
-        "power_high_performance"
-            | "game_dvr_off"
-            | "mmcss_gaming"
-            | "startup_delay_off"
-            | "game_mode_on"
-            | "fse_optimizations_off"
-            | "hags_on"
-            | "mmcss_games_task"
-            | "transparency_off"
-            | "min_animate_off"
-            | "widgets_off"
-            | "ntfs_8dot3_off"
-            | "edge_prelaunch_off"
-            | "svc_maps_off"
-    )
-}
-
 /// Every catalog id (the optimization registry must cover exactly these).
 #[cfg(test)]
 pub(crate) fn catalog_ids() -> Vec<&'static str> {
@@ -1497,7 +1473,6 @@ pub fn list_with_status() -> Value {
                 "id": t.id, "name": t.name, "category": t.category,
                 "description": t.description, "rationale": t.rationale,
                 "impact": t.impact, "risk": t.risk,
-                "performancePotential": may_help_performance(t.id),
                 "requiresAdmin": t.requires_admin, "reversible": t.reversible,
                 "status": status, "statusSource": status_source,
                 "retired": crate::optregistry::is_retired(t.id),
@@ -2239,43 +2214,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn performance_candidates_exclude_bonus_only_tweaks() {
-        assert!(may_help_performance("mmcss_gaming"));
-        assert!(may_help_performance("game_dvr_off"));
-        assert!(!may_help_performance("qos_bandwidth_free"));
-        assert!(!may_help_performance("advertising_id_off"));
-        assert!(!may_help_performance("disable_paging_executive"));
-    }
-
-    #[test]
-    fn no_gain_and_advanced_tweaks_are_not_performance_candidates() {
-        for id in [
-            "priority_separation",
-            "nagle_off",
-            "tcp_autotuning_normal",
-            "net_rss_on",
-            "xbox_services_off",
-            "ntfs_last_access_off",
-            "visual_fx_performance",
-            "irp_stack_high",
-            "tcp_timed_wait_low",
-            "qos_bandwidth_free",
-            "remote_registry_off",
-            "svc_geolocation_off",
-            "cortana_off",
-            "background_apps_off",
-            "disable_paging_executive",
-            "core_parking_off",
-            "power_throttling_off",
-            "usb_suspend_off",
-            "sysmain_off",
-            "wsearch_manual",
-            "mpo_off",
-        ] {
-            assert!(!may_help_performance(id), "{id}");
-            // Every listed id must still exist: capability is kept.
-            assert!(catalog().iter().any(|t| t.id == id), "{id} missing");
-        }
+    fn situational_tweaks_are_marked_high_risk() {
         for id in [
             "core_parking_off",
             "power_throttling_off",
