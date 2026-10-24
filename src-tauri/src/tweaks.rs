@@ -573,7 +573,7 @@ pub fn catalog() -> Vec<Tweak> {
             name: "Hardware-Accelerated GPU Scheduling (HAGS)",
             category: "Gaming",
             description: "Sets HwSchMode=2, letting the GPU manage its own scheduling queue. REBOOT REQUIRED.",
-            rationale: "Offloads frame scheduling from CPU to a dedicated GPU scheduler, reduces latency on modern GPUs (NVIDIA 10-series+/AMD RDNA+), and is required for DLSS 3 Frame Generation.",
+            rationale: "Offloads frame scheduling from the CPU to a dedicated GPU scheduler, which can reduce latency on modern GPUs (NVIDIA 10-series+/AMD RDNA+), and is required for DLSS 3 Frame Generation.",
             impact: "May slightly lower latency on modern GPUs. Requires reboot. On very old GPUs/drivers it can hurt, benchmark before/after.",
             risk: "Medium",
             requires_admin: true,
