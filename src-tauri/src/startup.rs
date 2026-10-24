@@ -70,9 +70,11 @@ fn run_key_entries(
     for value in key.enum_values() {
         let (name, _) =
             value.map_err(|error| format!("Cannot enumerate {root}/{run_path}: {error}"))?;
-        let command: String = key
-            .get_value(&name)
-            .map_err(|error| format!("Cannot read startup value {name}: {error}"))?;
+        // A non-string value cannot be a command Windows starts; skip it
+        // instead of dropping every entry of this key.
+        let Ok(command) = key.get_value::<String, _>(&name) else {
+            continue;
+        };
         entries.push(json!({
             "name": name,
             "command": command,
@@ -84,20 +86,17 @@ fn run_key_entries(
     Ok(entries)
 }
 
+/// The per-user folder comes from the known-folder API, the common one from
+/// HKLM: not from `%APPDATA%`/`%ProgramData%` of the inherited environment.
 #[cfg(windows)]
 fn startup_folders() -> Vec<(PathBuf, &'static str)> {
+    const STARTUP: &str = "Microsoft\\Windows\\Start Menu\\Programs\\Startup";
     let mut v = Vec::new();
-    if let Ok(appdata) = std::env::var("APPDATA") {
-        v.push((
-            PathBuf::from(appdata).join("Microsoft\\Windows\\Start Menu\\Programs\\Startup"),
-            "folder_user",
-        ));
+    if let Some(appdata) = dirs::data_dir() {
+        v.push((appdata.join(STARTUP), "folder_user"));
     }
-    if let Ok(pd) = std::env::var("ProgramData") {
-        v.push((
-            PathBuf::from(pd).join("Microsoft\\Windows\\Start Menu\\Programs\\Startup"),
-            "folder_common",
-        ));
+    if let Ok(pd) = crate::statestore::program_data_dir() {
+        v.push((pd.join(STARTUP), "folder_common"));
     }
     v
 }
@@ -239,17 +238,30 @@ pub fn toggle(scope: String, name: String, enable: bool) -> Result<Value, String
             reverted_items: 0,
             untrusted: false,
         })?;
-        let (key, _) = hive(root)
+        let written = hive(root)
             .create_subkey(approved)
-            .map_err(|e| format!("open StartupApproved: {e}"))?;
-        key.set_raw_value(
-            &name,
-            &RegValue {
-                bytes,
-                vtype: winreg::enums::RegType::REG_BINARY,
-            },
-        )
-        .map_err(|e| format!("set state: {e}"))?;
+            .map_err(|e| format!("open StartupApproved: {e}"))
+            .and_then(|(key, _)| {
+                key.set_raw_value(
+                    &name,
+                    &RegValue {
+                        bytes,
+                        vtype: winreg::enums::RegType::REG_BINARY,
+                    },
+                )
+                .map_err(|e| format!("set state: {e}"))
+            });
+        if let Err(e) = written {
+            // Nothing was written: close the entry so it is neither shown as
+            // an unfinished change nor offered for undo.
+            let _ = crate::safety::with_journal(|entries| {
+                if let Some(entry) = entries.iter_mut().find(|entry| entry.id == entry_id) {
+                    entry.reverted = true;
+                }
+                Ok(())
+            });
+            return Err(e);
+        }
         let changed = approved_state(root, approved, &name) == enable;
         crate::safety::with_journal(|entries| {
             let entry = entries

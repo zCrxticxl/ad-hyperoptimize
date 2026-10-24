@@ -46,6 +46,8 @@ Severity:
 | `gameboost.rs` | 650 | reviewed |
 | `uninstaller.rs` | 640 | reviewed |
 | `cleanup.rs` | 600 | reviewed |
+| `security.rs` | 490 | reviewed |
+| `startup.rs` | 285 | reviewed |
 
 ## Findings
 
@@ -97,3 +99,7 @@ Severity:
 | 44 | `regclean.rs:expand_env`, `diskanalyzer.rs:scan_temp_age` | Low | These also read paths from the process environment of the elevated app. Effect is limited to scan results: deletion needs an explicit selection, regclean exports a backup first, the temp scan is read-only. | open (low) |
 | 45 | `cleanup.rs:cat_paths` | **High** | **Elevated deletion in a folder chosen by user-level code.** "User Temp" cleaned `std::env::temp_dir()` (`%TEMP%`), "Windows Temp"/the update cache cleaned `%WINDIR%\…`, both from the inherited environment. `HKCU\Environment` can be written by any process of the user, and Explorer passes it to the app. With `TEMP=C:\Windows\System32`, a click on "User Temp" deleted every unlocked file older than 24 h there, with admin rights. `delete_file_under` only checks "inside the root", and the root itself was the manipulated value. | fixed: machine roots from `GetWindowsDirectory` / HKLM (`program_data_dir`); per-user roots must canonicalize to a folder strictly inside the account's profile (`FOLDERID_Profile`, not redirectable via variables) and must not be a protected location. A TEMP deliberately moved outside the profile is no longer cleaned (fails closed). Tests `per_user_roots_must_stay_inside_the_profile`, `every_category_root_is_classified` |
 | 46 | `cleanup.rs:safe_delete` | Info | Checked: open by handle with `FILE_FLAG_OPEN_REPARSE_POINT`, plain single-link file, final path strictly under the canonical root, delete on the same handle. Solid against junction swaps. | ok |
+| 47 | `security.rs:hosts_path` | Medium | The hosts path was built from `%WINDIR%` of the inherited environment. The elevated app read, backed up and **rewrote** `<WINDIR>\System32\drivers\etc\hosts`. Through a junction in a user-writable `WINDIR` that is a write to a file of the caller's choice, and the page showed foreign hosts entries. | fixed: `ps::system_dir()` (GetWindowsDirectory) |
+| 48 | `security.rs:disable/remove_unsigned_driver` | Medium | The device ID came from the renderer and went to `pnputil /disable-device` or `/remove-device` unchecked. Any device could be disabled or removed with admin rights, including the boot disk controller. Other modules (regclean, uninstaller, MSI) compare with a fresh scan. | fixed: the ID must be an unsigned driver in a fresh `unsigned_drivers()` scan; `enable` (the undo) stays unrestricted. Test `only_scanned_unsigned_devices_can_be_targeted` |
+| 49 | `startup.rs:startup_folders` | Low | Startup folders came from `%APPDATA%`/`%ProgramData%` of the inherited environment; listing and the existence check for HKLM toggles followed a foreign folder. | fixed: known-folder API / HKLM |
+| 50 | `startup.rs:toggle`, `run_key_entries` | Low | 1) If writing the StartupApproved value failed after the journal append, an entry remained that the health check reported as "change did not finish", although nothing was changed. 2) One non-string value in a Run key discarded the whole listing of that key. | fixed: entry is closed when the write fails; non-string values are skipped |
