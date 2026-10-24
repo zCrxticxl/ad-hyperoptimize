@@ -36,6 +36,8 @@ Severity:
 | `safety.rs` | 500 | reviewed |
 | `optimizer.rs` | 1830 | reviewed |
 | `optregistry.rs` | 589 | reviewed |
+| `privacy.rs` | 795 | reviewed |
+| `debloater.rs` | 940 | reviewed |
 
 ## Findings
 
@@ -64,3 +66,6 @@ Severity:
 | 21 | `optimizer.rs:apply` | Low | When the user asked for a restore point and Windows created none (and no recent one exists), the one-click apply still runs. The result shows the failed restore point; the journal Undo stays available. | open: decide whether a failed restore point should stop the apply |
 | 22 | `tweaks.rs:may_help_performance` | Low | `performancePotential` in `list_with_status` marked tweaks as having "measurable performance potential" that `optregistry` classifies as retired or NoProvenBenefit (`mmcss_gaming`, `ntfs_8dot3_off`, `svc_maps_off`, `transparency_off`, …). No frontend reads it. | fixed: removed; the High-risk assertion kept as its own test |
 | 23 | `optregistry.rs` | Info | Checked: every catalog id has exactly one entry; no NoProvenBenefit/Outdated/Harmful/Unverified entry is recommended or one-click; one-click never needs a restart. The `nagle_off` text says Windows does not read `TCPNoDelay`, while the catalog rationale says games set `TCP_NODELAY` themselves. Both lead to "no effect"; the registry claim is not verified here. | ok / note |
+| 24 | `privacy.rs:apply` | Medium | When the apply script or the read-back check failed, nothing was rolled back. The script can already have changed values or stopped/disabled the service. The entry stayed open as "did not finish"; the tweak engine and the Debloater roll back in that case. | fixed: `revert_entry` restores the captured originals; the message says whether the rollback was complete (restore token otherwise) |
+| 25 | `privacy.rs:apply` | Low | No check for an already open entry: a second apply captures the tweak's own values, so the first Undo restores those and only the second restores the original. The tweak engine refuses or reports `already_applied` instead. | open |
+| 26 | `debloater.rs:capture_state` | **High** | **Cause of the failing Cortana reset.** `$out \| ConvertTo-Json` writes a single captured item as a bare object, not as a one-element array. That affects every tweak with exactly one value or only a service: `cortana_off`, `telemetry_off`, `advertising_id`, `location_off`, `feedback_off`, `taskbar_widgets_off`, `diagtrack_stop`, `error_reporting_off`. `restore_script` only read arrays and produced an empty script, so:<br>• Revert ran the guessed `undo` instead of the captured original (location set to `Allow`, ad ID to `1`, …). For Cortana the guess `Remove-ItemProperty … -EA SilentlyContinue` fails once the value is gone (e.g. after the Optimize reset); `powershell -Command` then exits 1, matching the report.<br>• The rollback of a failed apply reported "rolled back" without restoring anything.<br>• Migration (`state_is_valid`) discarded these files. | fixed: capture writes `ConvertTo-Json -InputObject @($out)` (always an array); existing files with a bare object are read as one item. Test `single_item_state_restores_exactly`. PowerShell behaviour still to be confirmed on Windows. |

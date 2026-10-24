@@ -503,6 +503,18 @@ fn state_path(id: &str) -> Result<std::path::PathBuf, String> {
         .join(format!("{id}.json")))
 }
 
+/// The captured items of a state file. `$out | ConvertTo-Json` wrote a
+/// single captured item as a bare object instead of a one-element array;
+/// files written that way (every tweak with one value or only a service)
+/// must still restore exactly instead of falling back to the guessed `undo`.
+fn state_items(state: &serde_json::Value) -> Vec<&serde_json::Value> {
+    match state {
+        serde_json::Value::Array(items) => items.iter().collect(),
+        serde_json::Value::Object(_) => vec![state],
+        _ => Vec::new(),
+    }
+}
+
 /// A migrated legacy state file is accepted only if every captured item is
 /// one this tweak's catalog entry declares (statestore.rs): restore_script
 /// would otherwise write attacker-chosen registry values with admin rights.
@@ -510,18 +522,20 @@ pub(crate) fn state_is_valid(id: &str, state: &serde_json::Value) -> bool {
     let Some(t) = TWEAKS.iter().find(|t| t.id == id) else {
         return false;
     };
-    let Some(items) = state.as_array() else {
+    if !(state.is_array() || state.is_object()) {
         return false;
-    };
-    items.iter().all(|it| match it["kind"].as_str() {
-        Some("reg") => t.capture.iter().any(|(root, path, name)| {
-            it["root"].as_str() == Some(*root)
-                && it["path"].as_str() == Some(*path)
-                && it["name"].as_str() == Some(*name)
-        }),
-        Some("service") => t.service.is_some() && it["name"].as_str() == t.service,
-        _ => false,
-    })
+    }
+    state_items(state)
+        .iter()
+        .all(|it| match it["kind"].as_str() {
+            Some("reg") => t.capture.iter().any(|(root, path, name)| {
+                it["root"].as_str() == Some(*root)
+                    && it["path"].as_str() == Some(*path)
+                    && it["name"].as_str() == Some(*name)
+            }),
+            Some("service") => t.service.is_some() && it["name"].as_str() == t.service,
+            _ => false,
+        })
 }
 
 /// Capture registry values + service state listed in `t.capture`/`t.service`
@@ -557,7 +571,7 @@ foreach ($i in $items) {{
     }}
 }}
 {svc_block}
-$out | ConvertTo-Json -Compress -Depth 4
+ConvertTo-Json -InputObject @($out) -Compress -Depth 4
 "#
     );
     ps::run_json(&script)
@@ -577,8 +591,8 @@ fn restore_script(state: &serde_json::Value) -> String {
         format!("try {{ {body} }} catch {{ $e += '{what}: ' + $_.Exception.Message }}")
     };
     let mut steps = Vec::new();
-    if let Some(arr) = state.as_array() {
-        for it in arr {
+    {
+        for it in state_items(state) {
             match it["kind"].as_str() {
                 Some("reg") => {
                     let root = q(it["root"].as_str().unwrap_or("HKCU"));
@@ -782,6 +796,28 @@ mod tests {
         assert_eq!(s.matches("try {").count(), 3, "one try per step");
         assert!(s.contains("[Console]::Error.WriteLine"));
         assert_eq!(restore_script(&serde_json::json!([])), "");
+    }
+
+    /// Regression (Cortana reset "exit code 1"): a state with one captured
+    /// value was stored as a bare object, restore_script ignored it and the
+    /// guessed `undo` ran instead.
+    #[test]
+    fn single_item_state_restores_exactly() {
+        let state = serde_json::json!({
+            "kind": "reg", "root": "HKLM",
+            "path": "SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Search",
+            "name": "AllowCortana", "value": null, "isNumber": false
+        });
+        let s = restore_script(&state);
+        assert!(
+            s.contains("Remove-ItemProperty 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Search' 'AllowCortana'"),
+            "{s}"
+        );
+        assert!(state_is_valid("cortana_off", &state));
+        let svc = serde_json::json!({ "kind": "service", "name": "WerSvc", "startType": "Manual", "status": "Stopped" });
+        assert!(restore_script(&svc).contains("Set-Service -Name 'WerSvc' -StartupType Manual"));
+        assert!(state_is_valid("error_reporting_off", &svc));
+        assert!(!state_is_valid("cortana_off", &serde_json::json!("x")));
     }
 
     /// Only parses the generated script (nothing is executed).
