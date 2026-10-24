@@ -15,10 +15,10 @@ const TWEAKS: Partial<Record<Lang, Record<string, TweakOverlay>>> = {
   de: de.tweaks, es: es.tweaks, fr: fr.tweaks, pt: pt.tweaks, pl: pl.tweaks, ru: ru.tweaks, tr: tr.tweaks, sv: sv.tweaks,
 };
 const WARNINGS: Partial<Record<Lang, Record<string, TextOverlay>>> = {
-  es: es.warnings, fr: fr.warnings, pt: pt.warnings, pl: pl.warnings, ru: ru.warnings, tr: tr.warnings, sv: sv.warnings,
+  de: de.warnings, es: es.warnings, fr: fr.warnings, pt: pt.warnings, pl: pl.warnings, ru: ru.warnings, tr: tr.warnings, sv: sv.warnings,
 };
 const RISKS: Partial<Record<Lang, Record<string, TextOverlay>>> = {
-  es: es.risks, fr: fr.risks, pt: pt.risks, pl: pl.risks, ru: ru.risks, tr: tr.risks, sv: sv.risks,
+  de: de.risks, es: es.risks, fr: fr.risks, pt: pt.risks, pl: pl.risks, ru: ru.risks, tr: tr.risks, sv: sv.risks,
 };
 
 // Tweak catalog entries (tweaks.rs + gputweaks.rs), keyed by tweak id.
