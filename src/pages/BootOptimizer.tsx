@@ -33,7 +33,7 @@ function BootChart({ events, logWasDisabled }: { events: BootEvent[]; logWasDisa
     catch { return iso; }
   };
   const rating = (ms: number) => {
-    if (ms < 0)      return { label: t("ratingUnknown"), color: "var(--muted)" };
+    if (ms <= 0)     return { label: t("ratingUnknown"), color: "var(--muted)" };
     if (ms < 15_000) return { label: t("ratingExcellent"), color: "var(--green)" };
     if (ms < 25_000) return { label: t("ratingGood"), color: "#22b8cf" };
     if (ms < 45_000) return { label: t("ratingMedium"), color: "var(--yellow)" };
@@ -238,7 +238,7 @@ export default function BootOptimizer({ admin }: { admin: boolean }) {
 
   const rating = useMemo(() => {
     const ms = data?.lastBootMs ?? -1;
-    if (ms < 0)      return { label: t("ratingUnknown"), color: "var(--muted)" };
+    if (ms <= 0)     return { label: t("ratingUnknown"), color: "var(--muted)" };
     if (ms < 15_000) return { label: t("ratingExcellent"), color: "var(--green)" };
     if (ms < 25_000) return { label: t("ratingGood"), color: "#22b8cf" };
     if (ms < 45_000) return { label: t("ratingMedium"), color: "var(--yellow)" };

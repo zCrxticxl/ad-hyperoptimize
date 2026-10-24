@@ -80,7 +80,7 @@ export const api = {
   gameboostKillBackground: (pids: number[]) => invoke<string>("cmd_gameboost_kill_background", { pids }),
   gameboostStart: (pid: number) => invoke<string>("cmd_gameboost_start", { pid }),
   gameboostStop: () => invoke<string>("cmd_gameboost_stop"),
-  gameboostGetStatus: () => invoke<number | null>("cmd_gameboost_get_status"),
+  gameboostGetStatus: () => invoke<{ pid: number | null; active: boolean }>("cmd_gameboost_get_status"),
   quickBoostStart: (processName: string) => invoke<any>("cmd_gameboost_quick_boost", { processName }),
   quickBoostRevert: (restoreToken: string) => invoke<any>("cmd_gameboost_quick_boost_revert", { restoreToken }),
   // hosts
@@ -153,7 +153,7 @@ export const api = {
   diskTempAge: () => invoke<any>("cmd_disk_temp_age"),
   diskDelete: (paths: string[]) => invoke<any>("cmd_disk_delete", { paths }),
   diskMove: (paths: string[], destDir: string) => invoke<any>("cmd_disk_move", { paths, destDir }),
-  diskOrganizePreview: (folder: string, recurse: boolean) => invoke<any>("cmd_disk_organize_preview", { folder, recurse }),
+  diskOrganizePreview: (folder: string) => invoke<any>("cmd_disk_organize_preview", { folder }),
   diskOrganizeApply: (items: any[]) => invoke<any>("cmd_disk_organize_apply", { items }),
   schedTasksList: () => invoke<any>("cmd_schedtasks_list"),
   schedTaskToggle: (path: string, name: string, enable: boolean) =>

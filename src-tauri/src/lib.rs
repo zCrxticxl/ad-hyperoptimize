@@ -846,9 +846,12 @@ async fn cmd_gameboost_stop(state: State<'_, AppState>) -> Result<String, String
     Ok(r)
 }
 
+/// `active` also covers a boost started before an app restart, whose PID is
+/// no longer known; without it the page offered no way to stop that boost.
 #[tauri::command]
-fn cmd_gameboost_get_status(state: State<'_, AppState>) -> Option<u32> {
-    *state.boosted_pid.lock().unwrap_or_else(|e| e.into_inner())
+fn cmd_gameboost_get_status(state: State<'_, AppState>) -> Value {
+    let pid = *state.boosted_pid.lock().unwrap_or_else(|e| e.into_inner());
+    serde_json::json!({ "pid": pid, "active": pid.is_some() || gameboost::boost_active() })
 }
 
 #[tauri::command(async)]
@@ -980,8 +983,8 @@ async fn cmd_regclean_restore(backup_path: String) -> Result<Value, String> {
 
 // ---- disk organizer ----
 #[tauri::command(async)]
-async fn cmd_disk_organize_preview(folder: String, recurse: bool) -> Value {
-    tauri::async_runtime::spawn_blocking(move || diskanalyzer::organize_preview(folder, recurse))
+async fn cmd_disk_organize_preview(folder: String) -> Value {
+    tauri::async_runtime::spawn_blocking(move || diskanalyzer::organize_preview(folder))
         .await
         .unwrap_or_default()
 }

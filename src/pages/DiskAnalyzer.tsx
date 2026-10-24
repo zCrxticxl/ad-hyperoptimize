@@ -59,7 +59,10 @@ function ActionBar({ selection, selectionSize, drives, currentRoot, onClear, onD
     setBusy(true);
     try {
       const r = await api.diskDelete([...selection]);
-      setResult(`✔ ${r.deleted} ${t("diskDeleted")}${r.failed ? `, ${r.failed} ${t("diskErrors")}` : ""}`);
+      // A refusal (protected path, junction) or a locked file must not be
+      // reported as success: show the first reason, red when nothing went.
+      const firstErr = r.errors?.[0] ? ` (${r.errors[0]})` : "";
+      setResult(`${r.deleted ? "✔" : "✘"} ${r.deleted} ${t("diskDeleted")}${r.failed ? `, ${r.failed} ${t("diskErrors")}${firstErr}` : ""}`);
       onDeleted();
       onClear();
     } catch (e: any) {
@@ -76,7 +79,8 @@ function ActionBar({ selection, selectionSize, drives, currentRoot, onClear, onD
     setBusy(true);
     try {
       const r = await api.diskMove([...selection], destination);
-      setResult(`✔ ${r.moved} ${t("diskMoved")}${r.failed ? `, ${r.failed} ${t("diskErrors")}` : ""}`);
+      const firstErr = r.errors?.[0] ? ` (${r.errors[0]})` : "";
+      setResult(`${r.moved ? "✔" : "✘"} ${r.moved} ${t("diskMoved")}${r.failed ? `, ${r.failed} ${t("diskErrors")}${firstErr}` : ""}`);
       onMoved();
       onClear();
     } catch (e: any) {
@@ -593,13 +597,14 @@ const CAT_COLORS: Record<string, string> = {
 
 
 type OrgItem = { src: string; dest: string; name: string; size: number; sizeFmt: string; cat: string; catFolder: string; icon: string };
-type OrgPreview = { items: OrgItem[]; total_size: number; total_size_fmt: string };
+type OrgPreview = { items: OrgItem[] };
 
 // ─── Organize Tab ─────────────────────────────────────────────────────────────
 
 function OrganizeTab() {
   const { t } = useLang();
-  const [root, setRoot]         = useState("C:\\Users");
+  // No default: the user names the folder whose top-level files are sorted.
+  const [root, setRoot]         = useState("");
   const [preview, setPreview]   = useState<OrgPreview | null>(null);
   const [busy, setBusy]         = useState(false);
   const [log, setLog]           = useState<{ msg: string; ok: boolean; errors: string[] } | null>(null);
@@ -608,7 +613,7 @@ function OrganizeTab() {
   const loadPreview = async () => {
     setPreview(null);
     setSelected(new Set());
-    setPreview(await api.diskOrganizePreview(root, true));
+    setPreview(await api.diskOrganizePreview(root.trim()));
   };
 
   const doPreview = async () => {
@@ -658,7 +663,7 @@ function OrganizeTab() {
           placeholder={t("diskOrganizeFolder")}
           style={{ flex: 1, padding: "7px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg2)", color: "var(--text)", fontSize: 13 }}
         />
-        <button className="btn small" onClick={doPreview} disabled={busy}>
+        <button className="btn small" onClick={doPreview} disabled={busy || !root.trim()}>
           {busy ? <Spinner /> : t("diskOrganizePreview")}
         </button>
       </div>
@@ -677,7 +682,7 @@ function OrganizeTab() {
       {preview && (
         <>
           <div className="row" style={{ justifyContent: "space-between", marginBottom: 8 }}>
-            <span className="muted" style={{ fontSize: 13 }}>{preview.items.length} {t("diskFilesWord")} · {preview.total_size_fmt}</span>
+            <span className="muted" style={{ fontSize: 13 }}>{preview.items.length} {t("diskFilesWord")} · {fmtBytes(preview.items.reduce((a, it) => a + (it.size || 0), 0))}</span>
             <div className="row" style={{ gap: 8 }}>
               <button className="btn small ghost" onClick={toggleAll}>
                 {selected.size === preview.items.length ? t("diskDeselectAll") : t("diskSelectAll")}

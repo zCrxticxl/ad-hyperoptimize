@@ -338,6 +338,12 @@ fn read_boost_state() -> Option<BoostState> {
     Some(parse_boost_state(&v))
 }
 
+/// A boost whose pre-boost state is still on disk, also one started before
+/// the app was restarted.
+pub fn boost_active() -> bool {
+    boost_state_path().is_ok_and(|p| p.exists())
+}
+
 fn remove_boost_state() {
     if let Ok(path) = boost_state_path() {
         let _ = std::fs::remove_file(path);

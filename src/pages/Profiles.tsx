@@ -4,7 +4,8 @@ import { Card, Badge, Spinner } from "../components/ui";
 import { useLang } from "../i18n";
 
 function delta(before?: number, after?: number) {
-  if (!before || !after || before <= 0) return null;
+  // The disk benchmark reports -1 when it could not run: no delta then.
+  if (!before || !after || before <= 0 || after <= 0) return null;
   const pct = ((after - before) / before) * 100;
   const color = Math.abs(pct) < 3 ? "var(--muted)" : pct > 0 ? "var(--green)" : "var(--red)";
   return (

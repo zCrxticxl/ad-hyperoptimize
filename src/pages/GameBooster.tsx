@@ -12,6 +12,7 @@ export default function GameBooster({ admin }: { admin: boolean }) {
   const [confirmKill, setConfirmKill] = useState(false);
   const [loading, setLoading]   = useState(true);
   const [boosted, setBoosted]   = useState<number | null>(null);
+  const [boostActive, setBoostActive] = useState(false);
   const [busy, setBusy]         = useState(false);
   const [log, setLog]           = useState("");
   const [qbToken, setQbToken]   = useState<Record<number, string>>({});
@@ -30,7 +31,8 @@ export default function GameBooster({ admin }: { admin: boolean }) {
       ]);
       setGames(g.games ?? []);
       setBg(b.procs ?? []);
-      setBoosted(status ?? null);
+      setBoosted(status?.pid ?? null);
+      setBoostActive(!!status?.active);
     } catch (e: any) {
       setLoadErr(String(e));
     } finally { setLoading(false); }
@@ -121,6 +123,7 @@ export default function GameBooster({ admin }: { admin: boolean }) {
                 onClick={() => act(async () => {
                   const r = await api.gameboostStart(g.Id);
                   setBoosted(g.Id);
+                  setBoostActive(true);
                   refresh();
                   return r;
                 })}
@@ -134,6 +137,7 @@ export default function GameBooster({ admin }: { admin: boolean }) {
                 onClick={() => act(async () => {
                   const r = await api.gameboostStop();
                   setBoosted(null);
+                  setBoostActive(false);
                   refresh();
                   return r;
                 })}
@@ -162,13 +166,14 @@ export default function GameBooster({ admin }: { admin: boolean }) {
         ))}
         <div className="row" style={{ marginTop: 10, gap: 8 }}>
           <button className="btn small ghost" onClick={refresh} disabled={loading}>↺ {t("gameboostRefresh")}</button>
-          {boosted !== null && (
+          {boostActive && (
             <button
               className="btn small ghost danger"
               disabled={busy}
               onClick={() => act(async () => {
                 const r = await api.gameboostStop();
                 setBoosted(null);
+                setBoostActive(false);
                 return r;
               })}
             >

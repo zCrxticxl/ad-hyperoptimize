@@ -981,40 +981,38 @@ const CATEGORIES: &[Category] = &[
     },
 ];
 
-pub fn organize_preview(folder: String, recurse: bool) -> Value {
-    let root = PathBuf::from(&folder);
-    let cat_folder_names: Vec<String> =
-        CATEGORIES.iter().map(|c| c.folder.to_lowercase()).collect();
+/// Target of `src` (`<folder>\<name>`): `<folder>\<category>\<name>`, or
+/// None when the extension has no category. String-based on `\\` so the
+/// same rule holds in unit tests and at runtime.
+fn organize_dest(src: &str) -> Option<String> {
+    let (parent, name) = src.rsplit_once('\\')?;
+    if parent.is_empty() || name.is_empty() {
+        return None;
+    }
+    let ext = name.rsplit_once('.')?.1.to_lowercase();
+    let cat = CATEGORIES.iter().find(|c| c.exts.contains(&ext.as_str()))?;
+    Some(format!("{parent}\\{}\\{name}", cat.folder))
+}
 
-    let file_paths: Vec<PathBuf> = if recurse {
-        walk(&root)
-            .into_iter()
-            .filter(|fi| {
-                // exclude files already inside one of our category subfolders
-                !cat_folder_names.iter().any(|cf| {
-                    fi.path
-                        .components()
-                        .any(|c| c.as_os_str().to_string_lossy().to_lowercase() == *cf)
-                })
-            })
-            .map(|fi| fi.path)
-            .collect()
-    } else {
-        std::fs::read_dir(&root)
-            .ok()
-            .into_iter()
-            .flatten()
-            .flatten()
-            .filter_map(|e| {
-                let m = e.path().symlink_metadata().ok()?;
-                if m.is_file() {
-                    Some(e.path())
-                } else {
-                    None
-                }
-            })
-            .collect()
-    };
+/// Only the files directly in `folder` are offered. Walking subfolders
+/// pulled whole program folders (AppData\Local\Programs, game installs)
+/// into the list and flattened them into one category folder.
+pub fn organize_preview(folder: String) -> Value {
+    let root = PathBuf::from(&folder);
+    let file_paths: Vec<PathBuf> = std::fs::read_dir(&root)
+        .ok()
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| {
+            let m = e.path().symlink_metadata().ok()?;
+            if m.is_file() {
+                Some(e.path())
+            } else {
+                None
+            }
+        })
+        .collect();
 
     let mut items: Vec<Value> = Vec::new();
     let mut uncategorized: Vec<Value> = Vec::new();
@@ -1034,7 +1032,9 @@ pub fn organize_preview(folder: String, recurse: bool) -> Value {
         let size = path.metadata().map(|m| m.len()).unwrap_or(0);
 
         if let Some(cat) = CATEGORIES.iter().find(|c| c.exts.contains(&ext.as_str())) {
-            let dest = format!("{}\\{}\\{}", folder, cat.folder, name);
+            let Some(dest) = organize_dest(&path.to_string_lossy()) else {
+                continue;
+            };
             items.push(json!({
                 "src":       path.to_string_lossy(),
                 "dest":      dest,
@@ -1075,8 +1075,20 @@ pub fn organize_apply(items: Vec<Value>) -> Value {
             continue;
         }
 
+        // The target is derived here, not taken from the renderer: a file
+        // only ever moves into a category folder next to it.
+        if organize_dest(src).as_deref() != Some(dest) {
+            errors.push(format!(
+                "{src}: destination does not match its category folder"
+            ));
+            continue;
+        }
         let src_path = PathBuf::from(src);
         let dest_path = PathBuf::from(dest);
+        if !src_path.symlink_metadata().is_ok_and(|m| m.is_file()) {
+            errors.push(format!("{src}: not a file"));
+            continue;
+        }
 
         if is_protected(&src_path) || is_protected(&dest_path) {
             errors.push(format!("{}: path is protected", src));
@@ -1139,6 +1151,18 @@ pub fn organize_apply(items: Vec<Value>) -> Value {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn organize_targets_stay_next_to_the_file() {
+        use super::organize_dest;
+        assert_eq!(
+            organize_dest(r"D:\Downloads\clip.MP4").as_deref(),
+            Some(r"D:\Downloads\Videos\clip.MP4")
+        );
+        assert_eq!(organize_dest(r"D:\Downloads\readme"), None);
+        assert_eq!(organize_dest(r"D:\Downloads\data.unknownext"), None);
+        assert_eq!(organize_dest("clip.mp4"), None);
+    }
+
     use super::{is_protected, is_protected_dest};
     use std::path::Path;
 
