@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { api } from "../api";
-import { Card, Spinner } from "../components/ui";
+import { Card, Spinner, Switch } from "../components/ui";
 import { useLang } from "../i18n";
 
 export default function CtxMenuCleaner({ admin }: { admin: boolean }) {
@@ -82,13 +82,6 @@ export default function CtxMenuCleaner({ admin }: { admin: boolean }) {
               >
                 <div style={{ flex: 1 }}>
                   <div className="row" style={{ alignItems: "center", gap: 8, marginBottom: 2 }}>
-                    <span style={{
-                      color: e.enabled ? "var(--green)" : "var(--red)",
-                      fontWeight: 700,
-                      fontSize: 12,
-                    }}>
-                      {e.enabled ? `● ${t("ctxmenuOn")}` : `● ${t("ctxmenuOff")}`}
-                    </span>
                     <b style={{ fontSize: 13 }}>{e.name}</b>
                     {e.admin && <span className="muted" style={{ fontSize: 10 }}>[{t("ctxmenuAdminTag")}]</span>}
                     {e.bulk && <span className="muted" style={{ fontSize: 10 }}>[{t("ctxmenuBulkTag")}]</span>}
@@ -98,14 +91,13 @@ export default function CtxMenuCleaner({ admin }: { admin: boolean }) {
                 </div>
 
                 {e.present && (
-                  <button
-                    className={`btn small ${e.enabled ? "ghost" : ""}`}
-                    style={{ flexShrink: 0 }}
-                    disabled={busy === e.path || (e.admin && !admin)}
-                    onClick={() => toggle(e, !e.enabled)}
-                  >
-                    {busy === e.path ? "…" : e.enabled ? t("disable") : t("enable")}
-                  </button>
+                  <Switch
+                    on={e.enabled}
+                    label={e.name}
+                    busy={busy === e.path}
+                    disabled={e.admin && !admin}
+                    onChange={(next) => toggle(e, next)}
+                  />
                 )}
               </div>
             ))}

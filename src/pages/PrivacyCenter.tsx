@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
-import { Card, Spinner, Badge } from "../components/ui";
+import { Card, Spinner, Badge, Switch } from "../components/ui";
 import { useLang, TKey } from "../i18n";
 import { localizeCatalog } from "../localize";
 import { useFeatureFocus } from "../hooks/useFeatureFocus";
@@ -220,21 +220,16 @@ export default function PrivacyCenter({ admin, focusId }: { admin: boolean; focu
                       {tw.name}
                     </span>
                     <Badge cls={RISK_CLS[tw.risk]}>{tw.risk}</Badge>
-                    <Badge cls={tw.applied ? "st-applied" : "st-unknown"}>
-                      {tw.applied ? t("active") : t("inactive")}
-                    </Badge>
                     <button className="btn small ghost" onClick={() => setOpenId(isOpen ? null : tw.id)}>
                       {isOpen ? "▲" : "▼"}
                     </button>
-                    {tw.applied && tw.canRevert ? (
-                      <button className="btn small ghost" disabled={!!busy || !admin} onClick={() => doRevert(tw)}>
-                        {isBusy ? <Spinner /> : t("revert")}
-                      </button>
-                    ) : !tw.applied ? (
-                      <button className="btn small" disabled={!!busy || !admin} onClick={() => doApply(tw)}>
-                        {isBusy ? <Spinner /> : t("privActivate")}
-                      </button>
-                    ) : null}
+                    <Switch
+                      on={tw.applied}
+                      label={tw.name}
+                      busy={isBusy}
+                      disabled={!!busy || !admin || (tw.applied && !tw.canRevert)}
+                      onChange={(next) => (next ? doApply(tw) : doRevert(tw))}
+                    />
                   </div>
                   {isOpen && (
                     <div className="tweak-detail">
@@ -256,12 +251,14 @@ export default function PrivacyCenter({ admin, focusId }: { admin: boolean; focu
               <div className="tweak" key={tw.id} data-focus-id={tw.id}>
                 <div className="tweak-head">
                   <span className="tweak-name">{tw.name}</span>
-                  <Badge cls="st-partial">{t("active")}</Badge>
-                  {tw.canRevert && (
-                    <button className="btn small ghost" disabled={!!busy || !admin} onClick={() => doRevert(tw)}>
-                      {busy === tw.id ? <Spinner /> : t("wdReset")}
-                    </button>
-                  )}
+                  <Switch
+                    on
+                    label={tw.name}
+                    title={t("wdReset")}
+                    busy={busy === tw.id}
+                    disabled={!!busy || !admin || !tw.canRevert}
+                    onChange={() => doRevert(tw)}
+                  />
                 </div>
                 <div className="tweak-detail">
                   <p>{reason(tw.id, tw.retiredReason)}</p>

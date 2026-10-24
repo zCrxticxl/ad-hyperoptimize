@@ -5,11 +5,20 @@ use serde_json::{json, Value};
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
+/// Date Microsoft stamps on every inbox driver so that any vendor driver
+/// outranks it; it says nothing about the driver's age.
+const INBOX_DRIVER_DATE: &str = "2006-06-21";
+
 /// Windows inbox/system drivers, date is meaningless, they're managed by WU.
-fn is_inbox(manufacturer: &str, device_name: &str) -> bool {
+/// The provider is not localized ("Microsoft"); the manufacturer is
+/// ("(Standard)", "(Standardsystemgeräte)", ...).
+fn is_inbox(provider: &str, date: &str, manufacturer: &str, device_name: &str) -> bool {
     let m = manufacturer.to_lowercase();
     let n = device_name.to_lowercase();
-    m == "microsoft"
+    provider.eq_ignore_ascii_case("microsoft")
+        || date == INBOX_DRIVER_DATE
+        || m == "microsoft"
+        || m.starts_with("(standard")
         || m.starts_with("(standard ")
         || n.contains("audio endpoint")
         || n.contains("system firmware")
@@ -108,7 +117,7 @@ $drivers = Get-WmiObject Win32_PnPSignedDriver -ErrorAction SilentlyContinue |
     Where-Object { $_.DeviceName -and $_.DriverVersion -and
                    $_.DeviceClass -notmatch '^(Processor|System|Computer|Volume|SCSIAdapter)$' -and
                    $_.DeviceName -notmatch '^(Remote|Composite|Microsoft|Generic|Unknown)' } |
-    Select-Object DeviceName, DeviceClass, DriverVersion, Manufacturer, IsSigned,
+    Select-Object DeviceName, DeviceClass, DriverVersion, Manufacturer, DriverProviderName, IsSigned,
                   @{n='dateStr';e={
                       if($_.DriverDate) {
                           [Management.ManagementDateTimeConverter]::ToDateTime($_.DriverDate).ToString('yyyy-MM-dd')
@@ -135,7 +144,9 @@ $drivers | ConvertTo-Json -Compress -Depth 3
             let cls = d["DeviceClass"].as_str().unwrap_or("").to_string();
             let mfr = d["Manufacturer"].as_str().unwrap_or("").to_string();
             let name = d["DeviceName"].as_str().unwrap_or("").to_string();
-            let inbox = is_inbox(&mfr, &name);
+            let provider = d["DriverProviderName"].as_str().unwrap_or("");
+            let date = d["dateStr"].as_str().unwrap_or("");
+            let inbox = is_inbox(provider, date, &mfr, &name);
             let info = driver_info(&cls, &mfr);
             d["wingetId"] = json!(info.winget_id);
             d["vendorUrl"] = json!(info.vendor_url);
@@ -314,6 +325,42 @@ pub fn open_windows_update() -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn inbox_drivers_are_recognized_on_localized_systems() {
+        // From a German Windows 11: TPM, SATA AHCI and WinUsb are inbox
+        // drivers with the fixed 2006-06-21 date.
+        assert!(super::is_inbox(
+            "Microsoft",
+            "2006-06-21",
+            "(Standard)",
+            "Trusted Platform Module 2.0"
+        ));
+        assert!(super::is_inbox(
+            "",
+            "2006-06-21",
+            "Standard SATA AHCI Controller",
+            "Standard SATA AHCI Controller"
+        ));
+        assert!(super::is_inbox(
+            "Microsoft",
+            "2024-01-01",
+            "WinUsb Device",
+            "WinUsb Device"
+        ));
+        assert!(!super::is_inbox(
+            "WireGuard LLC",
+            "2021-10-13",
+            "WireGuard LLC",
+            "Tailscale Tunnel"
+        ));
+        assert!(!super::is_inbox(
+            "HyperX",
+            "2023-10-20",
+            "HyperX",
+            "DTS HPXV2 Service for HyperX"
+        ));
+    }
+
     use super::*;
 
     #[test]

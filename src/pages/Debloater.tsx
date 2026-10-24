@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { api } from "../api";
-import { Spinner } from "../components/ui";
+import { Spinner, Switch } from "../components/ui";
 import { HwWarnings } from "../components/HwWarnings";
 import { useLang, TKey } from "../i18n";
 import { localizeCatalog } from "../localize";
@@ -279,14 +279,6 @@ export default function Debloater({ admin, focusId }: { admin: boolean; focusId?
             </div>
             {items.map(tw => (
               <div key={tw.id} data-focus-id={tw.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 0", borderBottom: "1px solid var(--border)", opacity: busy[tw.id] ? 0.7 : 1 }}>
-                <button
-                  onClick={() => toggle(tw)}
-                  disabled={!admin || applyingAll || !!busy[tw.id]}
-                  aria-label={tw.name}
-                  style={{ width: 22, height: 22, borderRadius: 5, flexShrink: 0, border: `2px solid ${tw.applied ? "var(--green)" : "var(--border)"}`, background: tw.applied ? "var(--green)" : "transparent", color: "#fff", fontSize: 12, display: "flex", alignItems: "center", justifyContent: "center", cursor: admin ? "pointer" : "not-allowed" }}
-                >
-                  {busy[tw.id] ? <Spinner /> : tw.applied ? "✓" : ""}
-                </button>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontWeight: 600, fontSize: 13 }}>{tw.name}</div>
                   <div className="muted" style={{ fontSize: 11 }}>{tw.desc}</div>
@@ -296,9 +288,13 @@ export default function Debloater({ admin, focusId }: { admin: boolean; focusId?
                     </div>
                   )}
                 </div>
-                <span style={{ fontSize: 11, fontWeight: 600, color: tw.applied ? "var(--green)" : "var(--muted)" }}>
-                  {tw.applied ? t("debloatApplied") : t("debloatNotApplied")}
-                </span>
+                <Switch
+                  on={tw.applied}
+                  label={tw.name}
+                  busy={!!busy[tw.id]}
+                  disabled={!admin || applyingAll}
+                  onChange={() => toggle(tw)}
+                />
               </div>
             ))}
           </div>
@@ -326,9 +322,14 @@ export default function Debloater({ admin, focusId }: { admin: boolean; focusId?
                   </div>
                 )}
               </div>
-              <button className="btn small ghost" onClick={() => toggle(tw)} disabled={!admin || applyingAll || !!busy[tw.id]}>
-                {busy[tw.id] ? <Spinner /> : t("wdReset")}
-              </button>
+              <Switch
+                on
+                label={tw.name}
+                title={t("wdReset")}
+                busy={!!busy[tw.id]}
+                disabled={!admin || applyingAll}
+                onChange={() => toggle(tw)}
+              />
             </div>
           ))}
         </div>

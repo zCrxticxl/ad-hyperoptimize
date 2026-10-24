@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo } from "react";
 import { api } from "../api";
-import { Card, Spinner, Badge } from "../components/ui";
+import { Card, Spinner, Badge, Switch } from "../components/ui";
 import { useLang } from "../i18n";
 import { localizeTweak } from "../localize";
 import { HwWarnings, RiskBadge, RiskNotice } from "../components/HwWarnings";
@@ -287,39 +287,23 @@ export default function GpuTweaks({ admin, focusId }: { admin: boolean; focusId?
                         >
                           {isOpen ? "▲" : "▼"}
                         </button>
-                        {/* Apply / Revert */}
-                        {applied ? (
-                          tw.canRevert ? <button
-                            className="btn small ghost"
-                            disabled={isBusy || blocked || needsAdmin}
-                            onClick={() => doRevert(tw)}
-                            title={blocked ? t("gpuNoKey") : needsAdmin ? t("bootAdminNeeded") : ""}
-                          >
-                            {isBusy ? <Spinner /> : t("bootUndo")}
-                          </button> : <span className="muted" style={{ fontSize: 11 }}>{t("gpuStatusApplied")}</span>
-                        ) : tw.deprecated ? null : awaitingConfirm ? (
-                          <button
-                            className="btn small"
-                            style={{ background: "var(--red)", borderColor: "var(--red)" }}
-                            disabled={isBusy || blocked || needsAdmin}
-                            onClick={() => { setPendingApply(tw.id); setOpen(tw.id); }}
-                            title={t("gpuRiskReviewTitle")}
-                          >
-                            {t("gpuReviewRisk")}
-                          </button>
-                        ) : (
-                          <button
-                            className="btn small"
-                            disabled={isBusy || blocked || needsAdmin}
-                            onClick={() => doApply(tw)}
-                            title={
-                              blocked    ? t("gpuNoKey") :
-                              needsAdmin ? t("bootAdminNeeded") : ""
-                            }
-                          >
-                                                   {isBusy ? <Spinner /> : (pendingApply === tw.id ? `⚠ ${t("applyAnyway")}` : t("apply"))}
-                          </button>
-                        )}
+                        {/* On = applied; off = undo. A tweak with a hardware
+                            danger warning opens the risk review first. */}
+                        {(applied ? tw.canRevert : !tw.deprecated) ? (
+                          <Switch
+                            on={applied}
+                            partial={tw.status === "partial"}
+                            label={tw.name}
+                            busy={isBusy}
+                            disabled={blocked || needsAdmin}
+                            title={blocked ? t("gpuNoKey") : needsAdmin ? t("bootAdminNeeded") : awaitingConfirm ? t("gpuRiskReviewTitle") : ""}
+                            onChange={(next) => {
+                              if (!next) doRevert(tw);
+                              else if (awaitingConfirm) { setPendingApply(tw.id); setOpen(tw.id); }
+                              else doApply(tw);
+                            }}
+                          />
+                        ) : applied ? <span className="muted" style={{ fontSize: 11 }}>{t("gpuStatusApplied")}</span> : null}
                       </div>
                       {isOpen && (
                         <div className="tweak-desc" style={{ marginTop: 6 }}>
@@ -339,7 +323,15 @@ export default function GpuTweaks({ admin, focusId }: { admin: boolean; focusId?
                           )}
                           <RiskNotice id={tw.id} />
                           {pendingApply === tw.id && (
-                            <div style={{ marginTop: 8 }}>
+                            <div className="row" style={{ marginTop: 8, gap: 8 }}>
+                              <button
+                                className="btn small"
+                                style={{ background: "var(--red)", borderColor: "var(--red)" }}
+                                disabled={isBusy || blocked || needsAdmin}
+                                onClick={() => doApply(tw)}
+                              >
+                                {isBusy ? <Spinner /> : `⚠ ${t("applyAnyway")}`}
+                              </button>
                               <button className="btn small ghost" onClick={() => setPendingApply(null)}>
                                 {t("cancel")}
                               </button>

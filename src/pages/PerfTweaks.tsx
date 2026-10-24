@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
-import { Card, Spinner, ErrorBanner } from "../components/ui";
+import { Card, Spinner, ErrorBanner, Switch } from "../components/ui";
 import { HwWarnings, RiskBadge, RiskNotice } from "../components/HwWarnings";
 import { useHwProfile } from "../hooks/useHwProfile";
 import { useLang } from "../i18n";
@@ -177,17 +177,14 @@ function MsiCard({ admin }: { admin: boolean }) {
             <div key={i} className="row" style={{ padding: "6px 0", borderBottom: "1px solid var(--border)", alignItems: "center", gap: 10 }}>
               <span style={{ color: "var(--muted)", fontSize: 11, width: 36, flexShrink: 0 }}>[{d.type}]</span>
               <span style={{ flex: 1 }}>{d.name}</span>
-              <span style={{ color: d.msiEnabled ? "var(--green)" : "var(--red)", fontWeight: 700, fontSize: 12, flexShrink: 0 }}>
-                {d.msiEnabled ? `● ${t("perfMsiOn")}` : `● ${t("perfMsiLine")}`}
-              </span>
               <RiskBadge id="msi_mode_toggle" />
-              <button
-                className={`btn small ${d.msiEnabled ? "ghost" : ""}`}
-                onClick={() => toggle(d)}
+              <Switch
+                on={!!d.msiEnabled}
+                label={`MSI: ${d.name}`}
+                busy={busy === d.regPath}
                 disabled={busy !== null || !admin}
-              >
-                {busy === d.regPath ? "…" : d.msiEnabled ? t("perfDisable") : t("perfMsiEnable")}
-              </button>
+                onChange={() => toggle(d)}
+              />
             </div>
           ))}
           {log && <div className="mono muted" style={{ fontSize: 11, marginTop: 8 }}>⚠ {log}</div>}
@@ -205,7 +202,7 @@ function MsiCard({ admin }: { admin: boolean }) {
 function NetCard({ admin }: { admin: boolean }) {
   const { t } = useLang();
   const [data, setData] = useState<any>(null);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
   const [log, setLog] = useState("");
 
   const NET_PROPS: { key: string; label: string; hint: string; keyword: string; offVal: number; onVal: number }[] = [
@@ -225,19 +222,19 @@ function NetCard({ admin }: { admin: boolean }) {
   useEffect(() => { load(); }, [load]);
   usePerfChanged(load);
 
-  const tweak = async (adapter: string, keyword: string, value: number) => {
-    setBusy(true);
+  const tweak = async (id: string, adapter: string, keyword: string, value: number) => {
+    setBusy(id);
     try { setLog(await api.netTweak(adapter, keyword, value)); notifyPerfChanged(); }
     catch (e: any) { setLog(String(e)); }
-    finally { setBusy(false); }
+    finally { setBusy(null); }
   };
 
   const resetAll = async () => {
     if (!window.confirm(t("perfNetResetConfirm"))) return;
-    setBusy(true);
+    setBusy("all");
     try { setLog(await api.netResetAll()); notifyPerfChanged(); }
     catch (e: any) { setLog(String(e)); }
-    finally { setBusy(false); }
+    finally { setBusy(null); }
   };
 
   const adapters: any[] = data?.adapters ?? [];
@@ -270,32 +267,27 @@ function NetCard({ admin }: { admin: boolean }) {
               </div>
               {NET_PROPS.map((p) => {
                 const raw = a[p.key];
-                const shown = a[`${p.key}Text`] || raw;
                 const unsupported = isUnsupported(raw);
                 const off = isDisabled(raw);
+                const id = `${a.name}|${p.keyword}`;
                 return (
-                  <div key={p.key} className="row" style={{ padding: "5px 0", borderBottom: "1px solid var(--border)", alignItems: "flex-start", gap: 8 }}>
+                  <div key={p.key} className="row" style={{ padding: "6px 0", borderBottom: "1px solid var(--border)", alignItems: "center", gap: 10 }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 13 }}>{p.label}</div>
                       <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>{p.hint}</div>
                     </div>
-                    <span className="muted" style={{ fontSize: 11, minWidth: 70, textAlign: "right", flexShrink: 0 }}>{unsupported ? t("perfUnsupported") : shown}</span>
-                    {!unsupported && (
+                    {unsupported ? (
+                      <span className="muted" style={{ fontSize: 11 }}>{t("perfUnsupported")}</span>
+                    ) : (
                       <>
-                        {/* Neutral: "off" deviates from the driver default and is not
-                            a recommendation (the registry rates these as no proven gain). */}
-                        <span style={{ color: off ? "var(--orange)" : "var(--muted)", fontWeight: 700, fontSize: 11, minWidth: 24 }}>
-                          {off ? "●" : "○"}
-                        </span>
                         <RiskBadge id="net_offload_disable" />
-                        <button
-                          className="btn small ghost"
-                          style={{ minWidth: 70 }}
-                          disabled={busy || !admin}
-                          onClick={() => tweak(a.name, p.keyword, off ? p.onVal : p.offVal)}
-                        >
-                          {off ? t("perfEnable") : t("perfDisable")}
-                        </button>
+                        <Switch
+                          on={!off}
+                          label={p.label}
+                          busy={busy === id}
+                          disabled={busy !== null || !admin}
+                          onChange={(next) => tweak(id, a.name, p.keyword, next ? p.onVal : p.offVal)}
+                        />
                       </>
                     )}
                   </div>
@@ -305,10 +297,10 @@ function NetCard({ admin }: { admin: boolean }) {
           ))}
           {!admin && <div className="muted" style={{ fontSize: 12 }}>⚠ {t("perfAdminRequired")}</div>}
           <div className="row" style={{ gap: 8, marginTop: 10 }}>
-            <button className="btn small ghost" onClick={resetAll} disabled={busy || !admin}>
+            <button className="btn small ghost" onClick={resetAll} disabled={busy !== null || !admin}>
               ↩ {t("perfNetResetAllDefaults")}
             </button>
-            <button className="btn small ghost" onClick={load} disabled={busy}>↺</button>
+            <button className="btn small ghost" onClick={load} disabled={busy !== null}>↺</button>
           </div>
           {log && <div className="mono muted" style={{ fontSize: 11, marginTop: 8 }}>{log}</div>}
         </>
