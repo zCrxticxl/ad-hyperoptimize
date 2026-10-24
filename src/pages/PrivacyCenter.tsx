@@ -13,31 +13,32 @@ type PTweak = {
 
 const RISK_CLS: Record<string, string> = { Low: "risk-Low", Medium: "risk-Medium", High: "risk-High" };
 
-// Keys are backend category names (always German); icons and display labels are translated
+// Keys are the backend category names (privacy.rs, English); icons and display
+// labels are translated here.
 const CAT_ICONS: Record<string, string> = {
-  "Telemetrie": "📡",
-  "Werbung": "📢",
-  "Suche": "🔍",
-  "Aktivitätsverlauf": "📋",
-  "Eingabe": "⌨",
-  "Standort": "📍",
+  "Telemetry": "📡",
+  "Advertising": "📢",
+  "Search": "🔍",
+  "Activity History": "📋",
+  "Input": "⌨",
+  "Location": "📍",
   "Feedback": "💬",
-  "Netzwerk": "🌐",
+  "Network": "🌐",
 };
 
 export default function PrivacyCenter({ admin, focusId }: { admin: boolean; focusId?: string }) {
   const { t, lang } = useLang();
 
-  // Translate backend category names (backend always returns German keys)
+  // Translate backend category names (privacy.rs returns English names).
   const CAT_LABEL: Record<string, string> = {
-    "Telemetrie":       t("catTelemetrie"),
-    "Werbung":          t("catWerbung"),
-    "Suche":            t("catSuche"),
-    "Aktivitätsverlauf":t("catAktivitaet"),
-    "Eingabe":          t("catEingabe"),
-    "Standort":         t("catStandort"),
+    "Telemetry":        t("catTelemetrie"),
+    "Advertising":      t("catWerbung"),
+    "Search":           t("catSuche"),
+    "Activity History": t("catAktivitaet"),
+    "Input":            t("catEingabe"),
+    "Location":         t("catStandort"),
     "Feedback":         t("catFeedback"),
-    "Netzwerk":         t("catNetzwerk"),
+    "Network":          t("catNetzwerk"),
   };
   const [tweaks, setTweaks]   = useState<PTweak[]>([]);
   // Retired items, only present while still active (backend filters).

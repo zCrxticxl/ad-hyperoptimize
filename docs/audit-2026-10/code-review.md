@@ -74,6 +74,7 @@ Severity:
 | `commands.rs`, `main.rs`, `build.rs` | 610 | reviewed |
 | **Rust backend** | | **complete** |
 | `App.tsx`, `main.tsx`, hooks, `api.ts`, `lib/health.ts`, `OptCard`, `RetiredCard`, `Optimize`, `OptimizeMyPc`, `Dashboard`, `SystemCheck` | ~1700 | reviewed |
+| `PrivacyCenter`, `Debloater`, `PerfTweaks` | ~1220 | reviewed |
 
 ## Findings
 
@@ -167,3 +168,7 @@ Severity:
 | 86 | `api.ts` ↔ `lib.rs` | Info | Checked by script: every `invoke` targets a registered command with matching parameter names (camelCase ↔ snake_case). | ok |
 | 87 | `Optimize.tsx` (restore point) | Low | With the admin helper connected but an unelevated UI, the restore-point button is active, but `cmd_create_restore_point` is not routed through the broker and always fails with "Administrator rights required". Only with the `broker` feature (not the default build). | open (broker phase 3) |
 | 88 | `App.tsx` (beginner mode) | Low | "Advanced performance tweaks" (`perftweaks`: page file off, MSI mode, NIC properties, timer task) is marked `basic` and therefore visible in beginner mode, although these are the riskiest actions without a journal (#38). | open: decide |
+| 89 | `PrivacyCenter.tsx` | Low | Category icons/labels were keyed by German names ("Telemetrie", "Werbung", …, comment: "backend always returns German"). `privacy.rs` returns English names, so no category had an icon or a translation. | fixed: keyed by the real backend names |
+| 90 | `PerfTweaks.tsx` NIC card + `perftweaks.rs:net_adapters` | Medium | 1) State came from the **localized** `DisplayValue`; "off" was recognised only by `"0"` or `"disab"`. On German Windows ("Deaktiviert") a disabled adapter showed as on, and the button disabled it again. 2) "Enable" for TCP checksum offload wrote `1` (Tx only) instead of the driver default `3` (Rx & Tx). 3) "Off" was shown in green, as if recommended. | fixed: state from `RegistryValue`, text only for display; `onVal` 3; neutral colour |
+| 91 | `Debloater.tsx` | Info | The "Reset" button actually selects the recommended apps. | fixed (de/en label "Select recommended"); other languages keep "Reset" |
+| 92 | `PerfTweaks.tsx` (timer) | Info | The Windows default 15.6 ms timer resolution is shown in red and 0.5 ms is labelled "gaming", as if the default were a fault. No measured benefit in this app. | open (low): neutral display |

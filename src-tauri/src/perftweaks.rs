@@ -367,10 +367,14 @@ $all = $null
 try { $all = Get-NetAdapter -ErrorAction SilentlyContinue } catch {}
 foreach ($a in $all) {
     $name = $a.Name
+    # State from RegistryValue (locale-independent: "0"/"1"/"3"); the
+    # localized DisplayValue is only shown next to it.
     $kwmap = @{}
+    $txtmap = @{}
     try {
         Get-NetAdapterAdvancedProperty -Name $name -ErrorAction SilentlyContinue | ForEach-Object {
-            $kwmap[$_.RegistryKeyword] = $_.DisplayValue
+            $kwmap[$_.RegistryKeyword] = ($_.RegistryValue -join ',')
+            $txtmap[$_.RegistryKeyword] = $_.DisplayValue
         }
     } catch {}
     $adapters += [PSCustomObject]@{
@@ -382,6 +386,10 @@ foreach ($a in $all) {
         rss         = $kwmap['*RSS']
         tcpOffload  = $kwmap['*TCPChecksumOffloadIPv4']
         lsoV2       = $kwmap['*LsoV2IPv4']
+        intModText     = $txtmap['*InterruptModeration']
+        rssText        = $txtmap['*RSS']
+        tcpOffloadText = $txtmap['*TCPChecksumOffloadIPv4']
+        lsoV2Text      = $txtmap['*LsoV2IPv4']
     }
 }
 if ($adapters.Count -eq 0) { '[]' } else { @($adapters) | ConvertTo-Json -Depth 2 -Compress }

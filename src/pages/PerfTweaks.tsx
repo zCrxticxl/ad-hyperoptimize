@@ -199,7 +199,8 @@ function NetCard({ admin }: { admin: boolean }) {
   const NET_PROPS: { key: string; label: string; hint: string; keyword: string; offVal: number; onVal: number }[] = [
     { key: "intMod",     label: t("perfNetIntMod"),     hint: t("perfNetIntModHint"),     keyword: "*InterruptModeration",    offVal: 0, onVal: 1 },
     { key: "rss",        label: t("perfNetRss"),        hint: t("perfNetRssHint"),        keyword: "*RSS",                     offVal: 0, onVal: 1 },
-    { key: "tcpOffload", label: t("perfNetTcpOffload"), hint: t("perfNetTcpOffloadHint"), keyword: "*TCPChecksumOffloadIPv4", offVal: 0, onVal: 1 },
+    // 3 = Rx & Tx enabled (the driver default); 1 would enable Tx only.
+    { key: "tcpOffload", label: t("perfNetTcpOffload"), hint: t("perfNetTcpOffloadHint"), keyword: "*TCPChecksumOffloadIPv4", offVal: 0, onVal: 3 },
     { key: "lsoV2",      label: t("perfNetLsoV2"),      hint: t("perfNetLsoV2Hint"),      keyword: "*LsoV2IPv4",              offVal: 0, onVal: 1 },
   ];
 
@@ -229,10 +230,11 @@ function NetCard({ admin }: { admin: boolean }) {
   const adapters: any[] = data?.adapters ?? [];
 
   // No value means the adapter does not expose this property: that is
-  // "unsupported", not "off", and must not offer an Enable button.
+  // "unsupported", not "off", and must not offer an Enable button. The value
+  // is the RegistryValue ("0" = off for all four keywords), not the
+  // localized display text ("Deaktiviert" never matched "disab").
   const isUnsupported = (val: string | null | undefined) => val == null || val === "";
-  const isDisabled = (val: string | null | undefined) =>
-    !isUnsupported(val) && (val === "0" || !!val?.toLowerCase().includes("disab"));
+  const isDisabled = (val: string | null | undefined) => !isUnsupported(val) && val === "0";
 
   return (
     <Card title={t("perfNetTitle")}>
@@ -255,6 +257,7 @@ function NetCard({ admin }: { admin: boolean }) {
               </div>
               {NET_PROPS.map((p) => {
                 const raw = a[p.key];
+                const shown = a[`${p.key}Text`] || raw;
                 const unsupported = isUnsupported(raw);
                 const off = isDisabled(raw);
                 return (
@@ -263,10 +266,12 @@ function NetCard({ admin }: { admin: boolean }) {
                       <div style={{ fontSize: 13 }}>{p.label}</div>
                       <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>{p.hint}</div>
                     </div>
-                    <span className="muted" style={{ fontSize: 11, minWidth: 70, textAlign: "right", flexShrink: 0 }}>{unsupported ? t("perfUnsupported") : raw}</span>
+                    <span className="muted" style={{ fontSize: 11, minWidth: 70, textAlign: "right", flexShrink: 0 }}>{unsupported ? t("perfUnsupported") : shown}</span>
                     {!unsupported && (
                       <>
-                        <span style={{ color: off ? "var(--green)" : "var(--muted)", fontWeight: 700, fontSize: 11, minWidth: 24 }}>
+                        {/* Neutral: "off" deviates from the driver default and is not
+                            a recommendation (the registry rates these as no proven gain). */}
+                        <span style={{ color: off ? "var(--orange)" : "var(--muted)", fontWeight: 700, fontSize: 11, minWidth: 24 }}>
                           {off ? "●" : "○"}
                         </span>
                         <RiskBadge id="net_offload_disable" />
