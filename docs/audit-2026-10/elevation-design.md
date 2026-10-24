@@ -263,6 +263,13 @@ In the app:
 2. Optimize: Apply and Undo an admin tweak (e.g. Hibernation), then rescan.
 3. Task Manager shows a second `ad-hyperoptimize.exe` running elevated; it ends with the app or after 15 min idle.
 
+### Windows result (owner, 2026-10-24, at `b7063ef`)
+
+- `--broker-selftest` on Windows 11 25H2 with a real UAC prompt: **"broker selftest: ok"**. Launch, pipe DACL, PID/image checks and the nonce work on real Windows.
+- Gate: `cargo clippy --all-targets -D warnings` with and without `--features broker` clean; `cargo test`: 176 passed, 4 ignored (including the six `broker::pipe` tests).
+- Found while testing: Apply of `hibernate_off` failed with "could not capture the previous state". This is an engine bug, not a broker one. Fixed in the next commit.
+- Still to test in the app with `--features broker`: unlock button, Apply/Undo through the helper.
+
 ### Phase 3, second step: engine and catalog pages routed
 
 All commands that go through the journaled engine or the Privacy/Debloater catalogs now use the broker when it is connected:

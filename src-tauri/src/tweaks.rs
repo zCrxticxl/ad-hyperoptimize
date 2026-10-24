@@ -243,18 +243,15 @@ fn capture_revert(cap: &ShowCapture) -> Option<String> {
             parse_tcp_autotuning(out.as_str())
         }
         ShowCapture::HibernateState => {
-            let prev = reg_read(
+            let reg = reg_read(
                 "HKLM",
                 "SYSTEM\\CurrentControlSet\\Control\\Power",
                 "HibernateEnabled",
             )
-            .ok()
-            .flatten()?;
-            match prev {
-                RegVal::Dword(1) => Some("powercfg /h on".into()),
-                RegVal::Dword(0) => Some("powercfg /h off".into()),
-                _ => None,
-            }
+            .ok()?;
+            let drive = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
+            let file = std::path::Path::new(&format!("{drive}\\")).join("hiberfil.sys");
+            hibernate_revert(reg.as_ref(), std::fs::symlink_metadata(file).is_ok())
         }
         ShowCapture::RssEnabled => {
             let prev = reg_read(
@@ -1653,6 +1650,21 @@ fn cmd_live_state(id: &str) -> Option<bool> {
     }
 }
 
+/// The command that restores the hibernation state found before applying.
+/// Without `HibernateEnabled` Windows decides from its default; the
+/// hibernation file exists exactly while hibernation is enabled (the same
+/// rule the live status uses), so its presence decides.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn hibernate_revert(reg: Option<&RegVal>, hiberfil_exists: bool) -> Option<String> {
+    match reg {
+        Some(RegVal::Dword(1)) => Some("powercfg /h on".into()),
+        Some(RegVal::Dword(0)) => Some("powercfg /h off".into()),
+        Some(_) => None,
+        None if hiberfil_exists => Some("powercfg /h on".into()),
+        None => Some("powercfg /h off".into()),
+    }
+}
+
 /// Some(applied) for a single non-empty cmdlet output line, None otherwise.
 #[cfg(any(windows, test))]
 fn live_flag(out: &str, applied_value: &str) -> Option<bool> {
@@ -2134,6 +2146,30 @@ pub fn history() -> Value {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn hibernation_revert_is_captured_without_the_registry_value() {
+        use super::hibernate_revert;
+        assert_eq!(
+            hibernate_revert(Some(&RegVal::Dword(1)), false).as_deref(),
+            Some("powercfg /h on")
+        );
+        assert_eq!(
+            hibernate_revert(Some(&RegVal::Dword(0)), true).as_deref(),
+            Some("powercfg /h off")
+        );
+        // Value absent (Windows default): the hibernation file decides.
+        assert_eq!(
+            hibernate_revert(None, true).as_deref(),
+            Some("powercfg /h on")
+        );
+        assert_eq!(
+            hibernate_revert(None, false).as_deref(),
+            Some("powercfg /h off")
+        );
+        // An unexpected type is not guessed.
+        assert_eq!(hibernate_revert(Some(&RegVal::Str("1".into())), true), None);
+    }
+
     #[test]
     fn journal_less_policy_reset_only_for_retired_tweaks() {
         let cortana = "SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Search";
