@@ -44,6 +44,7 @@ Severity:
 | `gamedb.rs` | 1205 | reviewed (data) |
 | `perftweaks.rs` | 640 | reviewed |
 | `gameboost.rs` | 650 | reviewed |
+| `uninstaller.rs` | 640 | reviewed |
 
 ## Findings
 
@@ -90,3 +91,6 @@ Severity:
 | 39 | `perftweaks.rs:TIMER_LEGACY_CLEANUP_PS` | Low | The elevated script resolves `$env:ProgramData` from the inherited environment (`trusted_env` does not set ProgramData). Effect is limited: it deletes only a file named `timerres.ps1` and an empty folder `ADHyperOptimize` under the path given. | open (low): add `ProgramData` to the trusted environment |
 | 40 | `gameboost.rs:boost_start/boost_stop` | Low | The boost sets `AutoGameModeEnabled=1`, but only the power plan and notifications were captured and restored. Game Mode stayed on after "settings restored", even if the user had turned it off. | fixed: previous value captured (`prevGameMode`, `null` = not set) and restored. State files from older versions have no field and leave Game Mode untouched. Test `boost_state_keeps_absent_and_legacy_game_mode_apart` |
 | 41 | `gameboost.rs:quick_boost_start` (revert) | Low | The priority undo addresses the process by PID. If the game has exited and Windows reused the PID, the undo sets the captured priority (usually Normal) on an unrelated process. | open (low): check the process name in the revert as `kill_background` does |
+| 42 | `uninstaller.rs:LEFTOVER_BASES` | Medium | The base folders of the leftover scan and the allowlist of `clean_leftovers` (`ProgramFiles`, `ProgramFiles(x86)`, `ProgramData`, `APPDATA`, `LOCALAPPDATA`) came from the inherited environment of the elevated process. Same pattern as #2, but here it leads to deletion. With `ProgramFiles=C:\Users\<other>` and an HKCU uninstall entry (user-writable) named `Documents`, the elevated app offered `C:\Users\<other>\Documents` as a deletable leftover; `is_protected` only guards profile *roots*. A click on "clean" was still needed. | fixed: Program Files from HKLM `ProgramFilesDir*`, ProgramData via `statestore::program_data_dir` (HKLM), per-user folders via the known-folder API (`dirs`). Test adjusted (Windows no longer reads the environment). Residual: per-user known folders can be redirected by the user themselves (by design). |
+| 43 | `uninstaller.rs:uninstall_app` | Info | Checked: only HKLM entries (admin-writable) are launched elevated; the renderer string must exactly match a fresh registry read; HKCU entries are refused. | ok |
+| 44 | `regclean.rs:expand_env`, `diskanalyzer.rs:scan_temp_age` | Low | These also read paths from the process environment of the elevated app. Effect is limited to scan results: deletion needs an explicit selection, regclean exports a backup first, the temp scan is read-only. | open (low) |

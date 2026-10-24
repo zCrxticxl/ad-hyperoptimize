@@ -200,11 +200,8 @@ pub fn scan_leftovers(app_name: String, publisher: String, install_location: Str
 
     // File system: exact `<base>\<name>` folders only (no enumeration, no
     // wildcard semantics; the name is a validated single component).
-    for b in LEFTOVER_BASES {
-        let Some(base) = std::env::var_os(b) else {
-            continue;
-        };
-        let dir = std::path::PathBuf::from(base).join(&name);
+    for base in leftover_bases() {
+        let dir = base.join(&name);
         if dir.is_dir() {
             add("folder", dir.to_string_lossy().into_owned());
         }
@@ -278,14 +275,49 @@ fn leftover_cleanable(it: &serde_json::Value) -> bool {
     }
 }
 /// Directory bases the leftover scanner enumerates (see scan_leftovers).
-/// clean_leftovers refuses to touch anything outside these.
-const LEFTOVER_BASES: &[&str] = &[
-    "APPDATA",
-    "LOCALAPPDATA",
-    "PROGRAMDATA",
-    "ProgramFiles",
-    "ProgramFiles(x86)",
-];
+/// clean_leftovers refuses to touch anything outside these. Resolved without
+/// the process environment: the elevated app inherits it from the caller, and
+/// `ProgramFiles=C:\Users\<other>` would otherwise make another profile's
+/// folders deletable. Machine folders come from HKLM (admin-writable), the
+/// per-user ones from the known-folder API.
+#[cfg(windows)]
+fn leftover_bases() -> Vec<std::path::PathBuf> {
+    let hklm = winreg::RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE);
+    let program_files = hklm
+        .open_subkey(r"SOFTWARE\Microsoft\Windows\CurrentVersion")
+        .ok()
+        .map(|k| {
+            ["ProgramFilesDir", "ProgramFilesDir (x86)"]
+                .iter()
+                .filter_map(|v| k.get_value::<String, _>(v).ok())
+                .filter(|p| !p.contains('%'))
+                .map(std::path::PathBuf::from)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    [dirs::data_dir(), dirs::data_local_dir()]
+        .into_iter()
+        .flatten()
+        .chain(crate::statestore::program_data_dir().ok())
+        .chain(program_files)
+        .collect()
+}
+
+/// Non-Windows builds (unit tests) read the same names from the environment.
+#[cfg(not(windows))]
+fn leftover_bases() -> Vec<std::path::PathBuf> {
+    [
+        "APPDATA",
+        "LOCALAPPDATA",
+        "PROGRAMDATA",
+        "ProgramFiles",
+        "ProgramFiles(x86)",
+    ]
+    .iter()
+    .filter_map(std::env::var_os)
+    .map(std::path::PathBuf::from)
+    .collect()
+}
 
 /// True when `path` is a subdirectory/file strictly below one of the
 /// leftover base dirs (never the base itself, never a traversal component).
@@ -302,14 +334,9 @@ fn leftover_is_under_base(path: &str) -> bool {
     }) {
         return false;
     }
-    LEFTOVER_BASES.iter().any(|b| {
-        std::env::var_os(b)
-            .map(|base| {
-                let base = std::path::PathBuf::from(base);
-                p != base && p.starts_with(&base)
-            })
-            .unwrap_or(false)
-    })
+    leftover_bases()
+        .iter()
+        .any(|base| p != base.as_path() && p.starts_with(base))
 }
 
 /// A registry leftover path is only deletable below the bases the scanner
@@ -581,26 +608,34 @@ mod tests {
 
     #[test]
     fn fs_leftovers_only_under_base_dirs() {
-        let base = std::env::temp_dir().join("adho-leftover-test-base");
-        std::fs::create_dir_all(&base).unwrap();
-        std::env::set_var("LOCALAPPDATA", &base);
+        // Linux: bases come from the environment; Windows: from the known
+        // folders / HKLM (the environment is ignored there).
+        #[cfg(not(windows))]
+        let tmp = {
+            let base = std::env::temp_dir().join("adho-leftover-test-base");
+            std::fs::create_dir_all(&base).unwrap();
+            std::env::set_var("LOCALAPPDATA", &base);
+            base
+        };
+        let base = super::leftover_bases()
+            .into_iter()
+            .next()
+            .expect("at least one base");
 
-        let sub = base.join("MyApp");
-        std::fs::create_dir_all(&sub).unwrap();
-        assert!(leftover_is_under_base(sub.to_str().unwrap()));
-
+        assert!(leftover_is_under_base(base.join("MyApp").to_str().unwrap()));
         // the base itself and outside paths are rejected
         assert!(!leftover_is_under_base(base.to_str().unwrap()));
+        #[cfg(not(windows))]
         assert!(!leftover_is_under_base("/etc"));
-        assert!(!leftover_is_under_base(&format!(
-            "{}\\..\\escape",
-            base.display()
-        )));
-
+        #[cfg(windows)]
+        assert!(!leftover_is_under_base(r"C:\Windows\System32\drivers"));
         let escaped = PathBuf::from(format!("{}\\..\\escape", base.display()));
         assert!(!leftover_is_under_base(escaped.to_str().unwrap()));
 
-        std::env::remove_var("LOCALAPPDATA");
-        std::fs::remove_dir_all(&base).unwrap();
+        #[cfg(not(windows))]
+        {
+            std::env::remove_var("LOCALAPPDATA");
+            std::fs::remove_dir_all(&tmp).unwrap();
+        }
     }
 }
