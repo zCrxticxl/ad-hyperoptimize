@@ -5,6 +5,12 @@ import type { Lang } from "../i18n";
  * first, then patterns for formatted messages; anything unknown stays
  * English, so a missing entry never hides information. */
 const DE: Record<string, string> = {
+  "The NVIDIA Control Panel is not installed. Get it from the Microsoft Store (\"NVIDIA Control Panel\") or use the NVIDIA App.":
+    "Die NVIDIA-Systemsteuerung ist nicht installiert. Im Microsoft Store („NVIDIA Control Panel“) holen oder die NVIDIA App verwenden.",
+  "Windows blocks this setting for apps (UCPD protection), so nothing was changed. Set it with Group Policy instead: gpedit.msc > Computer Configuration > Administrative Templates > Windows Components > Widgets > Allow Widgets = Disabled.":
+    "Windows sperrt diese Einstellung für Programme (UCPD-Schutz), daher wurde nichts geändert. Stattdessen per Gruppenrichtlinie setzen: gpedit.msc > Computerkonfiguration > Administrative Vorlagen > Windows-Komponenten > Widgets > Widgets zulassen = Deaktiviert.",
+  "Windows blocks this setting for apps (UCPD protection), so nothing was changed. Turn it off in Settings > Personalization > Taskbar > Widgets.":
+    "Windows sperrt diese Einstellung für Programme (UCPD-Schutz), daher wurde nichts geändert. Stattdessen unter Einstellungen > Personalisierung > Taskleiste > Widgets ausschalten.",
   // ── optregistry: benefit / when ───────────────────────────────────────────
   "Restores Windows Game Mode: Windows prioritises the game and Windows Update does not install drivers or show restart notifications while you play.":
     "Stellt den Windows-Spielmodus wieder her: Windows bevorzugt das Spiel, und Windows Update installiert während des Spielens keine Treiber und zeigt keine Neustart-Hinweise.",

@@ -252,6 +252,51 @@ fn is_at_desired(current: Option<&str>, desired: Option<&str>) -> bool {
     }
 }
 
+/// Value an element has while it is absent from the store, where Windows
+/// documents one. `testsigning` absent = off: writing it is pointless and,
+/// with Secure Boot on, bcdedit refuses the write (and the rollback).
+fn absent_value(element: &str) -> Option<&'static str> {
+    match element {
+        "testsigning" => Some("no"),
+        _ => None,
+    }
+}
+
+/// `is_at_desired` that also counts an absent element by its implied value.
+fn element_at_desired(element: &str, current: Option<&str>, desired: Option<&str>) -> bool {
+    is_at_desired(current, desired) || is_at_desired(current.or(absent_value(element)), desired)
+}
+
+/// True for a journaled `bcdedit` revert whose element already has the
+/// state it would restore (read live from the store).
+pub(crate) fn revert_is_noop(revert_cmd: &str) -> bool {
+    let args: Vec<&str> = revert_cmd.split_whitespace().collect();
+    let (target, element) = match args.as_slice() {
+        ["bcdedit", "/deletevalue", t, e] | ["bcdedit", "/set", t, e, _] => (*t, *e),
+        _ => return false,
+    };
+    read_elements(target)
+        .map(|m| {
+            already_reverted(
+                revert_cmd,
+                m.get(&element.to_ascii_lowercase()).map(String::as_str),
+            )
+        })
+        .unwrap_or(false)
+}
+
+/// True when the element already has the state an entry's revert command
+/// would restore, so running it is unnecessary (and `/deletevalue` of an
+/// absent element fails).
+fn already_reverted(revert_cmd: &str, current: Option<&str>) -> bool {
+    let args: Vec<&str> = revert_cmd.split_whitespace().collect();
+    match args.as_slice() {
+        ["bcdedit", "/deletevalue", _, _] => current.is_none(),
+        ["bcdedit", "/set", _, _, v] => is_at_desired(current, Some(v)),
+        _ => false,
+    }
+}
+
 /// Build the bcdedit argv that restores `prev` (None = delete the element).
 fn restore_args(target: &str, element: &str, prev: Option<&str>) -> Result<Vec<String>, String> {
     match prev {
@@ -279,9 +324,9 @@ fn check_statuses() -> std::collections::HashMap<String, bool> {
         let elems = cache
             .entry(t.target)
             .or_insert_with(|| read_elements(t.target).ok());
-        let applied = elems
-            .as_ref()
-            .is_some_and(|m| is_at_desired(m.get(t.element).map(String::as_str), t.desired));
+        let applied = elems.as_ref().is_some_and(|m| {
+            element_at_desired(t.element, m.get(t.element).map(String::as_str), t.desired)
+        });
         out.insert(t.id.to_string(), applied);
     }
     for r in RETIRED {
@@ -386,7 +431,7 @@ pub fn apply_tweak(id: String) -> Result<Value, String> {
     let elems = read_elements(t.target)
         .map_err(|e| format!("reading BCD {} failed: {}", t.target, e.trim()))?;
     let prev = elems.get(t.element).map(String::as_str);
-    if is_at_desired(prev, t.desired) {
+    if element_at_desired(t.element, prev, t.desired) {
         return Ok(json!({ "ok": true, "id": id, "alreadySet": true }));
     }
     let revert = restore_args(t.target, t.element, prev)?;
@@ -424,7 +469,7 @@ pub fn apply_tweak(id: String) -> Result<Value, String> {
     // re-read afterwards so a silent no-op is reported too.
     let result = ps::exec("bcdedit.exe", &args).and_then(|_| {
         let now = read_elements(t.target)?;
-        if is_at_desired(now.get(t.element).map(String::as_str), t.desired) {
+        if element_at_desired(t.element, now.get(t.element).map(String::as_str), t.desired) {
             Ok(())
         } else {
             Err(format!("{} did not change", t.element))
@@ -476,6 +521,27 @@ pub fn revert_tweak(id: String) -> Result<Value, String> {
         .find(|e| e.tweak_id == jid && !e.reverted)
     {
         Some(entry) => {
+            // A failed apply can leave an entry whose element never changed
+            // (e.g. bcdedit refused the write): close it instead of running
+            // a revert that has nothing to do and would fail.
+            let t = TWEAKS.iter().find(|t| t.id == id);
+            let revert_cmd = entry.items.iter().find_map(|i| match i {
+                crate::safety::ChangeItem::Command { revert, .. } => Some(revert.clone()),
+                _ => None,
+            });
+            if let (Some(t), Some(cmd)) = (t, revert_cmd) {
+                let elems = read_elements(t.target)
+                    .map_err(|e| format!("reading BCD {} failed: {}", t.target, e.trim()))?;
+                if already_reverted(&cmd, elems.get(t.element).map(String::as_str)) {
+                    crate::tweaks::close_entry(&entry.id)?;
+                    return Ok(json!({
+                        "ok": true,
+                        "id": id,
+                        "entryId": entry.id,
+                        "alreadyWindowsDefault": windows_default(t.element).is_none(),
+                    }));
+                }
+            }
             crate::tweaks::revert_entry(&entry.id)?;
             Ok(json!({ "ok": true, "id": id, "entryId": entry.id }))
         }
@@ -505,7 +571,11 @@ fn reset_to_windows_default(id: &str) -> Result<Value, String> {
     }
     let elems = read_elements(t.target)
         .map_err(|e| format!("reading BCD {} failed: {}", t.target, e.trim()))?;
-    if !is_at_desired(elems.get(t.element).map(String::as_str), t.desired) {
+    if !element_at_desired(
+        t.element,
+        elems.get(t.element).map(String::as_str),
+        t.desired,
+    ) {
         return Ok(json!({ "ok": true, "id": id, "notActive": true }));
     }
     let Some(default) = windows_default(t.element) else {
@@ -581,6 +651,25 @@ mod tests {
         assert!(!is_at_desired(Some("4"), None));
         assert!(is_at_desired(Some("0"), Some("0")));
         assert!(!is_at_desired(None, Some("0")));
+        assert!(element_at_desired("testsigning", None, Some("off")));
+        assert!(!element_at_desired("testsigning", Some("Yes"), Some("off")));
+        assert!(!element_at_desired("timeout", None, Some("0")));
+        assert!(already_reverted(
+            "bcdedit /deletevalue {current} testsigning",
+            None
+        ));
+        assert!(!already_reverted(
+            "bcdedit /deletevalue {current} testsigning",
+            Some("No")
+        ));
+        assert!(already_reverted(
+            "bcdedit /set {bootmgr} timeout 30",
+            Some("30")
+        ));
+        assert!(!already_reverted(
+            "bcdedit /set {bootmgr} timeout 30",
+            Some("0")
+        ));
     }
 
     #[test]

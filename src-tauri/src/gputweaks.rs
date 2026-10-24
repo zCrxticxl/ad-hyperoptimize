@@ -874,6 +874,38 @@ pub fn nv_status() -> Value {
     })
 }
 
+/// App user model id (`PackageFamilyName!AppId`) of the installed NVIDIA
+/// Control Panel Store app.
+#[cfg(windows)]
+fn store_panel_aumid() -> Result<String, String> {
+    let out = crate::ps::run(
+        "$p = Get-AppxPackage -Name 'NVIDIACorp.NVIDIAControlPanel' -ErrorAction SilentlyContinue | Select-Object -First 1; \
+         if ($p) { $id = @((Get-AppxPackageManifest $p).Package.Applications.Application)[0].Id; \
+         \"$($p.PackageFamilyName)!$id\" }",
+    )?;
+    let aumid = out.trim();
+    if is_valid_aumid(aumid) {
+        Ok(aumid.to_string())
+    } else {
+        Err("The NVIDIA Control Panel is not installed. Get it from the Microsoft Store (\"NVIDIA Control Panel\") or use the NVIDIA App.".into())
+    }
+}
+
+/// `Family_publisherhash!AppId`, ASCII letters, digits, dots, underscores
+/// and dashes only (it is passed to explorer.exe).
+#[cfg_attr(not(windows), allow(dead_code))]
+fn is_valid_aumid(s: &str) -> bool {
+    let Some((family, app)) = s.split_once('!') else {
+        return false;
+    };
+    let ok = |p: &str| {
+        !p.is_empty()
+            && p.chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+    };
+    ok(family) && ok(app) && family.contains('_')
+}
+
 /// Launch NVIDIA's own Control Panel app, for the settings (anisotropic
 /// filtering, antialiasing, vertical sync, digital vibrance, per-app
 /// profiles, …) that live only in NVIDIA's proprietary DRS database.
@@ -895,10 +927,10 @@ pub fn nv_open_panel() -> Result<String, String> {
             .filter(|p| p.is_file());
         let target = match classic {
             Some(exe) => exe.to_string_lossy().into_owned(),
-            None => {
-                r"shell:AppsFolder\NVIDIACorp.NVIDIAControlPanel_56jybvy8c3kt8!NVIDIAControlPanel"
-                    .to_string()
-            }
+            // DCH drivers ship the panel as a Store app; its app id is read
+            // from the installed package, since explorer.exe silently opens
+            // the Documents folder for an unknown shell:AppsFolder target.
+            None => format!(r"shell:AppsFolder\{}", store_panel_aumid()?),
         };
         std::process::Command::new(
             std::path::Path::new(&crate::ps::windows_dir()).join("explorer.exe"),
@@ -914,7 +946,21 @@ pub fn nv_open_panel() -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{catalog, is_blocked, is_legacy_noop, is_valid_driver_key, GPU_CLASS};
+    use super::{
+        catalog, is_blocked, is_legacy_noop, is_valid_aumid, is_valid_driver_key, GPU_CLASS,
+    };
+
+    #[test]
+    fn aumid_validation() {
+        assert!(is_valid_aumid(
+            "NVIDIACorp.NVIDIAControlPanel_56jybvy8c3kt8!NVIDIACorp.NVIDIAControlPanel"
+        ));
+        assert!(!is_valid_aumid(""));
+        assert!(!is_valid_aumid(
+            "NVIDIACorp.NVIDIAControlPanel_56jybvy8c3kt8"
+        ));
+        assert!(!is_valid_aumid("a_b!c\" & calc"));
+    }
 
     #[test]
     fn legacy_nvidia_registry_tweaks_are_flagged_but_kept_for_undo() {

@@ -1863,7 +1863,9 @@ pub fn apply(tweak_id: &str) -> Result<Value, String> {
             Ok(())
         })?;
         if let Err(e) = apply_item(item) {
+            let blocked = windows_blocked_hint(item, &e);
             return match rollback_entry_items(&entry_id, &items[..=idx]) {
+                Ok(()) if blocked.is_some() => Err(blocked.unwrap_or_default()),
                 Ok(()) => Err(format!("apply failed ({e}); all changes were rolled back")),
                 Err(re) => Err(format!(
                     "apply failed ({e}); rollback incomplete ({re}); restore token: {entry_id}"
@@ -1893,6 +1895,28 @@ pub(crate) fn open_entry_id(journal: &[JournalEntry], tweak_id: &str) -> Option<
         .rev()
         .find(|e| e.tweak_id == tweak_id && !e.reverted && (e.completed || e.attempted > 0))
         .map(|e| e.id.clone())
+}
+
+/// Values Windows' UserChoice Protection Driver (UCPD) blocks for every
+/// program that is not Microsoft-signed, admin or not (seen on 24H2/25H2):
+/// the write fails with "access denied" although the key ACL allows it.
+/// Group Policy can still set them. Returns the user-facing message.
+fn windows_blocked_hint(item: &ChangeItem, err: &str) -> Option<String> {
+    let ChangeItem::Registry { path, name, .. } = item else {
+        return None;
+    };
+    if !err.contains("os error 5") {
+        return None;
+    }
+    match (path.to_ascii_lowercase().as_str(), name.as_str()) {
+        (r"software\policies\microsoft\dsh", "AllowNewsAndInterests") => Some(
+            "Windows blocks this setting for apps (UCPD protection), so nothing was changed. Set it with Group Policy instead: gpedit.msc > Computer Configuration > Administrative Templates > Windows Components > Widgets > Allow Widgets = Disabled.".into(),
+        ),
+        (r"software\microsoft\windows\currentversion\explorer\advanced", "TaskbarDa") => Some(
+            "Windows blocks this setting for apps (UCPD protection), so nothing was changed. Turn it off in Settings > Personalization > Taskbar > Widgets.".into(),
+        ),
+        _ => None,
+    }
 }
 
 pub(crate) fn apply_item(item: &ChangeItem) -> Result<(), String> {
@@ -1930,6 +1954,9 @@ pub(crate) fn revert_item(item: &ChangeItem) -> Result<(), String> {
         #[cfg(not(windows))]
         ChangeItem::Registry { .. } => Err("Windows only".into()),
         ChangeItem::ServiceStartup { service, prev, .. } => service_set_start(service, prev),
+        // bcdedit fails on `/deletevalue` of an absent element: an element
+        // already in its recorded previous state needs no command.
+        ChangeItem::Command { revert, .. } if crate::bootopt::revert_is_noop(revert) => Ok(()),
         ChangeItem::Command { revert, .. } => run_cmdline(revert),
     }
 }
@@ -2225,7 +2252,7 @@ pub fn revert_entry(entry_id: &str) -> Result<Value, String> {
 }
 
 /// Marks a journal entry as done without running it.
-fn close_entry(entry_id: &str) -> Result<(), String> {
+pub(crate) fn close_entry(entry_id: &str) -> Result<(), String> {
     safety::with_journal(|journal| {
         if let Some(e) = journal.iter_mut().find(|e| e.id == entry_id) {
             e.reverted = true;
@@ -2264,6 +2291,31 @@ pub fn history() -> Value {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn ucpd_blocked_values_get_a_clear_message() {
+        let item = |path: &str, name: &str| ChangeItem::Registry {
+            root: "HKLM".into(),
+            path: path.into(),
+            name: name.into(),
+            prev: None,
+            new: RegVal::Dword(0),
+        };
+        let denied = "set AllowNewsAndInterests: Zugriff verweigert (os error 5)";
+        let dsh = item(
+            "SOFTWARE\\Policies\\Microsoft\\Dsh",
+            "AllowNewsAndInterests",
+        );
+        assert!(super::windows_blocked_hint(&dsh, denied)
+            .unwrap()
+            .contains("gpedit.msc"));
+        assert!(super::windows_blocked_hint(&dsh, "set: other error").is_none());
+        let other = item(
+            "SOFTWARE\\Policies\\Microsoft\\Windows\\DataCollection",
+            "AllowTelemetry",
+        );
+        assert!(super::windows_blocked_hint(&other, denied).is_none());
+    }
+
     #[test]
     fn hibernation_revert_is_captured_without_the_registry_value() {
         use super::hibernate_revert;
