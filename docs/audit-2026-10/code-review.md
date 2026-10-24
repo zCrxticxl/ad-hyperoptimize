@@ -56,6 +56,7 @@ Severity:
 | `profiles.rs` | 300 | reviewed |
 | `updates.rs` | 360 | reviewed |
 | `drivers.rs` | 320 | reviewed |
+| `procmgr.rs` | 340 | reviewed |
 
 ## Findings
 
@@ -126,3 +127,5 @@ Severity:
 | 63 | `drivers.rs:install_via_winget` | Medium | 1) Exit code `0x8A150014` ("no package found": upgrade of a package that is not installed) counted as success. "Install" for a driver package that was not installed reported success and did nothing. 2) The fallback to `install` depended on English winget text (`No applicable update\|already installed`). | fixed: decided by exit code (`NO_PACKAGE_FOUND` → install; success only for 0 / `UPDATE_NOT_APPLICABLE` / `ALREADY_INSTALLED`); test |
 | 64 | `drivers.rs:update_via_pnputil` | Low | The message promised a "driver scan via Windows Update". `pnputil /scan-devices` only re-enumerates hardware. A failure was returned as `Ok("Error: …")`, so the UI showed it as success. | fixed: accurate text; failure returns an error |
 | 65 | `gputweaks.rs:nv_open_panel` | Info | Starts the NVIDIA Control Panel elevated (`Start-Process` in the admin process). No browser, but inconsistent with #62. | open (low) |
+| 66 | `procmgr.rs:set_priority/set_affinity/perm_set` | Medium | The protected list (csrss, lsass, dwm, smss, …) only applied to kill. Priority (including `Idle`/`RealTime`) and core affinity could be set for these processes. With `perm_set` it applied permanently through IFEO to every future start. `Idle` or one core on dwm/csrss stalls the system. | fixed: same protection for priority, affinity and permanent priority; test |
+| 67 | `procmgr.rs:perm_set` | Low | Wrote `IFEO\<exe>\PerfOptions\CpuPriorityClass` in HKLM without capturing the previous value (e.g. another tool's override). Remove then deletes the value without restoring the earlier one. | fixed: journal entry with the captured previous value (undo via history); `perm_remove` unchanged |
