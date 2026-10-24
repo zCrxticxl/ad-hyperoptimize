@@ -157,6 +157,10 @@ pub fn apply(profile_id: &str, with_bench: bool) -> Result<Value, String> {
         match status.get(*id).map(|s| s.1.as_str()) {
             Some("applied") => skipped.push(json!(id)),
             _ => match tweaks::apply(id) {
+                // An entry that already existed (applied manually or by
+                // another profile) stays with its owner: re-tagging it would
+                // make this profile's revert undo someone else's change.
+                Ok(result) if result["status"] == "already_applied" => skipped.push(json!(id)),
                 Ok(result) => {
                     if let Some(entry_id) = result["entryId"].as_str() {
                         let tag = safety::with_journal(|journal| {
@@ -225,7 +229,7 @@ pub fn apply(profile_id: &str, with_bench: bool) -> Result<Value, String> {
         "failed": failed,
         "benchBefore": before,
         "benchAfter": after,
-        "benchNote": "Synthetische Benchmarks zeigen Scheduler-/Latenz-Tweaks kaum, der echte Effekt zeigt sich in Frametimes im Spiel. Disk/CPU-Deltas unter ~3% sind Messrauschen.",
+        "benchNote": "Synthetische Benchmarks zeigen Scheduler-/Latenz-Tweaks kaum, der echte Effekt zeigt sich in Frametimes im Spiel. Ein einzelner Vorher/Nachher-Lauf unterscheidet sich schon durch Messrauschen; nur wiederholte Messungen (FPS-Messung) zeigen einen echten Unterschied.",
     }))
 }
 
