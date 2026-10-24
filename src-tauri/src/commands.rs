@@ -418,6 +418,12 @@ pub static COMMANDS: &[(&str, Class, &str)] = &[
     ),
     ("cmd_pagefile_set_custom", Privileged, "page file settings"),
     ("cmd_pagefile_disable", Privileged, "page file settings"),
+    ("cmd_perf_open_entries", Read, "journal"),
+    (
+        "cmd_perf_undo",
+        Privileged,
+        "journal undo of MSI, NIC and page-file changes",
+    ),
     // ── hardware ──
     (
         "cmd_hw_full",

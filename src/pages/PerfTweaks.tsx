@@ -7,6 +7,17 @@ import { useLang } from "../i18n";
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** MSI, NIC and page-file changes are journaled; the cards and the undo
+ * list reload each other through this event. */
+const PERF_CHANGED = "perf-changed";
+const notifyPerfChanged = () => window.dispatchEvent(new Event(PERF_CHANGED));
+function usePerfChanged(reload: () => void) {
+  useEffect(() => {
+    window.addEventListener(PERF_CHANGED, reload);
+    return () => window.removeEventListener(PERF_CHANGED, reload);
+  }, [reload]);
+}
+
 function mb(v: number | null | undefined) {
   if (v == null) return "-";
   if (v >= 1024) return `${(v / 1024).toFixed(1)} GB`;
@@ -135,13 +146,14 @@ function MsiCard({ admin }: { admin: boolean }) {
     catch (e: any) { setErr(String(e)); }
   }, []);
   useEffect(() => { load(); }, [load]);
+  usePerfChanged(load);
 
   const toggle = async (dev: any) => {
     // A wrong MSI setting can stop a device from starting: always confirm.
     const msg = (dev.msiEnabled ? t("perfMsiConfirmDisable") : t("perfMsiConfirmEnable")).replace("{name}", String(dev.name ?? ""));
     if (!window.confirm(msg)) return;
     setBusy(dev.regPath);
-    try { setLog(await api.msiSet(dev.regPath, !dev.msiEnabled)); await load(); }
+    try { setLog(await api.msiSet(dev.regPath, !dev.msiEnabled)); notifyPerfChanged(); }
     catch (e: any) { setLog(String(e)); }
     finally { setBusy(null); }
   };
@@ -211,10 +223,11 @@ function NetCard({ admin }: { admin: boolean }) {
     catch (e: any) { setErr(String(e)); }
   }, []);
   useEffect(() => { load(); }, [load]);
+  usePerfChanged(load);
 
   const tweak = async (adapter: string, keyword: string, value: number) => {
     setBusy(true);
-    try { setLog(await api.netTweak(adapter, keyword, value)); await load(); }
+    try { setLog(await api.netTweak(adapter, keyword, value)); notifyPerfChanged(); }
     catch (e: any) { setLog(String(e)); }
     finally { setBusy(false); }
   };
@@ -222,7 +235,7 @@ function NetCard({ admin }: { admin: boolean }) {
   const resetAll = async () => {
     if (!window.confirm(t("perfNetResetConfirm"))) return;
     setBusy(true);
-    try { setLog(await api.netResetAll()); await load(); }
+    try { setLog(await api.netResetAll()); notifyPerfChanged(); }
     catch (e: any) { setLog(String(e)); }
     finally { setBusy(false); }
   };
@@ -385,10 +398,11 @@ function PagefileCard({ admin }: { admin: boolean }) {
     } catch (e: any) { setErr(String(e)); }
   }, []);
   useEffect(() => { load(); }, [load]);
+  usePerfChanged(load);
 
   const act = async (fn: () => Promise<string>) => {
     setBusy(true);
-    try { setLog(await fn()); await load(); }
+    try { setLog(await fn()); notifyPerfChanged(); }
     catch (e: any) { setLog(String(e)); }
     finally { setBusy(false); }
   };
@@ -514,6 +528,46 @@ function PagefileCard({ admin }: { admin: boolean }) {
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
+function OpenChangesCard({ admin }: { admin: boolean }) {
+  const { t } = useLang();
+  const [entries, setEntries] = useState<{ id: string; name: string; time: string }[]>([]);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [log, setLog] = useState("");
+  const load = useCallback(async () => {
+    try { setEntries((await api.perfOpenEntries()).entries ?? []); }
+    catch (e: any) { setLog(String(e)); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  usePerfChanged(load);
+
+  const undo = async (id: string) => {
+    setBusy(id);
+    setLog("");
+    try { await api.perfUndo(id); setLog(t("perfUndone")); notifyPerfChanged(); }
+    catch (e: any) { setLog(String(e)); }
+    finally { setBusy(null); }
+  };
+
+  if (entries.length === 0 && !log) return null;
+  return (
+    <Card title={t("perfOpenChanges")} style={{ marginBottom: 14 }}>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>{t("perfOpenChangesHint")}</div>
+      {entries.map((e) => (
+        <div key={e.id} className="row" style={{ padding: "6px 0", borderBottom: "1px solid var(--border)", gap: 12, alignItems: "center" }}>
+          <div style={{ flex: 1, fontSize: 13 }}>
+            {e.name}
+            <div className="muted" style={{ fontSize: 11 }}>{new Date(e.time).toLocaleString()}</div>
+          </div>
+          <button className="btn small ghost" disabled={busy !== null || !admin} onClick={() => undo(e.id)}>
+            {busy === e.id ? <Spinner /> : t("revert")}
+          </button>
+        </div>
+      ))}
+      {log && <div className="mono muted" style={{ fontSize: 12, marginTop: 8 }}>{log}</div>}
+    </Card>
+  );
+}
+
 export default function PerfTweaks({ admin }: { admin: boolean }) {
   const { t } = useLang();
   return (
@@ -523,6 +577,7 @@ export default function PerfTweaks({ admin }: { admin: boolean }) {
         {t("perfPageSub")}
       </div>
       <HwWarnings page="perf_tweaks" />
+      <OpenChangesCard admin={admin} />
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
         <TimerCard admin={admin} />

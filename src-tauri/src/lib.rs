@@ -1501,6 +1501,20 @@ async fn cmd_pagefile_disable() -> Result<String, String> {
         .map_err(|_| "perf tweak task panicked".to_string())?
 }
 
+#[tauri::command(async)]
+async fn cmd_perf_open_entries() -> Value {
+    tauri::async_runtime::spawn_blocking(perftweaks::open_entries)
+        .await
+        .unwrap_or_default()
+}
+
+#[tauri::command(async)]
+async fn cmd_perf_undo(entry_id: String) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || perftweaks::undo(entry_id))
+        .await
+        .map_err(|_| "perf tweak task panicked".to_string())?
+}
+
 // ---- hw monitor ----
 #[tauri::command(async)]
 async fn cmd_hw_full() -> Value {
@@ -1736,6 +1750,8 @@ pub fn run() {
             cmd_pagefile_set_auto,
             cmd_pagefile_set_custom,
             cmd_pagefile_disable,
+            cmd_perf_open_entries,
+            cmd_perf_undo,
             // hw monitor
             cmd_hw_full,
             cmd_hw_profile,

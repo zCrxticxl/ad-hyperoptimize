@@ -258,6 +258,104 @@ if (Get-ScheduledTask -TaskPath '\ADHyperOptimize\' -TaskName 'TimerResolution' 
 "#
 );
 
+// ── Journal plumbing for MSI / NIC / page file ───────────────────────────────
+// Every change below is captured first and written ahead to the journal, the
+// same write-ahead → apply → undo pattern the tweak engine uses: a failure
+// rolls back what was captured, and Undo restores the exact earlier state
+// (including "value not set") instead of writing the opposite value.
+
+use crate::safety::{ChangeItem, JournalEntry};
+
+/// Open (applied, not undone) entry of `tweak_id`.
+fn open_entry(tweak_id: &str) -> Option<JournalEntry> {
+    crate::safety::load_journal()
+        .unwrap_or_default()
+        .into_iter()
+        .rev()
+        .find(|e| e.tweak_id == tweak_id && !e.reverted && (e.completed || e.attempted > 0))
+}
+
+/// Journal `items` write-ahead, apply them in order and mark the entry
+/// complete. On a failure the applied part is rolled back.
+fn apply_journaled(tweak_id: &str, name: &str, items: Vec<ChangeItem>) -> Result<String, String> {
+    let entry_id = crate::safety::append_entry(JournalEntry {
+        id: format!("perf-{}", chrono::Local::now().format("%Y%m%d%H%M%S%6f")),
+        tweak_id: tweak_id.into(),
+        tweak_name: name.into(),
+        origin: None,
+        time: chrono::Local::now().to_rfc3339(),
+        items: items.clone(),
+        reverted: false,
+        backup_files: vec![],
+        completed: false,
+        attempted: 0,
+        reverted_items: 0,
+        untrusted: false,
+    })?;
+    for (idx, item) in items.iter().enumerate() {
+        crate::safety::with_journal(|j| {
+            let entry = j
+                .iter_mut()
+                .find(|e| e.id == entry_id)
+                .ok_or("journal entry missing")?;
+            entry.attempted = idx + 1;
+            Ok(())
+        })?;
+        if let Err(e) = crate::tweaks::apply_item(item) {
+            return match crate::tweaks::rollback_entry_items(&entry_id, &items[..=idx]) {
+                Ok(()) => Err(format!("{e}; changes were rolled back")),
+                Err(re) => Err(format!(
+                    "{e}; rollback incomplete ({re}); undo it from the change history"
+                )),
+            };
+        }
+    }
+    crate::safety::with_journal(|j| {
+        let entry = j
+            .iter_mut()
+            .find(|e| e.id == entry_id)
+            .ok_or("journal entry missing")?;
+        entry.completed = true;
+        Ok(())
+    })?;
+    Ok(entry_id)
+}
+
+/// A PowerShell expression as a journal command line (run by
+/// `tweaks::run_cmdline` through `ps::run`, never re-split).
+fn ps_line(script: &str) -> String {
+    format!("powershell -Command {script}")
+}
+
+/// Open entries of this page (MSI, NIC, page file), for its Undo list. The
+/// timer has its own reset button.
+pub fn open_entries() -> Value {
+    let list: Vec<Value> = crate::safety::load_journal()
+        .unwrap_or_default()
+        .iter()
+        .filter(|e| {
+            e.tweak_id.starts_with("perftweaks:")
+                && e.tweak_id != "perftweaks:timer"
+                && e.completed
+                && !e.reverted
+        })
+        .map(|e| json!({ "id": e.id, "name": e.tweak_name, "time": e.time }))
+        .collect();
+    json!({ "entries": list })
+}
+
+/// Undo a change of this page; only entries of this page are accepted.
+pub fn undo(entry_id: String) -> Result<Value, String> {
+    let known = crate::safety::load_journal()
+        .unwrap_or_default()
+        .iter()
+        .any(|e| e.id == entry_id && e.tweak_id.starts_with("perftweaks:"));
+    if !known {
+        return Err("unknown entry".into());
+    }
+    crate::tweaks::revert_entry(&entry_id)
+}
+
 // ── MSI Mode ─────────────────────────────────────────────────────────────────
 
 // Get-PnpDevice gives a normalized Class + InstanceId regardless of how the
@@ -313,20 +411,21 @@ fn msi_path_allowed(devices: &Value, ps_path: &str) -> bool {
     })
 }
 
+const MSI_SUBKEY: &str =
+    r"Device Parameters\Interrupt Management\MessageSignaledInterruptProperties";
+
 pub fn msi_set(reg_path: String, enabled: bool) -> Result<String, String> {
     let val = if enabled { 1 } else { 0 };
     // regPath from msi_list() is already "HKLM:\SYSTEM\..." (PS-ready); this
     // replacen is a no-op for that shape, kept only for back-compat with any
     // stale HKEY_LOCAL_MACHINE-prefixed value a client might still send.
     let ps_path = reg_path.replacen("HKEY_LOCAL_MACHINE", "HKLM:", 1);
-    // The path is embedded in a single-quoted PS string and can only target
-    // device instances the scan produced (HKLM:\SYSTEM\CurrentControlSet\Enum\…).
-    // Wildcards are rejected: Set-ItemProperty -Path resolves them at the
-    // provider level, so a single '*' would flip MSI mode on EVERY device —
-    // disabling it on the boot storage controller bricks the next boot.
+    // Only device instances the scan produced (HKLM:\SYSTEM\CurrentControlSet\Enum\…);
+    // wildcards and quote characters are refused.
     if !ps_path.starts_with(r"HKLM:\SYSTEM\CurrentControlSet\Enum\")
         || !crate::ps::is_safe_ident(&ps_path)
         || ps_path.contains(['*', '?', '[', ']'])
+        || ps_path.split('\\').any(|seg| seg == ".." || seg == ".")
     {
         return Err("Invalid registry path for MSI mode".into());
     }
@@ -335,20 +434,44 @@ pub fn msi_set(reg_path: String, enabled: bool) -> Result<String, String> {
     if !msi_path_allowed(&devices, &ps_path) {
         return Err("MSI mode can only be changed for a present display or network adapter".into());
     }
-    let script = format!(
-        r#"
-$msiKey = Join-Path '{ps_path}' 'Device Parameters\Interrupt Management\MessageSignaledInterruptProperties'
-if (-not (Test-Path $msiKey)) {{ New-Item -Path $msiKey -Force | Out-Null }}
-Set-ItemProperty -Path $msiKey -Name 'MSISupported' -Value {val} -Type DWord -Force
-"OK, reboot required to take effect"
-"#
-    );
-    ps::run(&script).map(|_| {
-        format!(
-            "MSI {}, reboot required",
-            if enabled { "enabled" } else { "disabled" }
-        )
-    })
+    let _engine = crate::tweaks::engine_guard()?;
+    let instance = &ps_path[r"HKLM:\".len()..];
+    let tweak_id = format!("perftweaks:msi:{instance}");
+    let key = format!(r"{instance}\{MSI_SUBKEY}");
+    if let Some(open) = open_entry(&tweak_id) {
+        // Switching back is the undo of the open change, not a second change
+        // on top of it (which would capture this app's own value as "before").
+        let back = open.items.iter().any(|i| {
+            // "Not set" is the driver default, not 0: only an explicit
+            // earlier value counts as switching back.
+            matches!(i, ChangeItem::Registry { prev: Some(crate::safety::RegVal::Dword(v)), .. } if *v == val)
+        });
+        drop(_engine);
+        if back {
+            crate::tweaks::revert_entry(&open.id)?;
+            return Ok("MSI change undone, reboot required".into());
+        }
+        return Err("An MSI change for this device is still open; undo it first".into());
+    }
+    let prev = crate::tweaks::reg_read("HKLM", &key, "MSISupported")?;
+    apply_journaled(
+        &tweak_id,
+        &format!(
+            "MSI mode {} ({instance})",
+            if enabled { "on" } else { "off" }
+        ),
+        vec![ChangeItem::Registry {
+            root: "HKLM".into(),
+            path: key,
+            name: "MSISupported".into(),
+            prev,
+            new: crate::safety::RegVal::Dword(val),
+        }],
+    )?;
+    Ok(format!(
+        "MSI {}, reboot required",
+        if enabled { "enabled" } else { "disabled" }
+    ))
 }
 
 // ── Network Adapter Tweaks ────────────────────────────────────────────────────
@@ -401,16 +524,26 @@ if ($adapters.Count -eq 0) { '[]' } else { @($adapters) | ConvertTo-Json -Depth 
     }
 }
 
+const NET_KEYWORDS: &[&str] = &[
+    "*InterruptModeration",
+    "*RSS",
+    "*TCPChecksumOffloadIPv4",
+    "*LsoV2IPv4",
+    "*UDPChecksumOffloadIPv4",
+    "*IPChecksumOffloadIPv4",
+];
+
+fn net_set_line(adapter: &str, keyword: &str, value: &str) -> String {
+    ps_line(&format!(
+        "Set-NetAdapterAdvancedProperty -Name {} -RegistryKeyword {} -RegistryValue {} -ErrorAction Stop",
+        ps::quote_single(adapter),
+        ps::quote_single(keyword),
+        ps::quote_single(value)
+    ))
+}
+
 pub fn net_tweak(adapter: String, keyword: String, value: u32) -> Result<String, String> {
-    let allowed = [
-        "*InterruptModeration",
-        "*RSS",
-        "*TCPChecksumOffloadIPv4",
-        "*LsoV2IPv4",
-        "*UDPChecksumOffloadIPv4",
-        "*IPChecksumOffloadIPv4",
-    ];
-    if !allowed.contains(&keyword.as_str()) {
+    if !NET_KEYWORDS.contains(&keyword.as_str()) {
         return Err(format!("Disallowed keyword: {keyword}"));
     }
     // Adapter names come from net_adapters(); they never contain path
@@ -418,60 +551,157 @@ pub fn net_tweak(adapter: String, keyword: String, value: u32) -> Result<String,
     if !crate::ps::is_safe_regkey_name(&adapter) {
         return Err("Invalid adapter name".into());
     }
-    let script = format!(
-        "Set-NetAdapterAdvancedProperty -Name '{adapter}' -RegistryKeyword '{keyword}' -RegistryValue {value} -ErrorAction Stop; 'OK'"
-    );
-    ps::run(&script).map(|_| format!("{adapter}: {keyword} = {value}"))
+    let _engine = crate::tweaks::engine_guard()?;
+    let tweak_id = format!("perftweaks:nic:{adapter}:{keyword}");
+    let new = value.to_string();
+    if let Some(open) = open_entry(&tweak_id) {
+        // Setting the value from before the open change is its undo.
+        let back = open.items.iter().any(|i| {
+            matches!(i, ChangeItem::Command { revert, .. } if *revert == net_set_line(&adapter, &keyword, &new))
+        });
+        drop(_engine);
+        if back {
+            crate::tweaks::revert_entry(&open.id)?;
+            return Ok(format!("{adapter}: {keyword} restored"));
+        }
+        return Err(format!(
+            "A change of {keyword} on {adapter} is still open; undo it first"
+        ));
+    }
+    let prev = ps::run(&format!(
+        "(Get-NetAdapterAdvancedProperty -Name {} -RegistryKeyword {} -ErrorAction Stop).RegistryValue -join ','",
+        ps::quote_single(&adapter),
+        ps::quote_single(&keyword)
+    ))
+    .map_err(|e| format!("Cannot read {keyword} on {adapter}: {}", e.trim()))?;
+    let prev = prev.trim().to_string();
+    if prev.is_empty() || !prev.chars().all(|c| c.is_ascii_digit()) {
+        return Err(format!(
+            "{keyword} on {adapter} has an unexpected value ('{prev}'); nothing was changed"
+        ));
+    }
+    if prev == new {
+        return Ok(format!("{adapter}: {keyword} is already {new}"));
+    }
+    apply_journaled(
+        &tweak_id,
+        &format!("NIC {adapter}: {keyword} {prev} → {new}"),
+        vec![ChangeItem::Command {
+            applied: net_set_line(&adapter, &keyword, &new),
+            revert: net_set_line(&adapter, &keyword, &prev),
+        }],
+    )?;
+    Ok(format!("{adapter}: {keyword} = {value}"))
+}
+
+/// Restores every captured advanced property of one adapter, then restarts
+/// it once. A property that cannot be restored fails the undo (it can be
+/// retried) instead of being skipped silently.
+fn net_restore_script(adapter: &str, props: &[(String, Vec<String>)]) -> String {
+    let name = ps::quote_single(adapter);
+    let mut script = String::from("$e=@(); ");
+    for (keyword, values) in props {
+        let list = values
+            .iter()
+            .map(|v| ps::quote_single(v))
+            .collect::<Vec<_>>()
+            .join(",");
+        script.push_str(&format!(
+            "try {{ Set-NetAdapterAdvancedProperty -Name {name} -RegistryKeyword {} -RegistryValue @({list}) -NoRestart -ErrorAction Stop }} catch {{ $e += {} }}; ",
+            ps::quote_single(keyword),
+            ps::quote_single(keyword)
+        ));
+    }
+    script.push_str(&format!(
+        "Restart-NetAdapter -Name {name} -Confirm:$false -ErrorAction SilentlyContinue; if ($e.Count) {{ throw ('not restored: ' + ($e -join ', ')) }}"
+    ));
+    script
+}
+
+/// Advanced properties of one adapter: (keyword, registry values).
+type NetProps = Vec<(String, Vec<String>)>;
+
+/// Parses the capture of `net_reset_all`: adapters with their properties.
+fn parse_net_capture(v: &Value) -> Vec<(String, NetProps)> {
+    let rows: Vec<&Value> = match v {
+        Value::Array(a) => a.iter().collect(),
+        o @ Value::Object(_) => vec![o],
+        _ => vec![],
+    };
+    rows.iter()
+        .filter_map(|r| {
+            let name = r["name"].as_str()?.to_string();
+            let props = match &r["props"] {
+                Value::Array(a) => a.iter().collect::<Vec<_>>(),
+                o @ Value::Object(_) => vec![o],
+                _ => vec![],
+            };
+            let props = props
+                .iter()
+                .filter_map(|p| {
+                    let k = p["k"].as_str()?.to_string();
+                    let vals: Vec<String> = match &p["v"] {
+                        Value::Array(a) => a
+                            .iter()
+                            .filter_map(|x| x.as_str().map(String::from))
+                            .collect(),
+                        Value::String(s) => vec![s.clone()],
+                        _ => vec![],
+                    };
+                    (!vals.is_empty()).then_some((k, vals))
+                })
+                .collect();
+            Some((name, props))
+        })
+        .collect()
 }
 
 pub fn net_reset_all() -> Result<String, String> {
-    // One "OK|name" / "ERR|name|message" line per adapter so a failure on any
-    // adapter is reported instead of being swallowed.
-    let script = r#"
-Get-NetAdapter -Physical -ErrorAction Stop | Where-Object { $_.Status -eq 'Up' } | ForEach-Object {
-    $n = $_.Name
-    try {
-        Reset-NetAdapterAdvancedProperty -Name $n -DisplayName '*' -ErrorAction Stop
-        "OK|$n"
-    } catch {
-        "ERR|$n|$($_.Exception.Message -replace '[\r\n]+', ' ')"
-    }
-}
-"#;
-    summarize_net_reset(&ps::run(script)?)
-}
-
-fn summarize_net_reset(out: &str) -> Result<String, String> {
-    let mut ok = Vec::new();
-    let mut failed = Vec::new();
-    for line in out.lines().map(str::trim).filter(|l| !l.is_empty()) {
-        let mut parts = line.splitn(3, '|');
-        match (parts.next(), parts.next(), parts.next()) {
-            (Some("OK"), Some(name), _) => ok.push(name.to_string()),
-            (Some("ERR"), Some(name), msg) => {
-                failed.push(format!("{name}: {}", msg.unwrap_or("unknown error")))
-            }
-            _ => {}
-        }
-    }
-    if !failed.is_empty() {
+    let _engine = crate::tweaks::engine_guard()?;
+    if let Some(open) = open_entry("perftweaks:nicreset") {
         return Err(format!(
-            "Reset failed for {} adapter(s): {}{}",
-            failed.len(),
-            failed.join("; "),
-            if ok.is_empty() {
-                String::new()
-            } else {
-                format!(" (reset OK: {})", ok.join(", "))
-            }
+            "The adapter reset from {} is still open; undo it first",
+            open.time
         ));
     }
-    if ok.is_empty() {
+    // Capture every advanced property first, so the reset can be undone.
+    let captured = ps::run_json(
+        r#"
+@(Get-NetAdapter -Physical -ErrorAction Stop | Where-Object { $_.Status -eq 'Up' } | ForEach-Object {
+    $n = $_.Name
+    [PSCustomObject]@{
+        name  = $n
+        props = @(Get-NetAdapterAdvancedProperty -Name $n -ErrorAction Stop |
+            Where-Object { $_.RegistryKeyword } |
+            ForEach-Object { [PSCustomObject]@{ k = $_.RegistryKeyword; v = @($_.RegistryValue | ForEach-Object { [string]$_ }) } })
+    }
+})
+"#,
+    )
+    .map_err(|e| format!("Cannot capture adapter settings, nothing was reset: {e}"))?;
+    let adapters = parse_net_capture(&captured);
+    if adapters.is_empty() {
         return Ok("No connected physical adapters found; nothing was reset".into());
     }
+    let names: Vec<String> = adapters.iter().map(|(n, _)| n.clone()).collect();
+    let items = adapters
+        .iter()
+        .map(|(name, props)| ChangeItem::Command {
+            applied: ps_line(&format!(
+                "Reset-NetAdapterAdvancedProperty -Name {} -DisplayName '*' -ErrorAction Stop",
+                ps::quote_single(name)
+            )),
+            revert: ps_line(&net_restore_script(name, props)),
+        })
+        .collect();
+    apply_journaled(
+        "perftweaks:nicreset",
+        &format!("NIC reset to driver defaults ({})", names.join(", ")),
+        items,
+    )?;
     Ok(format!(
         "Advanced properties reset to driver defaults: {}",
-        ok.join(", ")
+        names.join(", ")
     ))
 }
 
@@ -541,65 +771,148 @@ if ($pfs) {
     ps::run_json(script).unwrap_or_else(|e| json!({ "error": e }))
 }
 
+/// Page-file configuration as captured before a change.
+struct PagefileState {
+    auto: bool,
+    files: Vec<(String, u32, u32)>,
+}
+
+fn pagefile_capture() -> Result<PagefileState, String> {
+    let v = ps::run_json(
+        r#"
+$cs = Get-WmiObject Win32_ComputerSystem -ErrorAction Stop
+[PSCustomObject]@{
+    auto  = [bool]$cs.AutomaticManagedPagefile
+    files = @(Get-WmiObject Win32_PageFileSetting -ErrorAction Stop | ForEach-Object {
+        [PSCustomObject]@{ name = $_.Name; init = [int]$_.InitialSize; max = [int]$_.MaximumSize } })
+}
+"#,
+    )
+    .map_err(|e| format!("Cannot read the page-file configuration, nothing was changed: {e}"))?;
+    let files = match &v["files"] {
+        Value::Array(a) => a.iter().collect::<Vec<_>>(),
+        o @ Value::Object(_) => vec![o],
+        _ => vec![],
+    };
+    let mut out = Vec::new();
+    for f in files {
+        let name = f["name"].as_str().unwrap_or("").to_string();
+        if !pagefile_path_ok(&name) {
+            return Err(format!(
+                "Unexpected page-file entry '{name}'; nothing was changed"
+            ));
+        }
+        out.push((
+            name,
+            f["init"].as_u64().unwrap_or(0) as u32,
+            f["max"].as_u64().unwrap_or(0) as u32,
+        ));
+    }
+    Ok(PagefileState {
+        auto: v["auto"].as_bool().ok_or("page-file state unreadable")?,
+        files: out,
+    })
+}
+
+fn pagefile_path_ok(path: &str) -> bool {
+    let b = path.as_bytes();
+    b.len() >= 3
+        && b[0].is_ascii_alphabetic()
+        && b[1] == b':'
+        && b[2] == b'\\'
+        && crate::ps::is_safe_ident(path)
+        && !path.contains(['*', '?', '[', ']'])
+}
+
+/// Script that sets exactly `state`: entries not in it are removed.
+fn pagefile_state_script(state: &PagefileState) -> String {
+    let mut s = String::from(
+        "$cs = Get-WmiObject Win32_ComputerSystem -ErrorAction Stop; $cs.AutomaticManagedPagefile = $false; $cs.Put() | Out-Null; ",
+    );
+    // Create/update the wanted entries BEFORE removing others, so the system
+    // never ends up without a page file when a later step fails.
+    for (name, init, max) in &state.files {
+        let q = ps::quote_single(name);
+        s.push_str(&format!(
+            "$pf = Get-WmiObject Win32_PageFileSetting -ErrorAction Stop | Where-Object {{ $_.Name -eq {q} }} | Select-Object -First 1; \
+             if (-not $pf) {{ $pf = ([WmiClass]'Win32_PageFileSetting').CreateInstance(); $pf.Name = {q} }}; \
+             $pf.InitialSize = {init}; $pf.MaximumSize = {max}; $pf.Put() | Out-Null; "
+        ));
+    }
+    let keep = state
+        .files
+        .iter()
+        .map(|(n, _, _)| ps::quote_single(n))
+        .collect::<Vec<_>>()
+        .join(",");
+    s.push_str(&format!(
+        "$keep = @({keep}); Get-WmiObject Win32_PageFileSetting -ErrorAction Stop | Where-Object {{ $keep -notcontains $_.Name }} | ForEach-Object {{ $_.Delete() }}; "
+    ));
+    if state.auto {
+        s.push_str("$cs = Get-WmiObject Win32_ComputerSystem -ErrorAction Stop; $cs.AutomaticManagedPagefile = $true; $cs.Put() | Out-Null; ");
+    }
+    s.push_str("'OK'");
+    s
+}
+
+fn pagefile_change(
+    label: &str,
+    target: impl FnOnce(&PagefileState) -> PagefileState,
+) -> Result<String, String> {
+    let _engine = crate::tweaks::engine_guard()?;
+    if let Some(open) = open_entry("perftweaks:pagefile") {
+        return Err(format!(
+            "The page-file change from {} is still open; undo it first",
+            open.time
+        ));
+    }
+    let before = pagefile_capture()?;
+    let target = target(&before);
+    apply_journaled(
+        "perftweaks:pagefile",
+        &format!("Page file: {label}"),
+        vec![ChangeItem::Command {
+            applied: ps_line(&pagefile_state_script(&target)),
+            revert: ps_line(&pagefile_state_script(&before)),
+        }],
+    )?;
+    Ok(format!("Page file: {label}, reboot required"))
+}
+
 pub fn pagefile_set_auto() -> Result<String, String> {
-    let script = r#"
-$cs = Get-WmiObject Win32_ComputerSystem
-$cs.AutomaticManagedPagefile = $true
-$cs.Put() | Out-Null
-"Automatic pagefile management enabled, reboot required"
-"#;
-    ps::run(script).map(|s| s.trim().to_string())
+    pagefile_change("managed by Windows", |_| PagefileState {
+        auto: true,
+        files: vec![],
+    })
 }
 
 pub fn pagefile_set_custom(path: String, init_mb: u32, max_mb: u32) -> Result<String, String> {
-    // Pagefile paths must be local drive paths and must not contain PS quote
-    // characters or wildcards, the value is embedded in single-quoted PS
-    // strings and used in a `-like '{path}*'` comparison.
     let path = path.trim().to_string();
-    let is_local = path.len() >= 3
-        && path.as_bytes()[1] == b':'
-        && path.as_bytes()[2] == b'\\'
-        && path.as_bytes()[0].is_ascii_alphabetic();
-    if !is_local || !crate::ps::is_safe_ident(&path) || path.contains(['*', '?', '[', ']']) {
+    if !pagefile_path_ok(&path) {
         return Err("Invalid pagefile path".into());
     }
     if max_mb > 0 && init_mb > max_mb {
         return Err("Initial size cannot exceed maximum size".into());
     }
-    // Create/update the new pagefile setting BEFORE removing any old entry so
-    // the system never ends up without a pagefile when a later step fails.
-    let script = format!(
-        r#"
-$cs = Get-WmiObject Win32_ComputerSystem
-$cs.AutomaticManagedPagefile = $false
-$cs.Put() | Out-Null
-$pf = Get-WmiObject Win32_PageFileSetting -ErrorAction SilentlyContinue |
-    Where-Object {{ $_.Name -eq '{path}' }} | Select-Object -First 1
-if (-not $pf) {{
-    $pf = ([WmiClass]'Win32_PageFileSetting').CreateInstance()
-    $pf.Name = '{path}'
-}}
-$pf.InitialSize = {init_mb}
-$pf.MaximumSize = {max_mb}
-$pf.Put() | Out-Null
-Get-WmiObject Win32_PageFileSetting -ErrorAction SilentlyContinue |
-    Where-Object {{ $_.Name -like '{path}*' -and $_.Name -ne '{path}' }} |
-    ForEach-Object {{ $_.Delete() }}
-"Pagefile: {path} {init_mb}MB-{max_mb}MB, reboot required"
-"#
-    );
-    ps::run(&script).map(|s| s.trim().to_string())
+    let label = format!("{path} {init_mb}-{max_mb} MB");
+    // Page files on other drives stay as they are.
+    pagefile_change(&label, |before| {
+        let mut files: Vec<(String, u32, u32)> = before
+            .files
+            .iter()
+            .filter(|(n, _, _)| !n.eq_ignore_ascii_case(&path))
+            .cloned()
+            .collect();
+        files.push((path.clone(), init_mb, max_mb));
+        PagefileState { auto: false, files }
+    })
 }
 
 pub fn pagefile_disable() -> Result<String, String> {
-    let script = r#"
-$cs = Get-WmiObject Win32_ComputerSystem
-$cs.AutomaticManagedPagefile = $false
-$cs.Put() | Out-Null
-Get-WmiObject Win32_PageFileSetting -ErrorAction SilentlyContinue | ForEach-Object { $_.Delete() }
-"Pagefile disabled, reboot required (only recommended with 32 GB+ RAM)"
-"#;
-    ps::run(script).map(|s| s.trim().to_string())
+    pagefile_change("disabled", |_| PagefileState {
+        auto: false,
+        files: vec![],
+    })
 }
 
 #[cfg(test)]
@@ -630,16 +943,44 @@ mod tests {
     }
 
     #[test]
-    fn net_reset_reports_per_adapter_failures() {
-        assert!(summarize_net_reset("OK|Ethernet\r\nOK|Wi-Fi\r\n")
-            .unwrap()
-            .contains("Ethernet, Wi-Fi"));
-        let err = summarize_net_reset("OK|Ethernet\nERR|Wi-Fi|Access denied\n").unwrap_err();
-        assert!(err.contains("Wi-Fi: Access denied"));
-        assert!(err.contains("reset OK: Ethernet"));
-        assert!(summarize_net_reset("")
-            .unwrap()
-            .contains("nothing was reset"));
+    fn net_capture_is_parsed_and_restored_quoted() {
+        let v = json!([{ "name": "Ethernet", "props": [
+            { "k": "*RSS", "v": ["1"] },
+            { "k": "NetworkAddress", "v": "00'11" },
+            { "k": "*Empty", "v": [] }
+        ]}]);
+        let parsed = parse_net_capture(&v);
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].1.len(), 2, "empty values are not restored");
+        let script = net_restore_script(&parsed[0].0, &parsed[0].1);
+        assert!(script.contains("-RegistryKeyword '*RSS' -RegistryValue @('1')"));
+        assert!(script.contains("@('00''11')"), "{script}");
+        assert!(script.contains("throw"));
+        // A single adapter arrives as a bare object.
+        assert_eq!(parse_net_capture(&v[0]).len(), 1);
+    }
+
+    #[test]
+    fn pagefile_script_sets_exactly_the_captured_state() {
+        let state = PagefileState {
+            auto: false,
+            files: vec![(r"D:\pagefile.sys".into(), 1024, 4096)],
+        };
+        let s = pagefile_state_script(&state);
+        assert!(s.contains(r"$pf.Name = 'D:\pagefile.sys'"));
+        assert!(s.contains("$pf.InitialSize = 1024; $pf.MaximumSize = 4096"));
+        assert!(s.contains(r"$keep = @('D:\pagefile.sys')"));
+        assert!(!s.contains("AutomaticManagedPagefile = $true"));
+        let auto = pagefile_state_script(&PagefileState {
+            auto: true,
+            files: vec![],
+        });
+        assert!(auto.contains("$keep = @()"));
+        assert!(auto.contains("AutomaticManagedPagefile = $true"));
+        assert!(pagefile_path_ok(r"C:\pagefile.sys"));
+        assert!(!pagefile_path_ok(r"C:\page'file.sys"));
+        assert!(!pagefile_path_ok(r"\\server\share\pagefile.sys"));
+        assert!(!pagefile_path_ok(r"C:\*.sys"));
     }
 
     #[test]

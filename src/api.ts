@@ -53,6 +53,8 @@ export const api = {
   pagefileSetAuto: () => invoke<string>("cmd_pagefile_set_auto"),
   pagefileSetCustom: (path: string, initMb: number, maxMb: number) => invoke<string>("cmd_pagefile_set_custom", { path, initMb, maxMb }),
   pagefileDisable: () => invoke<string>("cmd_pagefile_disable"),
+  perfOpenEntries: () => invoke<{ entries: { id: string; name: string; time: string }[] }>("cmd_perf_open_entries"),
+  perfUndo: (entryId: string) => invoke<any>("cmd_perf_undo", { entryId }),
   // hw monitor
   hwFull: () => invoke<any>("cmd_hw_full"),
   hwProfile: () => invoke<any>("cmd_hw_profile"),
