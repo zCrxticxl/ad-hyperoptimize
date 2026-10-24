@@ -15,6 +15,9 @@ struct CtxEntry {
     desc: &'static str,
     path: &'static str, // full registry path (HKLM: or HKCU: prefix)
     admin: bool,
+    /// Part of "Disable all bloat". Useful entries (Defender scan, Previous
+    /// Versions, Open with, pinning, OneDrive status) are only toggled one by one.
+    bulk: bool,
 }
 
 static ENTRIES: &[CtxEntry] = &[
@@ -23,90 +26,91 @@ static ENTRIES: &[CtxEntry] = &[
         desc: "Network sharing submenu on files and folders",
         path: r"HKLM:\SOFTWARE\Classes\*\shellex\ContextMenuHandlers\Sharing",
         admin: true,
+        bulk: true,
     },
     CtxEntry {
         name: "Cast to Device",
         desc: "Streams media to a Chromecast or DLNA device",
         path: r"HKLM:\SOFTWARE\Classes\*\shellex\ContextMenuHandlers\{7AD84985-87B4-4a16-BE58-8B72A5B390F7}",
         admin: true,
+        bulk: true,
     },
     CtxEntry {
         name: "Previous Versions",
         desc: "Restore from shadow copies / File History",
         path: r"HKLM:\SOFTWARE\Classes\AllFilesystemObjects\shellex\ContextMenuHandlers\{596AB062-B4D2-4215-9F74-E9109B0A8153}",
         admin: true,
+        bulk: false,
     },
     CtxEntry {
         name: "Scan with Microsoft Defender",
         desc: "Adds Defender scan to every right-click",
         path: r"HKLM:\SOFTWARE\Classes\*\shellex\ContextMenuHandlers\EPP",
         admin: true,
+        bulk: false,
     },
     CtxEntry {
         name: "Include in Library",
         desc: "Adds folders to Windows libraries",
         path: r"HKLM:\SOFTWARE\Classes\Folder\shellex\ContextMenuHandlers\Library Location",
         admin: true,
+        bulk: true,
     },
     CtxEntry {
         name: "Pin to Start",
         desc: "Pin to Start menu option on apps",
         path: r"HKLM:\SOFTWARE\Classes\*\shell\pintostartscreen",
         admin: true,
-    },
-    CtxEntry {
-        name: "Pin to Taskbar",
-        desc: "Pin to Taskbar option on shortcuts/EXEs",
-        path: r"HKLM:\SOFTWARE\Classes\*\shell\taskbarpin",
-        admin: true,
+        bulk: false,
     },
     CtxEntry {
         name: "Edit with Paint 3D",
         desc: "Adds Paint 3D to image file right-click",
         path: r"HKLM:\SOFTWARE\Classes\SystemFileAssociations\.bmp\Shell\3D Edit",
         admin: true,
+        bulk: true,
     },
     CtxEntry {
         name: "Open with (extra submenu)",
         desc: "Secondary Open With submenu for all files",
         path: r"HKLM:\SOFTWARE\Classes\*\shellex\ContextMenuHandlers\Open With",
         admin: true,
+        bulk: false,
     },
     CtxEntry {
         name: "OneDrive - Sync status",
         desc: "OneDrive file sync overlay and context menu",
         path: r"HKCU:\Software\Classes\*\shellex\ContextMenuHandlers\FileSyncEx",
         admin: false,
+        bulk: false,
     },
     CtxEntry {
         name: "OneDrive - Folder sync",
         desc: "OneDrive folder sync status icons",
         path: r"HKCU:\Software\Classes\Folder\shellex\ContextMenuHandlers\FileSyncEx",
         admin: false,
+        bulk: false,
     },
     CtxEntry {
         name: "Send to - Bluetooth",
         desc: "Bluetooth option in Send To submenu",
         path: r"HKLM:\SOFTWARE\Classes\AllFilesystemObjects\shellex\ContextMenuHandlers\SendTo",
         admin: true,
+        bulk: false,
     },
     CtxEntry {
         name: "Restore to previous version",
         desc: "File-level shadow copy restore (duplicate of Previous Versions)",
         path: r"HKLM:\SOFTWARE\Classes\AllFilesystemObjects\shellex\ContextMenuHandlers\{450D8FBA-AD25-11D0-98A8-0800361B1103}",
         admin: true,
+        bulk: false,
     },
     CtxEntry {
         name: "Windows Ink Workspace",
         desc: "Annotate in Windows Ink when right-clicking images",
         path: r"HKLM:\SOFTWARE\Classes\*\shell\ms-penworkspace",
         admin: true,
-    },
-    CtxEntry {
-        name: "Print to PDF (printto verb)",
-        desc: "Print to PDF option shown when right-clicking documents",
-        path: r"HKLM:\SOFTWARE\Classes\*\shell\printto",
-        admin: true,
+        bulk: true,
     },
 ];
 
@@ -157,6 +161,7 @@ pub fn list_entries() -> Value {
                 "desc":    e.desc,
                 "path":    e.path,
                 "admin":   e.admin,
+                "bulk":    e.bulk,
                 "present": present,
                 "enabled": enabled,
             })
@@ -202,10 +207,7 @@ pub fn disable_all_bloat() -> Result<String, String> {
     let mut disabled = 0usize;
     let mut errors = Vec::<String>::new();
 
-    for e in ENTRIES {
-        if !e.admin {
-            // HKCU entries, don't need admin, always attempt
-        }
+    for e in ENTRIES.iter().filter(|e| e.bulk) {
         match toggle_entry(e.path.to_string(), false) {
             Ok(s) if s == "Disabled" => disabled += 1,
             Ok(_) => {}

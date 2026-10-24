@@ -16,6 +16,8 @@ export default function GameProfiles() {
     ultimate:         t("gameprofPlanUltimate"),
     high_performance: t("gameprofPlanHighPerformance"),
     balanced:         t("gameprofPlanBalanced"),
+    // gameprofile.rs BATTERY_NOTE
+    "unchanged (battery device: game profiles do not switch the power plan)": t("gameprofPlanBattery"),
   };
 
   const [games, setGames]           = useState<any[]>([]);

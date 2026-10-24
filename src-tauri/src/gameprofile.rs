@@ -262,7 +262,24 @@ fn set_power_plan(guid: &str) -> Result<(), String> {
 }
 
 /// Apply the preset's plan; returns the label of the plan actually applied.
+/// Battery devices keep their power plan: High/Ultimate Performance costs
+/// battery and heat there, and the health check offers it only on desktops.
+fn has_battery() -> bool {
+    static BATTERY: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *BATTERY.get_or_init(|| {
+        ps::run("@(Get-CimInstance Win32_Battery -ErrorAction SilentlyContinue).Count")
+            .ok()
+            .and_then(|s| s.trim().parse::<u32>().ok())
+            .is_some_and(|n| n > 0)
+    })
+}
+
+const BATTERY_NOTE: &str = "unchanged (battery device: game profiles do not switch the power plan)";
+
 fn apply_power_plan_for_preset(game: &Game, preset: &str) -> Result<String, String> {
+    if has_battery() {
+        return Ok(BATTERY_NOTE.into());
+    }
     let (guid, label) = match plan_label_for_preset(game, preset) {
         "ultimate" => match resolve_ultimate_plan() {
             Some(g) => (g, "ultimate".to_string()),
@@ -344,6 +361,9 @@ fn clear_prev_plan() {
 /// plan with an already-applied game plan). A stale record (the user switched
 /// plans after the app's apply) is replaced by the current plan.
 fn record_prev_plan(state: Option<&SharedState>) -> Result<(), String> {
+    if has_battery() {
+        return Ok(()); // nothing is switched, so nothing to restore
+    }
     let active = get_active_plan_guid();
     let prev = match load_prev_record() {
         Some((g, applied)) if !record_is_stale(applied.as_deref(), active.as_deref()) => g,
