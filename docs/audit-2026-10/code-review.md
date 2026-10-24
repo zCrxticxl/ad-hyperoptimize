@@ -40,6 +40,8 @@ Severity:
 | `debloater.rs` | 940 | reviewed |
 | `gputweaks.rs` | 1053 | reviewed |
 | `regclean.rs` | 1035 | reviewed |
+| `diskanalyzer.rs` | 1360 | reviewed |
+| `gamedb.rs` | 1205 | reviewed (data) |
 
 ## Findings
 
@@ -76,3 +78,8 @@ Severity:
 | 29 | `lib.rs:cmd_nv_set_setting`, GPU tweaks | Info | Not yet routed through the broker (phase 3 is incomplete). Unelevated, HKLM writes fail with a clear message and are rolled back. | known (broker phase 3) |
 | 30 | `regclean.rs` scanners | Medium | **Valid entries could be offered as "orphaned".** Only the Uninstall scanner skipped paths on drives that are not present. Shell Extensions, SharedDLLs and App Paths judged unqualified names (`shell32.dll`) by `Path::exists` relative to the working directory, so they were always "missing". MUI and Run keys also flagged entries on an unplugged external drive. UNC paths made the elevated scan open network connections. Deletion still needs a selection and is backed up, but the list was wrong. | fixed: one rule `is_missing` for every scanner (local drive-letter path, drive present, file gone); test `only_local_qualified_paths_can_be_orphans` |
 | 31 | `regclean.rs:clean/restore` | Info | Checked: deletion only acts on entries that match a fresh scan exactly; every key is exported before it is deleted; restore only imports manifests and `.reg` files under the protected `regclean` folder (canonicalized). | ok |
+| 32 | `diskanalyzer.rs:scan_largest` | Medium | Unlike `walk()`, the "largest files" scan descended into junctions and directory symlinks (`symlink_metadata().is_dir()` is true for a junction). Folder sizes were counted twice. A junction pointing to an ancestor without files made the scan loop forever: `MAX_FILES` only counts files. | fixed: same reparse check as `walk()` |
+| 33 | `diskanalyzer.rs:move_items/organize_apply` | Low | `rename` falls back to copy + delete on *any* error, not only across drives. If the delete fails afterwards (locked file), the file exists twice; the message names the error. No data is lost. | accepted |
+| 34 | `diskanalyzer.rs:is_protected` | Info | Checked: `.`/`..`, NTFS streams, 8.3 aliases (non-existent paths), trailing dots/spaces, system folders, profile roots, `%ProgramData%` (holds the protected state folder), canonicalisation against junctions. Other users' profiles are not protected by design (admin tool, explicit selection). | ok |
+| 35 | `gamedb.rs` tips/settings | Low | Game advice with invented numbers or claims that are wrong/outdated: Dota "Vulkan … by 10-20%", Minecraft "Sodium … 2-3× FPS", PUBG "AA Ultra runs faster than lower settings", Valorant "Ultimate Performance can trigger Vanguard false flags", Cyberpunk "HDD streaming stutter: enable ReBAR", CS2 `Multicore Rendering` (CS:GO option, not in CS2) and `cl_interp_ratio`/`rate` "for 128-tick" (CS2 uses sub-tick), overlay "adds measurable latency". Elden Ring FPS Unlocker without the note that it only works offline (EAC off). | fixed: numbers and myths removed, the rest worded without unmeasured claims |
+| 36 | `gamedb.rs` | Info | The remaining game tips are community advice that the app cannot verify. CS2 recommends "Ultimate Performance", while `optregistry` rates plan gains as "usually small". | note |

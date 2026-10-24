@@ -62,7 +62,6 @@ Game {
                 s("Video",    "Effect Detail",           "Low"),
                 s("Video",    "Shader Detail",           "Low"),
                 s("Video",    "Boost Player Contrast",   "Enabled"),
-                s("Video",    "Multicore Rendering",     "Enabled"),
                 s("Video",    "Texture Filtering",       "Bilinear"),
                 s("Video",    "Anti-Aliasing (MSAA)",    "None"),
                 s("Video",    "V-Sync",                  "Disabled"),
@@ -99,8 +98,7 @@ Game {
         },
     },
     tips: &[
-        "Disable GeForce / Radeon overlay, adds measurable latency",
-        "cl_interp_ratio 1  |  rate 786432  for 128-tick",
+        "Disable the GeForce / Radeon overlay if you do not use it; overlays can add latency",
         "Keep Windows Game Mode on (the default); it prioritises the foreground game",
         "Set Windows power plan to Ultimate Performance before launching",
     ],
@@ -159,7 +157,6 @@ Game {
         },
     },
     tips: &[
-        "Do NOT use Ultimate Performance, can trigger Vanguard false flags",
         "Close all overlays (Discord, Steam, GeForce), Vanguard scans them",
         "Cap FPS at monitor refresh + 10% to reduce GPU heat and coil whine",
         "Use Fullscreen, not Borderless, lower input lag",
@@ -584,7 +581,7 @@ Game {
         },
     },
     tips: &[
-        "Vulkan API typically outperforms DX11/DX9 on Dota 2 by 10-20%",
+        "Vulkan is faster than DX11 on some systems; compare both on yours",
         "Game Screen Render Quality 100%, reducing it makes heroes hard to identify",
     ],
 },
@@ -652,7 +649,6 @@ Game {
         "Film Grain / Chromatic Aberration / DOF off, massive clarity improvement with zero FPS cost",
         "Frame Generation requires RTX 4000 (DLSS3) or RX 7000 / RTX 3000+ (FSR3)",
         "Texture Quality High vs Ultra, minimal FPS delta, big VRAM delta (use High on <12 GB)",
-        "Disable HDD-based city streaming stutter: enable ReBAR / Smart Access Memory in BIOS",
     ],
 },
 
@@ -705,7 +701,7 @@ Game {
     tips: &[
         "Texture Quality Maximum, negligible performance impact, huge visual improvement",
         "Motion Blur Off, essential: obscures parry timing windows",
-        "Use the community FPS Unlocker mod to break the 60 FPS cap (120 FPS gameplay at higher Hz)",
+        "The community FPS Unlocker mod breaks the 60 FPS cap, but only offline: it needs Easy Anti-Cheat disabled",
         "Depth of Field on Medium: the game uses DOF as a gameplay cue for item highlights",
     ],
 },
@@ -947,7 +943,7 @@ Game {
         },
     },
     tips: &[
-        "Sodium (Fabric) outperforms OptiFine on modern Java, 2-3× FPS improvement",
+        "Sodium (Fabric) is usually faster than OptiFine on current Java versions",
         "Allocate 6 GB RAM max, over-allocation causes GC pauses (worse than too little)",
         "-XX:+UseG1GC -XX:G1NewSizePercent=20 -XX:G1ReservePercent=20 JVM flags for smoother GC",
         "Simulation Distance separate from Render Distance, keep simulation lower than render",
@@ -1007,7 +1003,6 @@ Game {
     },
     tips: &[
         "Textures Ultra + View Distance Ultra, these two have the biggest gameplay impact regardless of preset",
-        "Anti-Aliasing Ultra in PUBG actually runs faster than lower settings due to UE4 implementation",
         "Foliage Very Low: significant FPS gain, reduces hiding spots (not bannable, server-side)",
         "Motion Blur Off, reduces target tracking clarity significantly",
     ],
