@@ -1696,6 +1696,7 @@ export const ui: Partial<UiText> = {
   restartAdminHint: "Uygulamayı yönetici haklarıyla yeniden başlatır (Windows UAC ile sorar).",
   restartAdminDev: "Geliştirme modu: uygulama burada kendini yeniden başlatamaz. Terminali yönetici olarak açın ve «npm run tauri dev» komutunu yeniden çalıştırın.",
   restartAdminDeclined: "Yönetici isteği reddedildi.",
+  bootAlreadyDefault: "zaten Windows varsayılanı – geri alınacak bir şey yok",
 };
 
 export const tweaks: Record<string, { name?: string; description?: string; rationale?: string; impact?: string }> = {

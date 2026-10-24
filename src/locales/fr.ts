@@ -1696,6 +1696,7 @@ export const ui: Partial<UiText> = {
   restartAdminHint: "Redémarre l'application avec les droits administrateur (Windows le demande via l'UAC).",
   restartAdminDev: "Mode développement : l'application ne peut pas se relancer elle-même ici. Ouvrez le terminal en administrateur et relancez « npm run tauri dev ».",
   restartAdminDeclined: "La demande d'administrateur a été refusée.",
+  bootAlreadyDefault: "est déjà la valeur par défaut de Windows – rien à annuler",
 };
 
 export const tweaks: Record<string, { name?: string; description?: string; rationale?: string; impact?: string }> = {

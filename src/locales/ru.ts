@@ -1696,6 +1696,7 @@ export const ui: Partial<UiText> = {
   restartAdminHint: "Перезапускает приложение с правами администратора (Windows спросит через UAC).",
   restartAdminDev: "Режим разработки: приложение не может само перезапуститься. Откройте терминал от имени администратора и снова выполните «npm run tauri dev».",
   restartAdminDeclined: "Запрос прав администратора отклонён.",
+  bootAlreadyDefault: "уже соответствует стандарту Windows – отменять нечего",
 };
 
 export const tweaks: Record<string, { name?: string; description?: string; rationale?: string; impact?: string }> = {

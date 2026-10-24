@@ -258,7 +258,10 @@ export default function BootOptimizer({ admin }: { admin: boolean }) {
     if (!admin || busy) return;
     if (!window.confirm(t("bootConfirmRevert").replace("{name}", nameOf(id)))) return;
     setBusy(id); push(`${t("logReverting")} ${nameOf(id)}…`);
-    try { await api.bootTweakRevert(id); push(`↩ ${nameOf(id)} ${t("gpuLogReset")}`); }
+    try {
+      const r = await api.bootTweakRevert(id);
+      push(r?.alreadyWindowsDefault ? `ℹ ${nameOf(id)} ${t("bootAlreadyDefault")}` : `↩ ${nameOf(id)} ${t("gpuLogReset")}`);
+    }
     catch (e: any) { push(`✘ ${id}: ${e}`); setErr(String(e)); }
     finally { setBusy(null); refresh(); }
   };

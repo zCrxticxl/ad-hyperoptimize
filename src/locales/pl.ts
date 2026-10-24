@@ -1696,6 +1696,7 @@ export const ui: Partial<UiText> = {
   restartAdminHint: "Uruchamia aplikację ponownie z uprawnieniami administratora (Windows pyta przez UAC).",
   restartAdminDev: "Tryb deweloperski: aplikacja nie może tu sama się zrestartować. Otwórz terminal jako administrator i ponownie uruchom „npm run tauri dev”.",
   restartAdminDeclined: "Prośba o uprawnienia administratora została odrzucona.",
+  bootAlreadyDefault: "to już domyślna wartość Windows – nie ma czego cofać",
 };
 
 export const tweaks: Record<string, { name?: string; description?: string; rationale?: string; impact?: string }> = {

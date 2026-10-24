@@ -470,17 +470,55 @@ pub fn revert_tweak(id: String) -> Result<Value, String> {
     }
     // Exact undo from the journal (restores the captured previous value).
     let jid = tweak_journal_id(&id);
-    let entry = crate::safety::load_journal()?
+    match crate::safety::load_journal()?
         .into_iter()
         .rev()
         .find(|e| e.tweak_id == jid && !e.reverted)
-        .ok_or_else(|| {
-            format!(
-                "No recorded previous value for {id} (applied by an older version or outside the app); nothing was changed"
-            )
-        })?;
-    crate::tweaks::revert_entry(&entry.id)?;
-    Ok(json!({ "ok": true, "id": id, "entryId": entry.id }))
+    {
+        Some(entry) => {
+            crate::tweaks::revert_entry(&entry.id)?;
+            Ok(json!({ "ok": true, "id": id, "entryId": entry.id }))
+        }
+        None => reset_to_windows_default(&id),
+    }
+}
+
+/// Windows default of an element whose tweak value differs from it
+/// (`bcdedit /set` value). Elements not listed are at the Windows default
+/// when the tweak is applied, so there is nothing to undo.
+fn windows_default(element: &str) -> Option<&'static str> {
+    match element {
+        "timeout" => Some("30"),
+        _ => None,
+    }
+}
+
+/// Undo without a recorded previous value (applied by an older version or
+/// another tool): reset the element to its Windows default and read it back.
+fn reset_to_windows_default(id: &str) -> Result<Value, String> {
+    let t = TWEAKS
+        .iter()
+        .find(|t| t.id == id)
+        .ok_or_else(|| format!("Unknown tweak: {id}"))?;
+    if !ps::is_admin() {
+        return Err("Changing boot configuration requires administrator rights".into());
+    }
+    let elems = read_elements(t.target)
+        .map_err(|e| format!("reading BCD {} failed: {}", t.target, e.trim()))?;
+    if !is_at_desired(elems.get(t.element).map(String::as_str), t.desired) {
+        return Ok(json!({ "ok": true, "id": id, "notActive": true }));
+    }
+    let Some(default) = windows_default(t.element) else {
+        return Ok(json!({ "ok": true, "id": id, "alreadyWindowsDefault": true }));
+    };
+    let _engine = crate::tweaks::engine_guard()?;
+    ps::exec("bcdedit.exe", &["/set", t.target, t.element, default])
+        .map_err(|e| format!("Resetting {id} failed: {}", e.trim()))?;
+    let now = read_elements(t.target)?;
+    if !is_at_desired(now.get(t.element).map(String::as_str), Some(default)) {
+        return Err(format!("{} did not change", t.element));
+    }
+    Ok(json!({ "ok": true, "id": id, "windowsDefault": true }))
 }
 
 #[cfg(test)]
@@ -488,6 +526,27 @@ mod tests {
     use super::*;
 
     const ENUM_DE: &str = "Windows-Startladeprogramm\n-------------------------\nidentifier              {9dea862c-5cdd-4e70-acc1-f32b344d4795}\ndevice                  partition=C:\ndescription             Windows 11\nlocale                  de-DE\nbootlog                 Nein\nnx                      OptIn\nbootmenupolicy          Standard\ntestsigning             Ja\nnumproc                 4\ntimeout                 30\ndisplayorder            {current}\n                        {a1b2}\n";
+
+    #[test]
+    fn tweaks_without_listed_default_set_the_windows_default() {
+        // Elements without a windows_default entry must be set to the
+        // Windows default by the tweak itself; otherwise a journal-less undo
+        // would wrongly report "nothing to undo".
+        for t in TWEAKS {
+            if windows_default(t.element).is_none() {
+                assert!(
+                    matches!(
+                        (t.element, t.desired),
+                        ("numproc", None)
+                            | ("bootmenupolicy", Some("standard"))
+                            | ("testsigning", Some("off"))
+                    ),
+                    "{}",
+                    t.id
+                );
+            }
+        }
+    }
 
     #[test]
     fn parses_localized_enum_output() {

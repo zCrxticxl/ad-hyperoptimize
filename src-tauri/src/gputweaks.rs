@@ -564,9 +564,11 @@ pub fn scan() -> serde_json::Value {
             } else {
                 "unknown"
             };
+            // A journal entry restores the saved values; without one an
+            // active tweak is reset to its driver defaults.
             let can_revert = journal.iter().any(|entry| {
                 entry.tweak_id == format!("gpu:{}", tw.id) && entry.completed && !entry.reverted
-            });
+            }) || matches!(status, "applied" | "partial");
             serde_json::json!({
                 "id":              tw.id,
                 "name":            tw.name,
@@ -594,7 +596,7 @@ pub fn scan() -> serde_json::Value {
 }
 
 pub fn do_tweak(id: String, driver_key: String, applying: bool) -> Result<String, String> {
-    if is_blocked(&id) {
+    if applying && is_blocked(&id) {
         return Err("GPU tweak has no verified effect or safe restore path".into());
     }
     if applying && is_legacy_noop(&id) {
@@ -622,13 +624,18 @@ pub fn do_tweak(id: String, driver_key: String, applying: bool) -> Result<String
     }
     let tweak_id = format!("gpu:{id}");
     if !applying {
-        let entry = safety::load_journal()?
+        let open = safety::load_journal()?
             .into_iter()
             .rev()
-            .find(|entry| entry.tweak_id == tweak_id && entry.completed && !entry.reverted)
-            .ok_or("No saved GPU state to restore")?;
-        tweaks::revert_entry(&entry.id)?;
-        return Ok(format!("Restored previous state for {}", tw.name));
+            .find(|entry| entry.tweak_id == tweak_id && entry.completed && !entry.reverted);
+        return match open {
+            Some(entry) => {
+                tweaks::revert_entry(&entry.id)?;
+                Ok(format!("Restored previous state for {}", tw.name))
+            }
+            // Applied by another tool or an older version: driver defaults.
+            None => reset_to_defaults(&id),
+        };
     }
     #[cfg(windows)]
     {
@@ -730,6 +737,59 @@ pub fn do_tweak(id: String, driver_key: String, applying: bool) -> Result<String
     #[cfg(not(windows))]
     {
         Err("Windows only".into())
+    }
+}
+
+/// Undo without a saved previous state: the catalog's revert values (the
+/// driver / Windows defaults) are written after the touched keys are backed
+/// up. Used when the tweak was applied outside this app or its journal entry
+/// cannot be verified.
+pub(crate) fn reset_to_defaults(id: &str) -> Result<String, String> {
+    let tweaks = catalog();
+    let tw = tweaks
+        .iter()
+        .find(|tw| tw.id == id)
+        .ok_or_else(|| format!("Unknown GPU tweak: {id}"))?;
+    let (_, _, driver_key) = detect_gpu();
+    if !matches!(detect_status(tw, &driver_key), "applied" | "partial") {
+        return Err("tweak is not currently active, nothing to undo".into());
+    }
+    if !crate::ps::is_admin() {
+        return Err(
+            "Undoing GPU tweaks needs administrator rights. Restart the app as admin.".into(),
+        );
+    }
+    let _engine = tweaks::engine_guard()?;
+    for action in &tw.actions {
+        let key = match action {
+            TweakAction::DriverReg { .. } => Some(("HKLM", driver_key.as_str())),
+            TweakAction::FixedReg { root, path, .. } => Some((*root, *path)),
+            _ => None,
+        };
+        if let Some((root, path)) = key {
+            if root == "HKLM" && path == driver_key && driver_key.is_empty() {
+                return Err("GPU driver registry key not found".into());
+            }
+            safety::backup_registry_key(root, path)
+                .map_err(|e| format!("registry backup failed, nothing changed: {e}"))?;
+        }
+    }
+    let errs: Vec<String> = tw
+        .actions
+        .iter()
+        .filter_map(|a| apply_action(a, &driver_key, false).err())
+        .collect();
+    if !errs.is_empty() {
+        return Err(format!("undo incomplete: {}", errs.join("; ")));
+    }
+    match detect_status(tw, &driver_key) {
+        "applied" | "partial" => {
+            Err("the defaults were written, but the tweak still reads as active".into())
+        }
+        _ => Ok(format!(
+            "{} reset to the driver defaults (no saved previous state)",
+            tw.name
+        )),
     }
 }
 

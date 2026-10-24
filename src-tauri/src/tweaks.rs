@@ -1463,12 +1463,10 @@ pub fn list_with_status() -> Value {
             } else {
                 "live"
             };
-            // canUndo: true when we have a journal entry (precise restore with
-            // saved previous values) OR when live detection confirms the tweak
-            // is currently active AND a force-revert would not have to guess
-            // (covers "app reinstalled / journal lost" for RegSet + Service
-            // tweaks). Captured Cmd tweaks always require the journal.
-            let can_undo = undoable || (live == "applied" && force_revertable(t));
+            // canUndo: a journal entry restores the saved previous values;
+            // without one, an active tweak is reset to the Windows default
+            // (see force_revert).
+            let can_undo = undoable || matches!(live, "applied" | "partial");
             json!({
                 "id": t.id, "name": t.name, "category": t.category,
                 "description": t.description, "rationale": t.rationale,
@@ -1481,45 +1479,6 @@ pub fn list_with_status() -> Value {
         })
         .collect();
     json!(out)
-}
-
-/// Journal-less reset of a retired tweak's policy value: removing a value
-/// under `SOFTWARE\Policies` returns it to "not configured", which is the
-/// Windows default by definition. Only for retired tweaks (they can no longer
-/// be re-applied to get a journal Undo); everything else keeps refusing.
-#[cfg_attr(not(windows), allow(dead_code))]
-fn retired_policy_reset_allowed(tweak_id: &str, path: &str) -> bool {
-    crate::optregistry::is_retired(tweak_id)
-        && path
-            .to_ascii_lowercase()
-            .starts_with("software\\policies\\")
-}
-
-/// The documented Windows default that switches a retired tweak off without
-/// a journal entry (applied by another tool or an old version). For FSE the
-/// global values are inert unless HonorUserFSEBehaviorMode is 1, so writing
-/// its default 0 ends the effect without guessing the other values.
-fn retired_known_default(
-    tweak_id: &str,
-) -> Option<(&'static str, &'static str, &'static str, RegVal)> {
-    match tweak_id {
-        "fse_optimizations_off" => Some((
-            "HKCU",
-            r"System\GameConfigStore",
-            "GameDVR_HonorUserFSEBehaviorMode",
-            RegVal::Dword(0),
-        )),
-        _ => None,
-    }
-}
-
-/// False when a journal-less revert would have to run a hardcoded guess:
-/// Cmd actions with a pre-apply capture only have an exact undo in the
-/// journal (the catalog `revert` is a default, not the user's prior state).
-fn force_revertable(t: &Tweak) -> bool {
-    !t.actions
-        .iter()
-        .any(|a| matches!(a, Action::Cmd { show: Some(_), .. }))
 }
 
 #[cfg_attr(not(windows), allow(unused_variables))]
@@ -2011,7 +1970,7 @@ pub fn revert(tweak_id: &str) -> Result<Value, String> {
     // ── 1. Journal path (precise: uses saved previous values + reg backups) ──
     // Find, execute and mark atomically: a concurrent revert of the same
     // entry sees it as already-reverted and does nothing.
-    if let Some(id) = safety::with_journal(|journal| {
+    let outcome = safety::with_journal(|journal| {
         let entry = match journal
             .iter_mut()
             .rev()
@@ -2026,7 +1985,10 @@ pub fn revert(tweak_id: &str) -> Result<Value, String> {
         let attempted = entry.attempted.min(entry.items.len());
         let already = entry.reverted_items.min(attempted);
         let stop = attempted - already;
-        refuse_untrusted(entry, stop)?;
+        if refuse_untrusted(entry, stop).is_err() {
+            // Not run; the catalog's Windows defaults are used instead below.
+            return Ok(Some(Err(entry.id.clone())));
+        }
         for offset in (0..stop).rev() {
             match revert_item(&entry.items[offset]) {
                 Ok(()) => entry.reverted_items += 1,
@@ -2034,60 +1996,117 @@ pub fn revert(tweak_id: &str) -> Result<Value, String> {
             }
         }
         entry.reverted = true;
-        Ok(Some(entry.id.clone()))
-    })? {
-        return Ok(json!({ "entryId": id, "status": "reverted" }));
+        Ok(Some(Ok(entry.id.clone())))
+    })?;
+    match outcome {
+        Some(Ok(id)) => return Ok(json!({ "entryId": id, "status": "reverted" })),
+        Some(Err(untrusted_id)) => return revert_untrusted(&untrusted_id, tweak_id),
+        None => {}
     }
 
-    // ── 2. Force-revert path (no journal, synthesize from catalog + live state) ──
+    // ── 2. No usable journal entry: restore the Windows default ──
+    force_revert(tweak_id)
+}
+
+/// What a journal-less undo writes for one catalog registry value: the
+/// documented Windows default. `Keep` leaves a value alone because another
+/// value already switches the setting off (FSE, see `fse_status`).
+#[derive(Debug, Clone, PartialEq)]
+enum WinDefault {
+    Set(RegVal),
+    Delete,
+    Keep,
+}
+
+/// Windows defaults of every registry value the catalog writes. A test
+/// keeps this table complete, so a journal-less undo never has to guess.
+fn windows_default(path: &str, name: &str) -> Option<WinDefault> {
+    use WinDefault::*;
+    let d = |v: u32| Set(RegVal::Dword(v));
+    let sz = |v: &str| Set(RegVal::Str(v.into()));
+    // Policy values: "not configured" (absent) is the Windows default.
+    if path
+        .to_ascii_lowercase()
+        .starts_with("software\\policies\\")
+    {
+        return Some(Delete);
+    }
+    Some(match name {
+        "GameDVR_Enabled" => d(1),
+        "AppCaptureEnabled" => Delete,
+        "SystemResponsiveness" => d(20),
+        "NetworkThrottlingIndex" => d(10),
+        "StartupDelayInMSec" => Delete,
+        "VisualFXSetting" => d(0),
+        // "Let Windows choose" mask of a default profile.
+        "UserPreferencesMask" => Set(RegVal::Raw {
+            ty: "REG_BINARY".into(),
+            hex: "9e1e078012000000".into(),
+        }),
+        "Enabled" if path.ends_with("AdvertisingInfo") => d(1),
+        "MenuShowDelay" => sz("400"),
+        "SubscribedContent-338389Enabled"
+        | "SoftLandingEnabled"
+        | "RotatingLockScreenOverlayEnabled"
+        | "SubscribedContent-338387Enabled" => d(1),
+        "GlobalUserDisabled" => Delete,
+        "MouseSpeed" => sz("1"),
+        "MouseThreshold1" => sz("6"),
+        "MouseThreshold2" => sz("10"),
+        "AllowAutoGameMode" | "AutoGameModeEnabled" => Delete,
+        "GameDVR_FSEBehaviorMode" | "GameDVR_EFSEFeatureFlags" => Keep,
+        "GameDVR_HonorUserFSEBehaviorMode" => d(0),
+        "HwSchMode" => Delete,
+        "Win32PrioritySeparation" => d(2),
+        "PowerThrottlingOff" => Delete,
+        "Priority" if path.ends_with("Tasks\\Games") => d(2),
+        "Scheduling Category" => sz("Medium"),
+        "OverlayTestMode" => Delete,
+        "ShowStartupPanel" | "UseNexusForGameBarEnabled" => Delete,
+        "EnableTransparency" => d(1),
+        "MinAnimate" => sz("1"),
+        "TaskbarDa" => d(1),
+        "Disabled" if path.ends_with("Windows Error Reporting") => Delete,
+        "HiberbootEnabled" => d(1),
+        "DisablePagingExecutive" => d(0),
+        "NtfsDisableLastAccessUpdate" => d(0x8000_0002),
+        "NtfsDisable8dot3NameCreation" => d(2),
+        "IsDynamicSearchBoxEnabled" => d(1),
+        "ShellFeedsTaskbarViewMode" => Delete,
+        "DisableAutoplay" => d(0),
+        "TCPTimedWaitDelay" | "IRPStackSize" => Delete,
+        _ => return None,
+    })
+}
+
+/// Undo without a journal entry (applied by another tool or an older
+/// version, or a journal entry this app cannot verify). Every value goes
+/// back to the newest registry backup when that really holds a different
+/// value, otherwise to the documented Windows default; the key is exported
+/// first. Captured commands run their catalog revert, which restores the
+/// Windows default (Balanced plan, hibernation on, …), not an earlier
+/// custom value; the result says so.
+fn force_revert(tweak_id: &str) -> Result<Value, String> {
     let t = catalog()
         .into_iter()
         .find(|t| t.id == tweak_id)
         .ok_or_else(|| format!("unknown tweak '{tweak_id}'"))?;
 
-    let live = detect_status(&t);
-    match live {
+    match detect_status(&t) {
         "not_applied" => return Err("tweak is not currently active, nothing to undo".into()),
         "unsupported" => {
             return Err("this tweak does not apply to this system, nothing to undo".into())
         }
-        // No journal entry and no live signal: running the catalog's
-        // hardcoded revert would impose a guessed default (e.g. Balanced
-        // plan, rss=disabled), not the user's previous state.
-        "unknown" => {
-            return Err(
-                "nothing recorded to undo: no journal entry exists for this tweak and its \
-                 current state cannot be read back, so the previous value is unknown"
-                    .into(),
-            )
-        }
         _ => {}
     }
-    if !force_revertable(&t) {
+    if t.requires_admin && !crate::ps::is_admin() {
         return Err(
-            "nothing recorded to undo: the previous value of this setting was only stored in \
-             the journal, which has no entry for it; refusing to guess a default"
-                .into(),
+            "Undoing this tweak needs administrator rights. Restart the app as admin.".into(),
         );
     }
 
-    #[cfg(windows)]
-    if crate::optregistry::is_retired(tweak_id) {
-        if let Some((root, path, name, default)) = retired_known_default(tweak_id) {
-            safety::backup_registry_key(root, path)
-                .map_err(|e| format!("registry backup failed, nothing changed: {e}"))?;
-            reg_write(root, path, name, &default)?;
-            return match detect_status(&t) {
-                "not_applied" => Ok(json!({ "status": "force_reverted", "journaled": false })),
-                other => Err(format!(
-                    "{root}\\{path}\\{name} was reset to the Windows default, but the setting still reads as {other}"
-                )),
-            };
-        }
-    }
-
-    // live == "applied" | "partial" → undo each action using catalog defaults
     let mut errs = Vec::new();
+    let mut used_default = false;
     for a in t.actions.iter().rev() {
         let res: Result<(), String> = match a {
             #[cfg(windows)]
@@ -2096,82 +2115,62 @@ pub fn revert(tweak_id: &str) -> Result<Value, String> {
                 path,
                 name,
                 value,
-            } => {
-                // Blind deletion would destroy values set by the user, Group
-                // Policy or other tools. Restore from the newest .reg backup
-                // when one exists; refuse when there is no backup and the
-                // value is present. Only a genuinely absent value is a no-op.
-                let restored = match safety::latest_backup_for(root, path) {
-                    Some(backup) => crate::ps::exec("reg.exe", &["import", &backup]).map(|_| ()),
-                    None => match reg_read(root, path, name) {
-                        Ok(Some(_)) => Err(format!(
-                            "no backup exists for {root}\\{path}\\{name}; refusing to delete \
-                             a value the app cannot prove it created — restore it manually \
-                             or re-apply the tweak and use journal Undo"
-                        )),
-                        other => other.map(|_| ()),
-                    },
-                };
-                // A retired tweak cannot be re-applied for a journal Undo, so
-                // a policy value it wrote would otherwise stay forever. For
-                // policies "not configured" (value absent) is the Windows
-                // default, not a guess; the key is exported first.
-                let still_tweak_value = matches!(
-                    reg_read(root, path, name),
-                    Ok(Some(ref cur)) if vals_eq(cur, value)
-                );
-                if retired_policy_reset_allowed(tweak_id, path) && still_tweak_value {
-                    safety::backup_registry_key(root, path)
-                        .and_then(|_| reg_delete(root, path, name))
-                } else {
-                    restored
+            } => (|| {
+                if !matches!(reg_read(root, path, name)?, Some(ref cur) if vals_eq(cur, value)) {
+                    return Ok(()); // this value is not (or no longer) the tweak's
                 }
-            }
+                if let Some(backup) = safety::latest_backup_for(root, path) {
+                    let _ = crate::ps::exec("reg.exe", &["import", &backup]);
+                    if !matches!(reg_read(root, path, name)?, Some(ref cur) if vals_eq(cur, value))
+                    {
+                        return Ok(()); // the backup held the earlier value
+                    }
+                }
+                let default = windows_default(path, name).ok_or_else(|| {
+                    format!("no known Windows default for {root}\\{path}\\{name}")
+                })?;
+                if default == WinDefault::Keep {
+                    return Ok(());
+                }
+                safety::backup_registry_key(root, path)
+                    .map_err(|e| format!("registry backup failed, {name} unchanged: {e}"))?;
+                used_default = true;
+                match default {
+                    WinDefault::Set(v) => reg_write(root, path, name, &v),
+                    _ => reg_delete(root, path, name),
+                }
+            })(),
             #[cfg(not(windows))]
             Action::RegSet { .. } => Ok(()),
             Action::Service { name, .. } => match service_default(name) {
-                Some(default) => service_set_start(name, default),
-                None => Err(format!(
-                    "no known Windows default for service '{name}'; refusing to guess"
-                )),
+                Some(default) => {
+                    used_default = true;
+                    service_set_start(name, default)
+                }
+                None => Err(format!("no known Windows default for service '{name}'")),
             },
-            Action::Cmd { revert, .. } => run_cmdline(revert),
+            Action::Cmd { revert, show, .. } => {
+                used_default |= show.is_some();
+                run_cmdline(revert)
+            }
         };
         if let Err(e) = res {
             errs.push(e);
         }
     }
 
-    // A .reg import "succeeds" even when the backup was taken after the tweak
-    // was applied (it then re-imports the tweak's own values). Only report
-    // success when every value really differs from what the tweak writes.
-    #[cfg(windows)]
-    if errs.is_empty() {
-        for a in &t.actions {
-            if let Action::RegSet {
-                root,
-                path,
-                name,
-                value,
-            } = a
-            {
-                match reg_read(root, path, name) {
-                    Ok(Some(cur)) if vals_eq(&cur, value) => errs.push(format!(
-                        "{root}\\{path}\\{name} still holds the tweak value after restoring \
-                         the newest backup (the backup already contained it); the original \
-                         value is unknown, so it was NOT restored"
-                    )),
-                    Ok(_) => {}
-                    Err(e) => errs.push(format!("could not verify restore: {e}")),
-                }
-            }
-        }
+    if !errs.is_empty() {
+        return Err(format!("undo incomplete: {}", errs.join("; ")));
     }
-
-    if errs.is_empty() {
-        Ok(json!({ "status": "force_reverted", "journaled": false }))
-    } else {
-        Err(format!("force revert errors: {}", errs.join("; ")))
+    match detect_status(&t) {
+        "applied" | "partial" => Err(
+            "the values were reset, but Windows still reports the setting as active \
+             (a policy or another tool may set it again)"
+                .into(),
+        ),
+        _ => Ok(
+            json!({ "status": "force_reverted", "journaled": false, "windowsDefault": used_default }),
+        ),
     }
 }
 
@@ -2183,7 +2182,7 @@ pub fn revert(tweak_id: &str) -> Result<Value, String> {
 /// unambiguous undo handle.
 pub fn revert_entry(entry_id: &str) -> Result<Value, String> {
     let _engine = engine_guard()?;
-    let id = safety::with_journal(|journal| {
+    let outcome = safety::with_journal(|journal| {
         let entry = journal
             .iter_mut()
             .find(|e| e.id == entry_id)
@@ -2198,7 +2197,9 @@ pub fn revert_entry(entry_id: &str) -> Result<Value, String> {
         let attempted = entry.attempted.min(entry.items.len());
         let already = entry.reverted_items.min(attempted);
         let stop = attempted - already;
-        refuse_untrusted(entry, stop)?;
+        if let Err(refusal) = refuse_untrusted(entry, stop) {
+            return Ok(Err((entry.tweak_id.clone(), refusal)));
+        }
         for offset in (0..stop).rev() {
             match revert_item(&entry.items[offset]) {
                 Ok(()) => entry.reverted_items += 1,
@@ -2206,9 +2207,53 @@ pub fn revert_entry(entry_id: &str) -> Result<Value, String> {
             }
         }
         entry.reverted = true;
-        Ok(entry.id.clone())
+        Ok(Ok(entry.id.clone()))
     })?;
-    Ok(json!({ "entryId": id, "status": "reverted" }))
+    match outcome {
+        Ok(id) => Ok(json!({ "entryId": id, "status": "reverted" })),
+        // An unverifiable entry of a catalog or GPU tweak is undone with the
+        // catalog's Windows defaults instead of its recorded steps.
+        Err((tweak_id, refusal)) => {
+            let known = catalog().iter().any(|t| t.id == tweak_id) || tweak_id.starts_with("gpu:");
+            if known {
+                revert_untrusted(entry_id, &tweak_id)
+            } else {
+                Err(refusal)
+            }
+        }
+    }
+}
+
+/// Marks a journal entry as done without running it.
+fn close_entry(entry_id: &str) -> Result<(), String> {
+    safety::with_journal(|journal| {
+        if let Some(e) = journal.iter_mut().find(|e| e.id == entry_id) {
+            e.reverted = true;
+        }
+        Ok(())
+    })
+}
+
+/// Undo for an entry whose recorded steps cannot be verified: the catalog
+/// defaults are applied (they do not come from the untrusted file), then the
+/// entry is closed. "Not active" also closes it: there is nothing left to do.
+fn revert_untrusted(entry_id: &str, tweak_id: &str) -> Result<Value, String> {
+    let res = match tweak_id.strip_prefix("gpu:") {
+        Some(gpu_id) => crate::gputweaks::reset_to_defaults(gpu_id)
+            .map(|m| json!({ "status": "force_reverted", "message": m })),
+        None => force_revert(tweak_id),
+    };
+    match res {
+        Ok(v) => {
+            close_entry(entry_id)?;
+            Ok(v)
+        }
+        Err(e) if e.contains("not currently active") => {
+            close_entry(entry_id)?;
+            Ok(json!({ "status": "already_default" }))
+        }
+        Err(e) => Err(e),
+    }
 }
 
 pub fn history() -> Value {
@@ -2244,23 +2289,34 @@ mod tests {
     }
 
     #[test]
-    fn journal_less_policy_reset_only_for_retired_tweaks() {
-        let cortana = "SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Search";
-        assert!(super::retired_policy_reset_allowed("cortana_off", cortana));
-        // Not retired: still refuses to delete without a record.
-        assert!(!super::retired_policy_reset_allowed(
-            "edge_prelaunch_off",
-            "SOFTWARE\\Policies\\Microsoft\\Edge"
-        ));
-        // Retired, but not a policy value: no Windows default by definition.
-        assert!(!super::retired_policy_reset_allowed(
-            "priority_separation",
-            "SYSTEM\\CurrentControlSet\\Control\\PriorityControl"
-        ));
-        assert!(!super::retired_policy_reset_allowed(
-            "cortana_off",
-            "SOFTWARE\\PoliciesX\\Foo"
-        ));
+    fn every_catalog_value_has_a_windows_default() {
+        let mut missing = Vec::new();
+        for t in catalog() {
+            for a in &t.actions {
+                if let Action::RegSet {
+                    path, name, value, ..
+                } = a
+                {
+                    match windows_default(path, name) {
+                        None => missing.push(format!("{}: {path}\\{name} = {value:?}", t.id)),
+                        // A default equal to the tweak value would make undo a no-op.
+                        Some(d) => {
+                            assert_ne!(d, WinDefault::Set(value.clone()), "{}: {name}", t.id)
+                        }
+                    }
+                }
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "no Windows default for:\n{}",
+            missing.join("\n")
+        );
+        assert_eq!(
+            windows_default("SOFTWARE\\Policies\\Microsoft\\Edge", "StartupBoostEnabled"),
+            Some(WinDefault::Delete)
+        );
+        assert_eq!(windows_default("x", "unknown"), None);
     }
 
     use super::*;
@@ -2320,7 +2376,6 @@ mod tests {
                 Action::Cmd { apply, show: Some(ShowCapture::PowerSettingIndex { .. }), .. }
                     if power_cmd_target(apply).is_some()
             )));
-            assert!(!force_revertable(&t));
         }
     }
 
@@ -2416,11 +2471,6 @@ mod tests {
         assert_eq!(fse_status(d(2), None), "not_applied");
         assert_eq!(fse_status(d(0), d(1)), "not_applied");
         assert_eq!(fse_status(None, None), "not_applied");
-        assert_eq!(
-            retired_known_default("fse_optimizations_off").map(|d| d.2),
-            Some("GameDVR_HonorUserFSEBehaviorMode")
-        );
-        assert!(retired_known_default("game_dvr_off").is_none());
     }
 
     #[test]

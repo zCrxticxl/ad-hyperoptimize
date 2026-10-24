@@ -1743,6 +1743,7 @@ const de = {
   restartAdminHint: "Startet die App mit Administratorrechten neu (Windows fragt per UAC).",
   restartAdminDev: "Entwicklungsmodus: Die App kann sich hier nicht selbst neu starten. Terminal als Administrator öffnen und „npm run tauri dev“ erneut ausführen.",
   restartAdminDeclined: "Die Administrator-Anfrage wurde abgelehnt.",
+  bootAlreadyDefault: "ist bereits der Windows-Standard – nichts rückgängig zu machen",
 };
 
 // ── English ───────────────────────────────────────────────────────────────────
@@ -3459,6 +3460,7 @@ const en: typeof de = {
   restartAdminHint: "Restarts the app with administrator rights (Windows asks via UAC).",
   restartAdminDev: "Development mode: the app cannot restart itself here. Open the terminal as administrator and run \"npm run tauri dev\" again.",
   restartAdminDeclined: "The administrator prompt was declined.",
+  bootAlreadyDefault: "is already the Windows default – nothing to undo",
 };
 
 export type UiText = typeof en;
