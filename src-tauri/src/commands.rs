@@ -208,6 +208,36 @@ pub static COMMANDS: &[(&str, Class, &str)] = &[
     ("cmd_fps_compare", Read, "app data"),
     ("cmd_latency_counters", Read, "performance counters"),
     (
+        "cmd_throttle_snapshot",
+        Read,
+        "performance counters, nvidia-smi",
+    ),
+    ("cmd_session_start", User, "starts the app's own sampler"),
+    (
+        "cmd_session_stop",
+        User,
+        "stops the sampler; writes app data",
+    ),
+    ("cmd_session_status", Read, "the app's own sampler"),
+    ("cmd_session_list", Read, "app data"),
+    (
+        "cmd_session_analyze",
+        Read,
+        "app data and a user-chosen CSV",
+    ),
+    ("cmd_session_delete", User, "app data"),
+    ("cmd_display_check", Read, "display configuration API"),
+    (
+        "cmd_audio_check",
+        Read,
+        "HKLM MMDevices (readable by users)",
+    ),
+    (
+        "cmd_game_storage_check",
+        Read,
+        "launcher files, disk info; fsutil query (verify as standard user)",
+    ),
+    (
         "cmd_stall_probe",
         Read,
         "timer measurement in the app process",
