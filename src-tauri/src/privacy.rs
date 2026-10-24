@@ -283,7 +283,7 @@ fn check_statuses() -> Result<std::collections::HashMap<String, bool>, String> {
 
 // ── public API ────────────────────────────────────────────────────────────────
 
-fn registry_targets(id: &str) -> &'static [(&'static str, &'static str, &'static str)] {
+pub(crate) fn registry_targets(id: &str) -> &'static [(&'static str, &'static str, &'static str)] {
     match id {
         "prv_telemetry_basic" => &[
             (
@@ -428,7 +428,7 @@ fn registry_targets(id: &str) -> &'static [(&'static str, &'static str, &'static
     }
 }
 
-fn service_target(id: &str) -> Option<&'static str> {
+pub(crate) fn service_target(id: &str) -> Option<&'static str> {
     match id {
         "prv_diagtrack_off" => Some("DiagTrack"),
         "prv_wer_off" => Some("WerSvc"),

@@ -234,6 +234,58 @@ fn trusted_revert(tweak_id: &str, revert: &str, static_reverts: &[&str]) -> Opti
     trusted_power_index(revert)
 }
 
+/// Whether the feature that recorded `tweak_id` can write this registry
+/// value. Undo writes the captured previous value elevated, so a migrated
+/// item is only data when its target is one this app itself declares;
+/// otherwise a planted entry could set any HKLM value (IFEO, Run, policies).
+fn registry_declared(tweak_id: &str, root: &str, path: &str, name: &str) -> bool {
+    let eq = |a: &str, b: &str| a.eq_ignore_ascii_case(b);
+    let listed = |targets: &[(&str, &str, &str)]| {
+        targets
+            .iter()
+            .any(|(r, p, n)| eq(r, root) && eq(p, path) && eq(n, name))
+    };
+    if let Some(id) = tweak_id.strip_prefix("privacy:") {
+        return listed(crate::privacy::registry_targets(id));
+    }
+    if let Some(id) = tweak_id.strip_prefix("gpu:") {
+        return crate::gputweaks::declares_registry(id, root, path, name);
+    }
+    if tweak_id.starts_with("nvCtrlPanel:") {
+        return crate::gputweaks::nv_panel_declares(root, path, name);
+    }
+    if tweak_id == "perftweaks:timer" {
+        return listed(&[(
+            "HKLM",
+            r"SYSTEM\CurrentControlSet\Control\Session Manager\kernel",
+            "GlobalTimerResolutionRequests",
+        )]);
+    }
+    if let Some(rest) = tweak_id.strip_prefix("startup:") {
+        // startup:<scope>:<value name>; the value name may contain ':'.
+        return rest.split_once(':').is_some_and(|(scope, entry_name)| {
+            crate::startup::approved_location(scope)
+                .is_some_and(|(r, p)| eq(r, root) && eq(p, path) && entry_name == name)
+        });
+    }
+    // Service-manager entries (service:<name>) can target any service and
+    // are therefore never trusted from the user-writable folder.
+    listed(&crate::tweaks::declared_registry(tweak_id))
+}
+
+/// Whether the feature that recorded `tweak_id` changes this service.
+fn service_declared(tweak_id: &str, service: &str) -> bool {
+    if let Some(id) = tweak_id.strip_prefix("privacy:") {
+        return crate::privacy::service_target(id).is_some_and(|s| s.eq_ignore_ascii_case(service));
+    }
+    if let Some(id) = tweak_id.strip_prefix("gpu:") {
+        return crate::gputweaks::declares_service(id, service);
+    }
+    crate::tweaks::declared_services(tweak_id)
+        .iter()
+        .any(|s| s.eq_ignore_ascii_case(service))
+}
+
 /// Validates one legacy entry in place. Returns true when it is fully trusted.
 fn sanitize_entry(entry: &mut JournalEntry) -> bool {
     let static_reverts: Vec<&'static str> = crate::tweaks::static_cmd_reverts(&entry.tweak_id);
@@ -243,17 +295,13 @@ fn sanitize_entry(entry: &mut JournalEntry) -> bool {
             ChangeItem::Registry {
                 root, path, name, ..
             } => {
-                let clean = |s: &str| !s.chars().any(char::is_control);
-                if !matches!(root.as_str(), "HKLM" | "HKCU")
-                    || path.is_empty()
-                    || !clean(path)
-                    || !clean(name)
-                {
+                if !registry_declared(&entry.tweak_id, root, path, name) {
                     trusted = false;
                 }
             }
             ChangeItem::ServiceStartup { service, .. } => {
-                if !crate::ps::is_safe_ident(service) {
+                if !crate::ps::is_safe_ident(service) || !service_declared(&entry.tweak_id, service)
+                {
                     trusted = false;
                 }
             }
@@ -727,15 +775,16 @@ mod tests {
     fn merge_marks_entries_with_unknown_commands_untrusted() {
         let entry = |id: &str, revert: &str| JournalEntry {
             id: id.into(),
-            tweak_id: "x".into(),
+            tweak_id: "auto_play_off".into(),
             tweak_name: "x".into(),
             origin: None,
             time: String::new(),
             items: vec![
                 ChangeItem::Registry {
                     root: "HKCU".into(),
-                    path: r"Software\X".into(),
-                    name: "Y".into(),
+                    path: r"Software\Microsoft\Windows\CurrentVersion\Explorer\AutoplayHandlers"
+                        .into(),
+                    name: "DisableAutoplay".into(),
                     prev: None,
                     new: crate::safety::RegVal::Dword(1),
                 },
@@ -762,5 +811,109 @@ mod tests {
         assert!(!get("keep").untrusted);
         assert!(!get("ok").untrusted);
         assert!(get("bad").untrusted);
+    }
+
+    fn single_item_entry(tweak_id: &str, item: ChangeItem) -> JournalEntry {
+        JournalEntry {
+            id: "e".into(),
+            tweak_id: tweak_id.into(),
+            tweak_name: "x".into(),
+            origin: None,
+            time: String::new(),
+            items: vec![item],
+            reverted: false,
+            backup_files: vec![],
+            completed: true,
+            attempted: 1,
+            reverted_items: 0,
+            untrusted: false,
+        }
+    }
+
+    fn reg(root: &str, path: &str, name: &str) -> ChangeItem {
+        ChangeItem::Registry {
+            root: root.into(),
+            path: path.into(),
+            name: name.into(),
+            prev: Some(crate::safety::RegVal::Str("payload".into())),
+            new: crate::safety::RegVal::Dword(1),
+        }
+    }
+
+    fn svc(name: &str) -> ChangeItem {
+        ChangeItem::ServiceStartup {
+            service: name.into(),
+            prev: "Disabled".into(),
+            new: "Manual".into(),
+        }
+    }
+
+    #[test]
+    fn planted_registry_and_service_targets_are_not_trusted() {
+        let ifeo =
+            r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\sethc.exe";
+        let approved = r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run";
+        for (tweak, item) in [
+            // Any HKLM value under a known tweak id.
+            ("game_dvr_off", reg("HKLM", ifeo, "Debugger")),
+            ("privacy:prv_telemetry_basic", reg("HKLM", ifeo, "Debugger")),
+            ("gpu:x", reg("HKLM", ifeo, "Debugger")),
+            ("nvCtrlPanel:x", reg("HKLM", ifeo, "Debugger")),
+            (
+                "perftweaks:timer",
+                reg(
+                    "HKLM",
+                    r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run",
+                    "x",
+                ),
+            ),
+            // Startup entry: the value name must be the recorded entry.
+            ("startup:hkcu_run:Steam", reg("HKCU", approved, "Other")),
+            ("startup:bogus:Steam", reg("HKCU", approved, "Steam")),
+            ("unknown_tweak", reg("HKCU", r"Software\X", "Y")),
+            // Services: only the ones the feature declares.
+            ("game_dvr_off", svc("WinDefend")),
+            ("privacy:prv_diagtrack_off", svc("WinDefend")),
+            ("service:wuauserv", svc("wuauserv")),
+        ] {
+            let mut e = single_item_entry(tweak, item);
+            assert!(!sanitize_entry(&mut e), "{tweak}");
+            assert!(e.untrusted, "{tweak}");
+        }
+    }
+
+    #[test]
+    fn declared_registry_and_service_targets_stay_trusted() {
+        let approved = r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run";
+        for (tweak, item) in [
+            ("startup:hkcu_run:Steam", reg("HKCU", approved, "Steam")),
+            (
+                "perftweaks:timer",
+                reg(
+                    "HKLM",
+                    r"SYSTEM\CurrentControlSet\Control\Session Manager\kernel",
+                    "GlobalTimerResolutionRequests",
+                ),
+            ),
+            (
+                "privacy:prv_telemetry_basic",
+                reg(
+                    "HKLM",
+                    r"SOFTWARE\Policies\Microsoft\Windows\DataCollection",
+                    "AllowTelemetry",
+                ),
+            ),
+            ("privacy:prv_diagtrack_off", svc("DiagTrack")),
+            ("svc_fax_off", svc("Fax")),
+        ] {
+            let mut e = single_item_entry(tweak, item);
+            assert!(sanitize_entry(&mut e), "{tweak}");
+        }
+        // Every catalog registry target of every tweak is accepted.
+        for id in crate::tweaks::catalog_ids() {
+            for (r, p, n) in crate::tweaks::declared_registry(id) {
+                assert!(registry_declared(id, r, p, n), "{id} {p}\\{n}");
+            }
+        }
     }
 }

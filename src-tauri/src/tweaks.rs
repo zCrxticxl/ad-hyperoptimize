@@ -31,7 +31,8 @@ pub enum Action {
         revert: &'static str,
         /// When set, the *pre-apply* state is captured and the revert command
         /// is built from it at apply time (exact undo instead of a hardcoded
-        /// default). Falls back to `revert` when the capture fails.
+        /// default). When the capture fails the apply is refused; `revert`
+        /// is only the force-revert default for uncaptured commands.
         show: Option<ShowCapture>,
     },
 }
@@ -200,26 +201,65 @@ pub(crate) fn static_cmd_reverts(tweak_id: &str) -> Vec<&'static str> {
         .collect()
 }
 
-/// Undo never runs a command of an untrusted (migrated, unrecognised) entry.
-fn refuse_untrusted(entry: &JournalEntry, upto: usize) -> Result<(), String> {
-    if !entry.untrusted {
-        return Ok(());
-    }
-    let commands: Vec<&str> = entry.items[..upto]
-        .iter()
-        .filter_map(|i| match i {
-            ChangeItem::Command { revert, .. } => Some(revert.as_str()),
+/// Registry values the catalog entry `tweak_id` writes (root, path, name).
+pub(crate) fn declared_registry(tweak_id: &str) -> Vec<(&'static str, &'static str, &'static str)> {
+    catalog()
+        .into_iter()
+        .filter(|t| t.id == tweak_id)
+        .flat_map(|t| t.actions)
+        .filter_map(|a| match a {
+            Action::RegSet {
+                root, path, name, ..
+            } => Some((root, path, name)),
             _ => None,
         })
-        .collect();
-    if commands.is_empty() {
+        .collect()
+}
+
+/// Services whose startup type the catalog entry `tweak_id` changes.
+pub(crate) fn declared_services(tweak_id: &str) -> Vec<&'static str> {
+    catalog()
+        .into_iter()
+        .filter(|t| t.id == tweak_id)
+        .flat_map(|t| t.actions)
+        .filter_map(|a| match a {
+            Action::Service { name, .. } => Some(name),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Undo never runs any step of an untrusted (migrated, unrecognised) entry:
+/// its registry targets, services and commands all came from a folder any
+/// unelevated process could write, and the undo runs elevated.
+fn refuse_untrusted(entry: &JournalEntry, upto: usize) -> Result<(), String> {
+    if !entry.untrusted || upto == 0 {
         return Ok(());
     }
+    let steps: Vec<String> = entry.items[..upto]
+        .iter()
+        .map(|i| match i {
+            ChangeItem::Registry {
+                root,
+                path,
+                name,
+                prev,
+                ..
+            } => match prev {
+                Some(v) => format!("set {root}\\{path}\\{name} = {v:?}"),
+                None => format!("delete {root}\\{path}\\{name}"),
+            },
+            ChangeItem::ServiceStartup { service, prev, .. } => {
+                format!("service {service} startup = {prev}")
+            }
+            ChangeItem::Command { revert, .. } => revert.clone(),
+        })
+        .collect();
     Err(format!(
-        "This undo entry was recorded in the old, user-writable data folder and its command \
-         could not be verified as one this app generates, so it is not run automatically. \
-         Review it and run it manually only if it is what you expect: {}",
-        commands.join(" | ")
+        "This undo entry was recorded in the old, user-writable data folder and could not be \
+         verified as one this app generates, so it is not run automatically. Review it and \
+         undo it manually only if it is what you expect: {}",
+        steps.join(" | ")
     ))
 }
 

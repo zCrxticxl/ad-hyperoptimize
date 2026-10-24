@@ -749,6 +749,45 @@ fn is_valid_driver_key(key: &str) -> bool {
     key.split('\\').all(|c| !matches!(c, "" | "." | ".."))
 }
 
+/// True when GPU tweak `id` writes this registry value (migration check).
+pub(crate) fn declares_registry(id: &str, root: &str, path: &str, name: &str) -> bool {
+    let eq = |a: &str, b: &str| a.eq_ignore_ascii_case(b);
+    catalog()
+        .iter()
+        .filter(|tw| tw.id == id)
+        .flat_map(|tw| tw.actions.iter())
+        .any(|a| match a {
+            TweakAction::DriverReg { name: n, .. } => {
+                eq(root, "HKLM") && is_valid_driver_key(path) && eq(name, n)
+            }
+            TweakAction::FixedReg {
+                root: r,
+                path: p,
+                name: n,
+                ..
+            } => eq(root, r) && eq(path, p) && eq(name, n),
+            _ => false,
+        })
+}
+
+/// True when GPU tweak `id` changes this service's startup type.
+pub(crate) fn declares_service(id: &str, service: &str) -> bool {
+    catalog()
+        .iter()
+        .filter(|tw| tw.id == id)
+        .flat_map(|tw| tw.actions.iter())
+        .any(|a| matches!(a, TweakAction::Svc { name, .. } if name.eq_ignore_ascii_case(service)))
+}
+
+/// True for the values the NVIDIA Control Panel page writes.
+pub(crate) fn nv_panel_declares(root: &str, path: &str, name: &str) -> bool {
+    root.eq_ignore_ascii_case("HKCU")
+        && path.eq_ignore_ascii_case(NV_TWEAK_HKCU)
+        && ["Prerenderlimit", "NVPCFLatencyPolicy", "Enabled"]
+            .iter()
+            .any(|n| n.eq_ignore_ascii_case(name))
+}
+
 // ── NVIDIA Control Panel, editable global 3D settings ──────────────────────
 // Mirrors a subset of "Manage 3D Settings → Global Settings" from NVIDIA's
 // own Control Panel: the handful of options that are genuinely backed by a
@@ -764,7 +803,6 @@ fn is_valid_driver_key(key: &str) -> bool {
 // other tweak in this app, so it shows up in Reports.tsx and is undone with
 // `tweaks::revert_entry`, identical plumbing to Quick Boost.
 
-#[cfg(windows)]
 const NV_TWEAK_HKCU: &str = "Software\\NVIDIA Corporation\\Global\\NVTweak";
 
 #[cfg(windows)]

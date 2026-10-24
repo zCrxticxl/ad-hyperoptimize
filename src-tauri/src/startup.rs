@@ -14,15 +14,24 @@ use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ};
 #[cfg(windows)]
 use winreg::{RegKey, RegValue};
 
-#[cfg(windows)]
 const APPROVED_RUN: &str =
     "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run";
-#[cfg(windows)]
 const APPROVED_RUN32: &str =
     "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run32";
-#[cfg(windows)]
 const APPROVED_FOLDER: &str =
     "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\StartupFolder";
+
+/// Hive and StartupApproved key of a startup scope.
+pub(crate) fn approved_location(scope: &str) -> Option<(&'static str, &'static str)> {
+    Some(match scope {
+        "hkcu_run" => ("HKCU", APPROVED_RUN),
+        "hklm_run" => ("HKLM", APPROVED_RUN),
+        "hklm_run32" => ("HKLM", APPROVED_RUN32),
+        "folder_user" => ("HKCU", APPROVED_FOLDER),
+        "folder_common" => ("HKLM", APPROVED_FOLDER),
+        _ => return None,
+    })
+}
 
 #[cfg(windows)]
 fn hive(root: &str) -> RegKey {
@@ -166,14 +175,8 @@ pub fn list() -> Value {
 pub fn toggle(scope: String, name: String, enable: bool) -> Result<Value, String> {
     #[cfg(windows)]
     {
-        let (root, approved) = match scope.as_str() {
-            "hkcu_run" => ("HKCU", APPROVED_RUN),
-            "hklm_run" => ("HKLM", APPROVED_RUN),
-            "hklm_run32" => ("HKLM", APPROVED_RUN32),
-            "folder_user" => ("HKCU", APPROVED_FOLDER),
-            "folder_common" => ("HKLM", APPROVED_FOLDER),
-            _ => return Err(format!("unknown scope '{scope}'")),
-        };
+        let (root, approved) =
+            approved_location(&scope).ok_or_else(|| format!("unknown scope '{scope}'"))?;
         if root == "HKLM" && !crate::ps::is_admin() {
             return Err("Systemweite Autostart-Einträge brauchen Adminrechte.".into());
         }
