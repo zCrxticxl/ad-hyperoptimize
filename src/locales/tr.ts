@@ -1692,6 +1692,11 @@ export const ui: Partial<UiText> = {
   orgRunUndone: "geri taşındı",
   orgUndo: "Geri taşı",
   orgHistoryHint: "Son 20 çalıştırma saklanır. Bir çalıştırmanın oluşturduğu boş klasörler geri taşırken kaldırılır.",
+  restartAdmin: "Yönetici olarak yeniden başlat",
+  restartAdminHint: "Uygulamayı yönetici haklarıyla yeniden başlatır (Windows UAC ile sorar).",
+  restartAdminDev: "Geliştirme modu: uygulama burada kendini yeniden başlatamaz. Terminali yönetici olarak açın ve «npm run tauri dev» komutunu yeniden çalıştırın.",
+  restartAdminDeclined: "Yönetici isteği reddedildi.",
+  bootAlreadyDefault: "zaten Windows varsayılanı – geri alınacak bir şey yok",
 };
 
 export const tweaks: Record<string, { name?: string; description?: string; rationale?: string; impact?: string }> = {

@@ -196,6 +196,8 @@ function AppInner() {
   const [admin, setAdmin] = useState<boolean | null>(null);
   const broker = useBroker();
   const [unlocking, setUnlocking] = useState(false);
+  const [elevating, setElevating] = useState(false);
+  const [elevateErr, setElevateErr] = useState("");
   const [brokerErr, setBrokerErr] = useState("");
   const [mode, setModeState] = useState<Mode>(() => {
     try { return (localStorage.getItem(MODE_KEY) as Mode) ?? "beginner"; } catch { return "beginner"; }
@@ -396,6 +398,18 @@ function AppInner() {
             <button className={mode === "expert" ? "on" : ""} aria-pressed={mode === "expert"} onClick={() => setMode("expert")}>{t("expert")}</button>
           </div>
           <span className="admin-chip" title={admin ? t("adminBadge") : t("adminHint")}><span className={`status-dot ${admin ? "is-ready" : ""}`} />{admin === null ? "…" : admin ? t("adminBadge") : t("userBadge")}</span>
+          {admin === false && !broker.available && (
+            <button className="btn small" disabled={elevating} title={t("restartAdminHint")}
+              onClick={async () => {
+                setElevating(true); setElevateErr("");
+                try { await api.restartAsAdmin(); }
+                catch (e) { const m = String(e); setElevateErr(m.includes("dev build") ? t("restartAdminDev") : m.includes("declined") ? t("restartAdminDeclined") : m); }
+                finally { setElevating(false); }
+              }}>
+              {elevating ? "…" : `🛡 ${t("restartAdmin")}`}
+            </button>
+          )}
+          {elevateErr && <span className="muted" style={{ color: "var(--orange)", fontSize: 11, maxWidth: 320 }}>{elevateErr}</span>}
           {admin === false && broker.available && (broker.connected
             ? <span className="admin-chip" title={t("brokerActiveHint")}><span className="status-dot is-ready" />{t("brokerActive")}</span>
             : <button className="btn small" disabled={unlocking} title={t("brokerUnlockHint")}

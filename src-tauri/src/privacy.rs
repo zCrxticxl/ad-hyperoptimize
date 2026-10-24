@@ -562,6 +562,7 @@ pub fn scan() -> Value {
             "risk":        t.risk,
             "applied":     applied,
             "canRevert":   journal.iter().any(|entry| entry.tweak_id == format!("privacy:{}", t.id) && !entry.reverted)
+                || (applied && retired_reason(t.id).is_none())
                 || (applied && !retired_reset_targets(t.id).is_empty()),
             "retired":     retired_reason(t.id).is_some(),
             "retiredReason": retired_reason(t.id),
@@ -650,11 +651,101 @@ pub fn revert(id: String) -> Result<Value, String> {
         return Ok(json!({ "ok": true, "id": id, "entryId": entry.id }));
     }
     if retired_reason(&id).is_none() {
-        return Err(format!(
-            "No saved previous state for {id}; refusing a blind reset"
-        ));
+        return reset_to_windows_defaults(t);
     }
     reset_retired_without_journal(t)
+}
+
+/// Windows default of a privacy value: `None` = absent (policies "not
+/// configured", settings Windows fills in itself), `Some(v)` = that DWORD.
+fn windows_default(path: &str, name: &str) -> Option<Option<u32>> {
+    let p = path.to_ascii_lowercase();
+    if p.starts_with("software\\policies\\") || p.contains("\\policies\\datacollection") {
+        return Some(None);
+    }
+    Some(match name {
+        "Disabled" if p.ends_with("windows error reporting") => None,
+        "Enabled" if p.ends_with("advertisinginfo") => Some(1),
+        "TailoredExperiencesWithDiagnosticDataEnabled" => Some(1),
+        "SystemPaneSuggestionsEnabled"
+        | "SoftLandingEnabled"
+        | "SubscribedContent-338388Enabled"
+        | "SubscribedContent-338389Enabled"
+        | "SubscribedContent-338393Enabled" => Some(1),
+        "Start_TrackProgs" => Some(1),
+        "BingSearchEnabled" | "CortanaConsent" => None,
+        "IsDynamicSearchBoxEnabled" => Some(1),
+        "RestrictImplicitInkCollection" | "RestrictImplicitTextCollection" => Some(0),
+        "HarvestContacts" => Some(1),
+        "Status" if p.ends_with("lfsvc\\service\\configuration") => Some(1),
+        "NumberOfSIUFInPeriod" | "PeriodInNanoSeconds" => None,
+        "AutoUpdateEnabled" => Some(1),
+        _ => return None,
+    })
+}
+
+/// Windows default start type of the services privacy items disable.
+fn service_default(service: &str) -> Option<&'static str> {
+    match service {
+        "DiagTrack" => Some("Automatic"),
+        "WerSvc" | "dmwappushservice" | "lfsvc" => Some("Manual"),
+        _ => None,
+    }
+}
+
+/// Undo without a saved previous state (applied by another tool or an older
+/// version): values that still hold what this item writes go back to the
+/// Windows default after the key is exported, a disabled service gets its
+/// default start type, and the result is read back.
+fn reset_to_windows_defaults(t: &PrivacyTweak) -> Result<Value, String> {
+    if !check_one(t)? {
+        return Err(format!("{} is not active, nothing to undo", t.id));
+    }
+    let _engine = crate::tweaks::engine_guard()?;
+    let mut backups = Vec::new();
+    for (root, path, name) in registry_targets(t.id) {
+        let current = crate::tweaks::reg_read(root, path, name)?;
+        let holds_tweak_value = match (&current, expected_dword(t.id, name)) {
+            (Some(safety::RegVal::Dword(v)), Some(w)) => *v == w,
+            (Some(_), None) => true,
+            _ => false,
+        };
+        if !holds_tweak_value {
+            continue;
+        }
+        let default = windows_default(path, name)
+            .ok_or_else(|| format!("no known Windows default for {root}\\{path}\\{name}"))?;
+        backups.push(safety::backup_registry_key(root, path)?);
+        let item = safety::ChangeItem::Registry {
+            root: (*root).into(),
+            path: (*path).into(),
+            name: (*name).into(),
+            prev: default.map(safety::RegVal::Dword),
+            new: safety::RegVal::Dword(0),
+        };
+        crate::tweaks::revert_item(&item)?;
+    }
+    if let Some(service) = service_target(t.id) {
+        let start = ps::run(&format!(
+            "(Get-Service -Name '{service}' -ErrorAction Stop).StartType.ToString()"
+        ))?;
+        if start.trim() == "Disabled" {
+            let default = service_default(service)
+                .ok_or_else(|| format!("no known Windows default for service {service}"))?;
+            crate::tweaks::apply_item(&safety::ChangeItem::ServiceStartup {
+                service: service.into(),
+                prev: String::new(),
+                new: default.into(),
+            })?;
+        }
+    }
+    if check_one(t)? {
+        return Err(format!(
+            "{} is still active after the reset: a policy or another tool sets it again.",
+            t.id
+        ));
+    }
+    Ok(json!({ "ok": true, "id": t.id, "backups": backups, "windowsDefault": true }))
 }
 
 /// Registry values a journal-less reset of a retired item removes. Only values
@@ -699,6 +790,22 @@ fn reset_retired_without_journal(t: &PrivacyTweak) -> Result<Value, String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn every_privacy_value_has_a_windows_default() {
+        for t in super::TWEAKS {
+            for (root, path, name) in super::registry_targets(t.id) {
+                assert!(
+                    super::windows_default(path, name).is_some(),
+                    "{}: {root}\\{path}\\{name}",
+                    t.id
+                );
+            }
+            if let Some(svc) = super::service_target(t.id) {
+                assert!(super::service_default(svc).is_some(), "{svc}");
+            }
+        }
+    }
+
     use super::{expected_dword, listed, registry_targets, service_target, RETIRED, TWEAKS};
 
     /// Regression: a statement-list check inside `[bool]( )` made the whole

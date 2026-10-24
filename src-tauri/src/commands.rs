@@ -27,6 +27,11 @@ use Class::*;
 pub static COMMANDS: &[(&str, Class, &str)] = &[
     // ── system scan / dashboard ──
     ("cmd_is_admin", Read, "token query"),
+    (
+        "cmd_restart_as_admin",
+        User,
+        "relaunches the app elevated (UAC)",
+    ),
     ("cmd_full_scan", Read, "WMI inventory"),
     (
         "cmd_boot_analysis",
