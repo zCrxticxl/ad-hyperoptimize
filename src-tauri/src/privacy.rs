@@ -617,14 +617,23 @@ pub fn apply(id: String) -> Result<Value, String> {
         }
         Ok(())
     })?;
-    let res = ps::run(t.apply).and_then(|_| verify_applied(t));
-    let _ = safety::with_journal(|j| {
+    // The script may have changed some values before failing (or verify
+    // found them wrong): restore the captured originals, like the tweak
+    // engine does, instead of leaving an open half-applied entry.
+    if let Err(e) = ps::run(t.apply).and_then(|_| verify_applied(t)) {
+        return match crate::tweaks::revert_entry(&entry_id) {
+            Ok(_) => Err(format!("{e}; all changes were rolled back")),
+            Err(re) => Err(format!(
+                "{e}; rollback incomplete ({re}); restore token: {entry_id}"
+            )),
+        };
+    }
+    safety::with_journal(|j| {
         if let Some(en) = j.iter_mut().find(|en| en.id == entry_id) {
-            en.completed = res.is_ok();
+            en.completed = true;
         }
         Ok(())
-    });
-    res?;
+    })?;
     Ok(json!({ "ok": true, "id": id, "entryId": entry_id }))
 }
 
