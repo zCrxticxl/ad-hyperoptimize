@@ -214,7 +214,7 @@ fn catalog() -> Vec<GpuTweak> {
             category: "Clock & Power",
             vendor: "nvidia",
             description: "Stops dynamic switching between GPU performance states (P0-P8).",
-            impact: "Smoother frametimes, eliminates clock dips from mid-frame P-state transitions. Slightly higher idle power draw.",
+            impact: "May smooth frametimes by avoiding clock dips from P-state transitions; not measured by this app. Higher idle power draw.",
             risk: "Medium",
             reboot: true,
             actions: vec![
@@ -290,7 +290,7 @@ fn catalog() -> Vec<GpuTweak> {
             category: "Clock & Power",
             vendor: "amd",
             description: "Prevents the shader clock from entering deep sleep during short inter-frame gaps.",
-            impact: "More consistent shader performance; fewer latency spikes between frames.",
+            impact: "May keep shader performance more consistent between frames; not measured by this app. Higher idle power draw.",
             risk: "Low",
             reboot: false,
             actions: vec![
@@ -316,7 +316,7 @@ fn catalog() -> Vec<GpuTweak> {
             category: "Clock & Power",
             vendor: "amd",
             description: "Keeps the GPU DMA engine permanently active instead of gating it during inactivity.",
-            impact: "Reduces latency on GPU driver DMA transfers; noticeable with fast texture uploads and asset streaming.",
+            impact: "May reduce latency of GPU DMA transfers during asset streaming; not measured by this app. Higher idle power draw.",
             risk: "Low",
             reboot: false,
             actions: vec![
@@ -329,7 +329,7 @@ fn catalog() -> Vec<GpuTweak> {
             category: "Rendering",
             vendor: "amd",
             description: "Enables AMD Texture Cache Prefetching for RX GPUs.",
-            impact: "Higher texture throughput in open-world games with heavy asset streaming.",
+            impact: "May raise texture throughput in games with heavy asset streaming; not measured by this app.",
             risk: "Low",
             reboot: false,
             actions: vec![
@@ -385,7 +385,7 @@ fn catalog() -> Vec<GpuTweak> {
             category:    "Rendering",
             vendor:      "any",
             description: "Removes the default 10 GB cap on the DirectX shader cache. Larger cache = fewer in-game shader compilation stalls (the \"stutters\" on first visit to an area).",
-            impact:      "Eliminates shader compilation stutter in DX11/DX12 games after first run. Uses more disk space.",
+            impact:      "Can reduce shader-compilation stutter once the default cache would be full; no effect while it is not. Uses more disk space.",
             risk:        "Low",
             reboot:      false,
             actions: vec![
