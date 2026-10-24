@@ -237,6 +237,17 @@ pub static COMMANDS: &[(&str, Class, &str)] = &[
         Read,
         "launcher files, disk info; fsutil query (verify as standard user)",
     ),
+    ("cmd_pregame_scan", Read, "process CPU/disk sampling"),
+    (
+        "cmd_pregame_pause",
+        Privileged,
+        "cancels a Defender scan, stops WSearch, closes OneDrive",
+    ),
+    (
+        "cmd_pregame_resume",
+        Privileged,
+        "starts WSearch, starts OneDrive as the user",
+    ),
     (
         "cmd_stall_probe",
         Read,

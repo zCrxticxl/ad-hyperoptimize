@@ -153,7 +153,7 @@ function renderTool(page: string, mode: Mode, admin: boolean | null, go: (id: st
     case "hardware": return <Hardware mode={mode} />;
     case "monitor": return <Monitor />;
     case "latency": return <Latency />;
-    case "gamediag": return <GameDiag />;
+    case "gamediag": return <GameDiag admin={!!admin} />;
     case "processes": return <Processes />;
     case "startup": return <Startup admin={!!admin} focusId={target} />;
     case "schedtasks": return <ScheduledTasks admin={!!admin} focusId={target} />;

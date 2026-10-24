@@ -32,6 +32,7 @@ mod organizer;
 mod pdh;
 mod perftweaks;
 mod powerplan;
+mod pregame;
 mod privacy;
 mod procmgr;
 mod profiles;
@@ -474,6 +475,33 @@ async fn cmd_game_storage_check() -> Value {
     tauri::async_runtime::spawn_blocking(gamestorage::check)
         .await
         .unwrap_or_default()
+}
+
+#[tauri::command(async)]
+async fn cmd_pregame_scan() -> Value {
+    tauri::async_runtime::spawn_blocking(pregame::scan)
+        .await
+        .unwrap_or_default()
+}
+
+#[tauri::command(async)]
+async fn cmd_pregame_pause(activities: Vec<String>) -> Result<Value, String> {
+    if !ps::is_admin() {
+        return Err("Administrator rights required".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || pregame::pause(activities))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command(async)]
+async fn cmd_pregame_resume() -> Result<Value, String> {
+    if !ps::is_admin() {
+        return Err("Administrator rights required".into());
+    }
+    tauri::async_runtime::spawn_blocking(pregame::resume)
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 // ---- latency analysis ----
@@ -1956,6 +1984,9 @@ pub fn run() {
             cmd_display_check,
             cmd_audio_check,
             cmd_game_storage_check,
+            cmd_pregame_scan,
+            cmd_pregame_pause,
+            cmd_pregame_resume,
             cmd_stall_probe,
             cmd_wpr_start,
             cmd_wpr_stop,
