@@ -130,17 +130,6 @@ $procs | ConvertTo-Json -Compress -Depth 2
     }
 }
 
-pub fn boost_process(pid: u32) -> Result<String, String> {
-    let script = format!(
-        r#"
-$p = Get-Process -Id {pid} -ErrorAction Stop
-$p.PriorityClass = [System.Diagnostics.ProcessPriorityClass]::High
-"Boosted PID {pid} ($($p.Name)) to High priority"
-"#
-    );
-    ps::run(&script).map(|s| s.trim().to_string())
-}
-
 /// Terminate frontend-selected background processes. The PIDs are NOT
 /// trusted: each one is re-resolved to its process name on the backend and
 /// only killed when that name exactly matches a kill candidate and is not
@@ -387,14 +376,6 @@ if ($errs.Count) {{ Write-Error ('Game boost stopped, but: ' + ($errs -join '; '
     }
 }
 
-/// Retired. The old implementation wrote HwSchMode=1 (which means HAGS
-/// OFF) or 0 (invalid) with SilentlyContinue and no journal. Hardware-
-/// accelerated GPU scheduling is owned by the `hags_on` tweak in the catalog,
-/// which has capture/undo. The signature is kept for the command surface.
-pub fn set_gpu_max_perf(_enable: bool) -> Result<String, String> {
-    Err("moved: use the Hardware-accelerated GPU scheduling tweak in Optimize".into())
-}
-
 // ── Quick Boost, one-click safe combo with journal-backed undo ─────────────
 // Unlike boost_start/boost_stop above (one-way apply, hardcoded global
 // revert), every change Quick Boost makes is captured as a ChangeItem before
@@ -634,11 +615,5 @@ mod tests {
         assert!(valid_priority("Idle"));
         assert!(!valid_priority("High'; rm"));
         assert!(!valid_priority(""));
-    }
-
-    #[test]
-    fn gpu_max_perf_is_retired() {
-        assert!(set_gpu_max_perf(true).is_err());
-        assert!(set_gpu_max_perf(false).is_err());
     }
 }

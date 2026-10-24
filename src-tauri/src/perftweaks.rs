@@ -403,11 +403,6 @@ pub fn net_tweak(adapter: String, keyword: String, value: u32) -> Result<String,
     ps::run(&script).map(|_| format!("{adapter}: {keyword} = {value}"))
 }
 
-// Disable all optimisable properties on all active physical adapters in one shot
-pub fn net_tweak_all_gaming() -> Result<String, String> {
-    Err("Pauschales Deaktivieren von RSS und Netzwerk-Offloads ist keine sichere Gaming-Optimierung. Einzelne Eigenschaften nur bei einem konkreten Problem ändern.".into())
-}
-
 pub fn net_reset_all() -> Result<String, String> {
     // One "OK|name" / "ERR|name|message" line per adapter so a failure on any
     // adapter is reported instead of being swallowed.

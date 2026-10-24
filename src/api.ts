@@ -45,7 +45,6 @@ export const api = {
   msiSet: (regPath: string, enabled: boolean) => invoke<string>("cmd_msi_set", { regPath, enabled }),
   netAdapters: () => invoke<any>("cmd_net_adapters"),
   netTweak: (adapter: string, keyword: string, value: number) => invoke<string>("cmd_net_tweak", { adapter, keyword, value }),
-  netTweakAllGaming: () => invoke<string>("cmd_net_tweak_all_gaming"),
   netResetAll: () => invoke<string>("cmd_net_reset_all"),
   ramInfo: () => invoke<any>("cmd_ram_info"),
   pagefileInfo: () => invoke<any>("cmd_pagefile_info"),
@@ -53,8 +52,6 @@ export const api = {
   pagefileSetCustom: (path: string, initMb: number, maxMb: number) => invoke<string>("cmd_pagefile_set_custom", { path, initMb, maxMb }),
   pagefileDisable: () => invoke<string>("cmd_pagefile_disable"),
   // hw monitor
-  hwTemps: () => invoke<any>("cmd_hw_temps"),
-  hwSmart: () => invoke<any>("cmd_hw_smart"),
   hwFull: () => invoke<any>("cmd_hw_full"),
   hwProfile: () => invoke<any>("cmd_hw_profile"),
   swCatalog: () => invoke<any>("cmd_sw_catalog"),
@@ -78,12 +75,10 @@ export const api = {
   // game booster
   gameboostBackgroundProcs: () => invoke<any>("cmd_gameboost_background_procs"),
   gameboostRunningGames: () => invoke<any>("cmd_gameboost_running_games"),
-  gameboostBoostProcess: (pid: number) => invoke<string>("cmd_gameboost_boost_process", { pid }),
   gameboostKillBackground: (pids: number[]) => invoke<string>("cmd_gameboost_kill_background", { pids }),
   gameboostStart: (pid: number) => invoke<string>("cmd_gameboost_start", { pid }),
   gameboostStop: () => invoke<string>("cmd_gameboost_stop"),
   gameboostGetStatus: () => invoke<number | null>("cmd_gameboost_get_status"),
-  gameboostGpuPerf: (enable: boolean) => invoke<string>("cmd_gameboost_gpu_perf", { enable }),
   quickBoostStart: (processName: string) => invoke<any>("cmd_gameboost_quick_boost", { processName }),
   quickBoostRevert: (restoreToken: string) => invoke<any>("cmd_gameboost_quick_boost_revert", { restoreToken }),
   // hosts
@@ -183,9 +178,6 @@ export const api = {
   optimizeApply: (ids: string[], restorePoint: boolean) => invoke<any>("cmd_optimize_apply", { ids, restorePoint }),
   resetRetired: () => invoke<any>("cmd_reset_retired"),
   openWindowsSettings: (page: string) => invoke<void>("cmd_open_windows_settings", { page }),
-  autooptScan: () => invoke<any>("cmd_autoopt_scan"),
-  autooptScore: () => invoke<any>("cmd_autoopt_score"),
-  autooptApply: (items: any[]) => invoke<any>("cmd_autoopt_apply", { items }),
 };
 
 export type Metrics = {

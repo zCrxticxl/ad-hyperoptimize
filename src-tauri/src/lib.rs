@@ -1,5 +1,4 @@
 mod analysis;
-mod autoopt;
 mod bench;
 mod bootopt;
 mod cache;
@@ -186,27 +185,6 @@ async fn cmd_launch_rstrui() -> Result<String, String> {
 }
 
 // ---- auto optimizer ----
-#[tauri::command(async)]
-async fn cmd_autoopt_scan() -> Value {
-    tauri::async_runtime::spawn_blocking(autoopt::scan)
-        .await
-        .unwrap_or_default()
-}
-
-#[tauri::command(async)]
-async fn cmd_autoopt_score() -> Value {
-    tauri::async_runtime::spawn_blocking(autoopt::score)
-        .await
-        .unwrap_or_default()
-}
-
-#[tauri::command(async)]
-async fn cmd_autoopt_apply(items: Vec<Value>) -> Value {
-    tauri::async_runtime::spawn_blocking(move || autoopt::apply_selected(items))
-        .await
-        .unwrap_or_default()
-}
-
 // ---- system health check / verified optimization ----
 #[tauri::command(async)]
 async fn cmd_health_scan() -> Value {
@@ -771,13 +749,6 @@ async fn cmd_gameboost_running_games() -> Value {
 }
 
 #[tauri::command(async)]
-async fn cmd_gameboost_boost_process(pid: u32) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || gameboost::boost_process(pid))
-        .await
-        .map_err(|_| "game booster task panicked".to_string())?
-}
-
-#[tauri::command(async)]
 async fn cmd_gameboost_kill_background(pids: Vec<u32>) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || gameboost::kill_background(pids))
         .await
@@ -805,13 +776,6 @@ async fn cmd_gameboost_stop(state: State<'_, AppState>) -> Result<String, String
 #[tauri::command]
 fn cmd_gameboost_get_status(state: State<'_, AppState>) -> Option<u32> {
     *state.boosted_pid.lock().unwrap_or_else(|e| e.into_inner())
-}
-
-#[tauri::command(async)]
-async fn cmd_gameboost_gpu_perf(enable: bool) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || gameboost::set_gpu_max_perf(enable))
-        .await
-        .map_err(|_| "game booster task panicked".to_string())?
 }
 
 #[tauri::command(async)]
@@ -1177,7 +1141,6 @@ mod smoke {
     fn read_only_scans_have_no_powershell_parser_errors() {
         type Scan = fn() -> serde_json::Value;
         let scans: Vec<(&str, Scan)> = vec![
-            ("autoopt", crate::autoopt::scan),
             ("bootopt", crate::bootopt::scan),
             ("cleanup", crate::cleanup::scan),
             ("debloater uwp", crate::debloater::list_uwp),
@@ -1424,13 +1387,6 @@ async fn cmd_net_tweak(adapter: String, keyword: String, value: u32) -> Result<S
 }
 
 #[tauri::command(async)]
-async fn cmd_net_tweak_all_gaming() -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(perftweaks::net_tweak_all_gaming)
-        .await
-        .map_err(|_| "perf tweak task panicked".to_string())?
-}
-
-#[tauri::command(async)]
 async fn cmd_net_reset_all() -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(perftweaks::net_reset_all)
         .await
@@ -1479,20 +1435,6 @@ async fn cmd_pagefile_disable() -> Result<String, String> {
 }
 
 // ---- hw monitor ----
-#[tauri::command(async)]
-async fn cmd_hw_temps() -> Value {
-    tauri::async_runtime::spawn_blocking(hwmonitor::temps)
-        .await
-        .unwrap_or_default()
-}
-
-#[tauri::command(async)]
-async fn cmd_hw_smart() -> Value {
-    tauri::async_runtime::spawn_blocking(hwmonitor::smart)
-        .await
-        .unwrap_or_default()
-}
-
 #[tauri::command(async)]
 async fn cmd_hw_full() -> Value {
     tauri::async_runtime::spawn_blocking(hwmonitor::full)
@@ -1707,7 +1649,6 @@ pub fn run() {
             cmd_msi_set,
             cmd_net_adapters,
             cmd_net_tweak,
-            cmd_net_tweak_all_gaming,
             cmd_net_reset_all,
             cmd_ram_info,
             cmd_pagefile_info,
@@ -1715,8 +1656,6 @@ pub fn run() {
             cmd_pagefile_set_custom,
             cmd_pagefile_disable,
             // hw monitor
-            cmd_hw_temps,
-            cmd_hw_smart,
             cmd_hw_full,
             cmd_hw_profile,
             // debloater
@@ -1737,12 +1676,10 @@ pub fn run() {
             // game booster
             cmd_gameboost_background_procs,
             cmd_gameboost_running_games,
-            cmd_gameboost_boost_process,
             cmd_gameboost_kill_background,
             cmd_gameboost_start,
             cmd_gameboost_stop,
             cmd_gameboost_get_status,
-            cmd_gameboost_gpu_perf,
             cmd_gameboost_quick_boost,
             cmd_gameboost_quick_boost_revert,
             // privacy
@@ -1820,13 +1757,10 @@ pub fn run() {
             cmd_analyze,
             cmd_generate_report,
             // auto optimizer
-            cmd_autoopt_scan,
             cmd_health_scan,
             cmd_optimize_apply,
             cmd_reset_retired,
             cmd_open_windows_settings,
-            cmd_autoopt_score,
-            cmd_autoopt_apply,
             // game profiles / auto-switcher
             cmd_game_list,
             cmd_game_switcher_status,
