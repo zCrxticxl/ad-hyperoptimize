@@ -86,6 +86,8 @@ Get-Service -ErrorAction Stop | ForEach-Object {
     let bloat_map: std::collections::HashMap<&str, &str> =
         BLOAT.iter().map(|b| (b.name, b.reason)).collect();
 
+    // Windows may live on another drive or folder than C:\Windows.
+    let windows = ps::windows_dir().to_lowercase();
     let annotated: Vec<Value> = services
         .into_iter()
         .map(|mut s| {
@@ -103,14 +105,14 @@ Get-Service -ErrorAction Stop | ForEach-Object {
                 .unwrap_or("")
                 .trim_matches('"')
                 .to_lowercase();
-            let normalized = raw_path.replace("%systemroot%", "c:\\windows");
-            s["origin"] = json!(
-                if normalized.starts_with("c:\\windows\\") || normalized.is_empty() {
-                    "windows"
-                } else {
-                    "thirdparty"
-                }
-            );
+            let normalized = raw_path.replace("%systemroot%", &windows);
+            s["origin"] = json!(if normalized.starts_with(&format!("{windows}\\"))
+                || normalized.is_empty()
+            {
+                "windows"
+            } else {
+                "thirdparty"
+            });
             s
         })
         .collect();
@@ -155,6 +157,17 @@ const PROTECTED_SERVICES: &[&str] = &[
     "CoreMessagingRegistrar",
     "StateRepository",
     "AppXSvc",
+    // Disabling these breaks elevation (UAC), sign-in or device handling;
+    // with Appinfo off not even this app can start elevated to undo it.
+    "Appinfo",
+    "PlugPlay",
+    "Power",
+    "SamSs",
+    "UserManager",
+    "SystemEventsBroker",
+    "EventSystem",
+    "KeyIso",
+    "TimeBrokerSvc",
 ];
 
 const DELAYED_AUTO: &str = "AutomaticDelayedStart";
@@ -393,6 +406,8 @@ mod tests {
             "Audiosrv",
             "AppXSvc",
             "BFE",
+            "Appinfo",
+            "UserManager",
         ] {
             assert!(check_startup_request(name, "Disabled").is_err(), "{name}");
             assert!(check_control_request(name, "stop").is_err(), "{name}");
