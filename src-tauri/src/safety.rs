@@ -90,7 +90,7 @@ pub enum ChangeItem {
     },
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(tag = "t", content = "v")]
 pub enum RegVal {
     Dword(u32),
