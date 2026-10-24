@@ -48,6 +48,7 @@ Severity:
 | `cleanup.rs` | 600 | reviewed |
 | `security.rs` | 490 | reviewed |
 | `startup.rs` | 285 | reviewed |
+| `bootopt.rs` | 560 | reviewed |
 
 ## Findings
 
@@ -103,3 +104,6 @@ Severity:
 | 48 | `security.rs:disable/remove_unsigned_driver` | Medium | The device ID came from the renderer and went to `pnputil /disable-device` or `/remove-device` unchecked. Any device could be disabled or removed with admin rights, including the boot disk controller. Other modules (regclean, uninstaller, MSI) compare with a fresh scan. | fixed: the ID must be an unsigned driver in a fresh `unsigned_drivers()` scan; `enable` (the undo) stays unrestricted. Test `only_scanned_unsigned_devices_can_be_targeted` |
 | 49 | `startup.rs:startup_folders` | Low | Startup folders came from `%APPDATA%`/`%ProgramData%` of the inherited environment; listing and the existence check for HKLM toggles followed a foreign folder. | fixed: known-folder API / HKLM |
 | 50 | `startup.rs:toggle`, `run_key_entries` | Low | 1) If writing the StartupApproved value failed after the journal append, an entry remained that the health check reported as "change did not finish", although nothing was changed. 2) One non-string value in a Run key discarded the whole listing of that key. | fixed: entry is closed when the write fails; non-string values are skipped |
+| 51 | `bootopt.rs` catalog | Low | `bcd_timeout_0` claimed "Saves 3-5 s on every boot" (invented number), and the description claimed the effect "when only one OS is present". With a single boot entry Windows shows no menu at all, so the timeout does nothing. `bcd_numproc_all` ("Parallelisierung der Treiberinitialisierung") and `bcd_standard_policy` ("Faster bootloader transition") also claimed unmeasured effects. The page shows `impact`. | fixed: texts say when it matters and what it costs (no menu choice at startup) |
+| 52 | `bootopt.rs:apply_tweak` | Low | A failed `bcdedit` or a failed read-back left the entry open as "did not finish", without rollback. | fixed: `revert_entry` restores the captured value (engine lock released first) |
+| 53 | `bootopt.rs:revert_tweak` (retired) | Info | Retired BCD tweaks are reset with fixed values (`nx OptIn`, delete `bootlog`/`quietboot`) even if an older journal entry with the exact original exists; that entry then stays open in the history. | open (low) |

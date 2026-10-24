@@ -30,8 +30,8 @@ static TWEAKS: &[BcdTweak] = &[
     BcdTweak {
         id: "bcd_timeout_0",
         name: "Set Boot Menu Timeout to 0",
-        description: "Sets the boot menu timeout to 0 seconds, skips the selection menu instantly when only one OS is present.",
-        impact: "Saves 3-5 s on every boot",
+        description: "Sets the boot menu timeout to 0 seconds. With several boot entries the menu no longer waits; with a single Windows installation the menu is not shown at all, so nothing changes.",
+        impact: "Only with several boot entries: the menu wait time is skipped. You can no longer choose another entry at startup.",
         risk: "Low",
         target: "{bootmgr}",
         element: "timeout",
@@ -41,7 +41,7 @@ static TWEAKS: &[BcdTweak] = &[
         id: "bcd_numproc_all",
         name: "Alle CPU-Kerne beim Boot nutzen",
         description: "Hebt ggf. gesetzte msconfig-Prozessorzahl-Begrenzung auf. Standard ist 0 (= alle Kerne).",
-        impact: "Parallelisierung der Treiberinitialisierung",
+        impact: "Nur wirksam, wenn in msconfig eine Kernbegrenzung gesetzt war; sonst keine Änderung.",
         risk: "Low",
         target: "{current}",
         element: "numproc",
@@ -51,7 +51,7 @@ static TWEAKS: &[BcdTweak] = &[
         id: "bcd_standard_policy",
         name: "Boot-Policy auf Standard setzen",
         description: "Sets bootmenupolicy to 'standard' (modern boot menu). 'legacy' forces the old F8 menu and slows startup.",
-        impact: "Faster bootloader transition",
+        impact: "Only matters if the legacy menu was enabled; restores the Windows default.",
         risk: "Low",
         target: "{default}",
         element: "bootmenupolicy",
@@ -429,15 +429,29 @@ pub fn apply_tweak(id: String) -> Result<Value, String> {
             Err(format!("{} did not change", t.element))
         }
     });
+    if let Err(e) = result {
+        // bcdedit may have changed the element (verify failed): restore the
+        // captured value. revert_entry takes the engine lock itself.
+        drop(_engine);
+        return Err(match crate::tweaks::revert_entry(&entry_id) {
+            Ok(_) => format!(
+                "Applying {id} failed: {}; the previous value was restored",
+                e.trim()
+            ),
+            Err(re) => format!(
+                "Applying {id} failed: {}; restore incomplete ({re}); restore token: {entry_id}",
+                e.trim()
+            ),
+        });
+    }
     crate::safety::with_journal(|entries| {
         let entry = entries
             .iter_mut()
             .find(|e| e.id == entry_id)
             .ok_or("BCD journal entry missing")?;
-        entry.completed = result.is_ok();
+        entry.completed = true;
         Ok(())
     })?;
-    result.map_err(|e| format!("Applying {id} failed: {}", e.trim()))?;
     Ok(json!({ "ok": true, "id": id, "entryId": entry_id }))
 }
 
