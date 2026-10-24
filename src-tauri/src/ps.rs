@@ -213,6 +213,19 @@ pub fn run(script: &str) -> Result<String, String> {
     run_checked(&mut cmd, "powershell", CMD_TIMEOUT).map(|(out, _)| out)
 }
 
+/// Like [`run`], but the status of the script's last command does not
+/// decide success. `powershell -Command` exits 1 whenever its last command
+/// set `$?` to false, even under `-ErrorAction SilentlyContinue` (e.g.
+/// removing a value that is already absent). Terminating errors still fail.
+/// Callers must read the result back from Windows afterwards.
+pub fn run_settled(script: &str) -> Result<String, String> {
+    run(&settled(script))
+}
+
+fn settled(script: &str) -> String {
+    format!("{script}\n$null = $null")
+}
+
 /// Like [`run`], but with the long timeout for operations that legitimately
 /// take minutes (winget install/upgrade, WU driver install, DISM/SFC checks).
 pub fn run_long(script: &str) -> Result<String, String> {
@@ -458,6 +471,14 @@ pub fn is_guid(s: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn settled_script_ends_with_a_succeeding_statement() {
+        assert_eq!(
+            super::settled("Remove-ItemProperty x y -EA SilentlyContinue"),
+            "Remove-ItemProperty x y -EA SilentlyContinue\n$null = $null"
+        );
+    }
+
     use super::{is_safe_ident, is_safe_regkey_name, quote_single, trusted_env, winget_exe_in};
 
     #[test]

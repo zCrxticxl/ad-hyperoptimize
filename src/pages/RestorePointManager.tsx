@@ -45,7 +45,8 @@ export default function RestorePointManager({ admin }: { admin: boolean }) {
     setLog("");
     try {
       const r = await api.listRestorePoints();
-      const arr = Array.isArray(r) ? r : r?.error ? [] : [r];
+      // No restore points: PowerShell prints nothing, which arrives as null.
+      const arr = (Array.isArray(r) ? r : r && !r.error ? [r] : []).filter((p: RP | null) => p && p.SequenceNumber != null);
       setPoints(arr.sort((a: RP, b: RP) => b.SequenceNumber - a.SequenceNumber));
       if (r?.error) setLog(`${t("error")}: ${r.error}`);
     } catch (error) {

@@ -409,8 +409,12 @@ pub fn create_restore_point(description: &str) -> Result<String, String> {
 }
 
 pub fn list_restore_points() -> serde_json::Value {
-    ps::run_json("Get-ComputerRestorePoint -ErrorAction Stop | Select-Object SequenceNumber,Description,RestorePointType,CreationTime")
-        .unwrap_or_else(|e| serde_json::json!({ "error": e.trim() }))
+    match ps::run_json("Get-ComputerRestorePoint -ErrorAction Stop | Select-Object SequenceNumber,Description,RestorePointType,CreationTime") {
+        // No restore points: no output, which parses as null.
+        Ok(serde_json::Value::Null) => serde_json::json!([]),
+        Ok(v) => v,
+        Err(e) => serde_json::json!({ "error": e.trim() }),
+    }
 }
 
 /// Delete a restore point by sequence number.
