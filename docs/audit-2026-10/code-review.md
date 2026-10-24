@@ -32,7 +32,7 @@ Severity:
 | `ps.rs` | 547 | reviewed |
 | `lib.rs` | 1873 | reviewed |
 | `tweaks.rs` | 2490 | reviewed |
-| `statestore.rs` (migration validation only) | – | partly reviewed |
+| `statestore.rs` | 870 | reviewed |
 
 ## Findings
 
@@ -51,3 +51,6 @@ Severity:
 | 11 | `tweaks.rs:detect_status` | Low | A failed service query (`Err`) counts as "checkable, not matching". A PowerShell failure then shows `not_applied`/`partial` instead of `unknown`, and force-Undo is hidden. | open |
 | 12 | `tweaks.rs` catalog, `may_help_performance` | Low | Some `rationale`/`impact` texts claim effects that were never measured: `game_dvr_off` "Measurable frametime stability gain", `transparency_off` "measurable on iGPUs", `ntfs_8dot3_off` "Faster file creation", `fse_optimizations_off` "Lower input lag", `power_high_performance` "Lower … latency". `svc_maps_off` and `ntfs_8dot3_off` are in the beginner "performance potential" list. The texts appear in the global search. | open: reword to "may"/"no measured effect" (en + `deTweaks.ts`), or measure with the FPS page |
 | 13 | `tweaks.rs:revert` force path | Info | Force-revert of a RegSet imports the newest `.reg` backup of the whole key. Other values in that key that changed since the backup are reset to the backup as well. By design (fallback without a journal); the value check afterwards only covers the tweak's own value. | accepted, documented |
+| 14 | `statestore.rs:trusted_bcdedit/_defender/_sched_task/_service_start` | High | **The command check accepted valid shapes regardless of the entry.** `bcdedit /set {current} <any lowercase element> <alnum>` passed, so planted `testsigning on`, `nointegritychecks on` or `hypervisorlaunchtype off` were carried over as trusted. The same applied to `Set-MpPreference -DisableRealtimeMonitoring $true` / `-MAPSReporting 0`, `Disable-ScheduledTask` on any task, and `Start-Service` for any of the four privacy services. The next Undo ran them elevated. | fixed: BCD only on the object + element of the entry's `bcd:<id>` tweak, never test signing on or `nx AlwaysOff`. Defender only reverts that turn protection back on, under its own tweak id. Scheduled task only `Enable-ScheduledTask` of the task named in `task:<path><name>`. `Start-Service` only for the service of the entry's `privacy:<id>`. Legacy entries with an older shape (e.g. `bootmenupolicy` on `{current}`) are now untrusted: manual undo, fails closed. |
+| 15 | `statestore.rs:migrate_debloater` | Medium | The file content was validated, then the *path* was copied again with `fs::copy`. The legacy folder is user-writable, so a symlink swapped in between check and copy made the elevated process copy any admin-only file into `%ProgramData%\ADHyperOptimize\debloater`, which Authenticated Users can read. | fixed: the validated bytes are written |
+| 16 | `statestore.rs:ensure_secure_dir` | Info | Checked: a pre-created or weak folder is moved aside; a new folder is hardened and must still be empty and not a reparse point; `%ProgramData%` comes from HKLM, not from the environment. A user holding a handle can block the rename, which only stops the app (no escalation). | ok |

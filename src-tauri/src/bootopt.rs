@@ -349,6 +349,20 @@ pub fn scan() -> Value {
     })
 }
 
+/// (BCD object, element) a current or retired tweak changes.
+pub(crate) fn declared_element(id: &str) -> Option<(&'static str, &'static str)> {
+    TWEAKS
+        .iter()
+        .find(|t| t.id == id)
+        .map(|t| (t.target, t.element))
+        .or_else(|| {
+            RETIRED
+                .iter()
+                .find(|r| r.id == id)
+                .map(|r| (r.target, r.element))
+        })
+}
+
 fn tweak_journal_id(id: &str) -> String {
     format!("bcd:{id}")
 }

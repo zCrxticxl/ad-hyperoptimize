@@ -160,52 +160,77 @@ fn trusted_netsh(cmd: &str) -> bool {
     )
 }
 
-fn trusted_sched_task(cmd: &str) -> bool {
+/// Re-enabling the task this entry is about. Disabling a task (the revert of
+/// an "enable") is never taken from the user-writable folder: it could turn
+/// off any task, Defender's scans included.
+fn trusted_sched_task(tweak_id: &str, cmd: &str) -> bool {
     let Some(script) = ps_script(cmd) else {
         return false;
     };
-    for verb in ["Enable-ScheduledTask", "Disable-ScheduledTask"] {
-        if let Some(args) = quoted_between(
-            script,
-            &format!("{verb} -TaskPath '"),
-            "' -ErrorAction Stop | Out-Null",
-        ) {
-            if let Some((path, name)) = args.split_once("' -TaskName '") {
-                return crate::schedtasks::is_valid_task_ident(path)
-                    && crate::schedtasks::is_valid_task_ident(name);
-            }
-        }
-    }
-    false
+    let Some(args) = quoted_between(
+        script,
+        "Enable-ScheduledTask -TaskPath '",
+        "' -ErrorAction Stop | Out-Null",
+    ) else {
+        return false;
+    };
+    let Some((path, name)) = args.split_once("' -TaskName '") else {
+        return false;
+    };
+    crate::schedtasks::is_valid_task_ident(path)
+        && crate::schedtasks::is_valid_task_ident(name)
+        && tweak_id == format!("task:{path}{name}")
 }
 
-fn trusted_service_start(cmd: &str) -> bool {
+/// Restarting the service of the privacy item this entry is about.
+fn trusted_service_start(tweak_id: &str, cmd: &str) -> bool {
+    let declared = tweak_id
+        .strip_prefix("privacy:")
+        .and_then(crate::privacy::service_target);
     ps_script(cmd)
         .and_then(|s| quoted_between(s, "Start-Service -Name '", "' -ErrorAction Stop"))
-        .is_some_and(|svc| matches!(svc, "DiagTrack" | "WerSvc" | "dmwappushservice" | "lfsvc"))
+        .is_some_and(|svc| declared == Some(svc))
 }
 
-fn trusted_defender(cmd: &str) -> bool {
+/// Only reverts that turn Defender protection back ON are carried over; one
+/// that switches it off is exactly what planted data would ask for.
+fn trusted_defender(tweak_id: &str, cmd: &str) -> bool {
     matches!(
-        ps_script(cmd),
-        Some(
-            "Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction Stop"
-                | "Set-MpPreference -DisableRealtimeMonitoring $false -ErrorAction Stop"
-                | "Set-MpPreference -MAPSReporting 0 -ErrorAction Stop"
-                | "Set-MpPreference -MAPSReporting 1 -ErrorAction Stop"
-                | "Set-MpPreference -MAPSReporting 2 -ErrorAction Stop"
+        (tweak_id, ps_script(cmd)),
+        (
+            "defenderRealtime",
+            Some("Set-MpPreference -DisableRealtimeMonitoring $false -ErrorAction Stop"),
+        ) | (
+            "defenderCloud",
+            Some(
+                "Set-MpPreference -MAPSReporting 1 -ErrorAction Stop"
+                    | "Set-MpPreference -MAPSReporting 2 -ErrorAction Stop"
+            ),
         )
     )
 }
 
-fn trusted_bcdedit(cmd: &str) -> bool {
+/// The element of the boot tweak this entry is about, and never a value that
+/// lowers boot security (test signing on, DEP always off).
+fn trusted_bcdedit(tweak_id: &str, cmd: &str) -> bool {
+    let Some((target, element)) = tweak_id
+        .strip_prefix("bcd:")
+        .and_then(crate::bootopt::declared_element)
+    else {
+        return false;
+    };
     let t: Vec<&str> = cmd.split_whitespace().collect();
-    let target = |s: &str| matches!(s, "{current}" | "{bootmgr}" | "{default}");
-    let element = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_lowercase());
     let value = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric());
+    let weakens = |v: &str| {
+        let v = v.to_ascii_lowercase();
+        (element == "testsigning" && !matches!(v.as_str(), "no" | "off"))
+            || (element == "nx" && v == "alwaysoff")
+    };
     match t.as_slice() {
-        ["bcdedit", "/set", tg, el, v] => target(tg) && element(el) && value(v),
-        ["bcdedit", "/deletevalue", tg, el] => target(tg) && element(el),
+        ["bcdedit", "/set", tg, el, v] => {
+            *tg == target && *el == element && value(v) && !weakens(v)
+        }
+        ["bcdedit", "/deletevalue", tg, el] => *tg == target && *el == element,
         _ => false,
     }
 }
@@ -224,10 +249,10 @@ fn trusted_revert(tweak_id: &str, revert: &str, static_reverts: &[&str]) -> Opti
     }
     if trusted_powercfg(revert)
         || trusted_netsh(revert)
-        || trusted_sched_task(revert)
-        || trusted_service_start(revert)
-        || trusted_defender(revert)
-        || trusted_bcdedit(revert)
+        || trusted_sched_task(tweak_id, revert)
+        || trusted_service_start(tweak_id, revert)
+        || trusted_defender(tweak_id, revert)
+        || trusted_bcdedit(tweak_id, revert)
     {
         return Some(revert.to_string());
     }
@@ -524,12 +549,16 @@ fn migrate_debloater(legacy: &Path, secure: &Path) {
         let Some(id) = path.file_stem().map(|s| s.to_string_lossy().into_owned()) else {
             continue;
         };
-        let valid = std::fs::read_to_string(&path)
-            .ok()
-            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-            .is_some_and(|v| crate::debloater::state_is_valid(&id, &v));
+        // Write the bytes that were validated: copying the path again would
+        // follow a symlink swapped in after the check (the legacy folder is
+        // user-writable) and copy an admin-only file into a readable folder.
+        let Ok(content) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let valid = serde_json::from_str::<serde_json::Value>(&content)
+            .is_ok_and(|v| crate::debloater::state_is_valid(&id, &v));
         if valid && !dst.join(file.file_name()).exists() {
-            let _ = std::fs::copy(&path, dst.join(file.file_name()));
+            let _ = std::fs::write(dst.join(file.file_name()), &content);
         }
     }
     let _ = std::fs::rename(&src, legacy.join(format!("debloater.migrated-{}", stamp())));
@@ -729,17 +758,32 @@ mod tests {
 
     #[test]
     fn generated_revert_shapes_are_trusted() {
-        for cmd in [
-            "powercfg /setactive 381b4222-f694-41f0-9685-ff5bb260df2e",
-            "powercfg /h on",
-            "netsh int tcp set global autotuninglevel=normal",
-            "powershell -Command Enable-ScheduledTask -TaskPath '\\' -TaskName 'Opera GX scheduled Autoupdate 1786662128' -ErrorAction Stop | Out-Null",
-            "powershell -Command Start-Service -Name 'DiagTrack' -ErrorAction Stop",
-            "powershell -Command Set-MpPreference -MAPSReporting 2 -ErrorAction Stop",
-            "bcdedit /set {current} bootmenupolicy Standard",
-            "bcdedit /deletevalue {current} numproc",
+        for (tweak, cmd) in [
+            ("x", "powercfg /setactive 381b4222-f694-41f0-9685-ff5bb260df2e"),
+            ("x", "powercfg /h on"),
+            ("x", "netsh int tcp set global autotuninglevel=normal"),
+            (
+                "task:\\Opera GX scheduled Autoupdate 1786662128",
+                "powershell -Command Enable-ScheduledTask -TaskPath '\\' -TaskName 'Opera GX scheduled Autoupdate 1786662128' -ErrorAction Stop | Out-Null",
+            ),
+            (
+                "privacy:prv_diagtrack_off",
+                "powershell -Command Start-Service -Name 'DiagTrack' -ErrorAction Stop",
+            ),
+            (
+                "defenderCloud",
+                "powershell -Command Set-MpPreference -MAPSReporting 2 -ErrorAction Stop",
+            ),
+            (
+                "defenderRealtime",
+                "powershell -Command Set-MpPreference -DisableRealtimeMonitoring $false -ErrorAction Stop",
+            ),
+            ("bcd:bcd_standard_policy", "bcdedit /set {default} bootmenupolicy Standard"),
+            ("bcd:bcd_numproc_all", "bcdedit /deletevalue {current} numproc"),
+            ("bcd:bcd_disable_integrity", "bcdedit /set {current} testsigning no"),
+            ("bcd:bcd_no_nx_alwaysoff", "bcdedit /set {current} nx OptIn"),
         ] {
-            assert_eq!(trusted_revert("x", cmd, &[]).as_deref(), Some(cmd), "{cmd}");
+            assert_eq!(trusted_revert(tweak, cmd, &[]).as_deref(), Some(cmd), "{cmd}");
         }
         // Legacy quoted power-index form is upgraded to the current form.
         let legacy = format!(
@@ -768,6 +812,42 @@ mod tests {
             "Set-ItemProperty -Path 'HKCU:\\Software\\X' -Name Y -Value 1 -Type DWord",
         ] {
             assert_eq!(trusted_revert("x", cmd, &[]), None, "{cmd}");
+        }
+        // Valid shapes, but not tied to the entry's own tweak, or lowering
+        // security when run elevated from planted data.
+        for (tweak, cmd) in [
+            ("bcd:bcd_disable_integrity", "bcdedit /set {current} testsigning on"),
+            ("bcd:bcd_disable_integrity", "bcdedit /set {current} testsigning yes"),
+            ("bcd:bcd_no_nx_alwaysoff", "bcdedit /set {current} nx AlwaysOff"),
+            ("bcd:bcd_timeout_0", "bcdedit /set {current} nointegritychecks on"),
+            ("bcd:bcd_timeout_0", "bcdedit /set {current} timeout 5"),
+            ("x", "bcdedit /deletevalue {current} numproc"),
+            (
+                "defenderRealtime",
+                "powershell -Command Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction Stop",
+            ),
+            (
+                "defenderCloud",
+                "powershell -Command Set-MpPreference -MAPSReporting 0 -ErrorAction Stop",
+            ),
+            (
+                "x",
+                "powershell -Command Set-MpPreference -MAPSReporting 2 -ErrorAction Stop",
+            ),
+            (
+                "task:\\Microsoft\\Windows\\Windows Defender\\Windows Defender Scheduled Scan",
+                "powershell -Command Disable-ScheduledTask -TaskPath '\\Microsoft\\Windows\\Windows Defender\\' -TaskName 'Windows Defender Scheduled Scan' -ErrorAction Stop | Out-Null",
+            ),
+            (
+                "task:\\Other",
+                "powershell -Command Enable-ScheduledTask -TaskPath '\\' -TaskName 'x' -ErrorAction Stop | Out-Null",
+            ),
+            (
+                "privacy:prv_wer_off",
+                "powershell -Command Start-Service -Name 'DiagTrack' -ErrorAction Stop",
+            ),
+        ] {
+            assert_eq!(trusted_revert(tweak, cmd, &[]), None, "{tweak} {cmd}");
         }
     }
 
