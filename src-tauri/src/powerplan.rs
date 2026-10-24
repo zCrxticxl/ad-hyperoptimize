@@ -182,6 +182,9 @@ pub fn delete_plan(guid: String) -> Result<String, String> {
         ULTIMATE_GUID,
     ];
     let g = guid.to_lowercase();
+    if !is_guid(&g) {
+        return Err(format!("Invalid GUID: {guid}"));
+    }
     if builtin.contains(&g.as_str()) {
         return Err("Cannot delete a built-in power plan.".into());
     }
@@ -194,7 +197,19 @@ pub fn delete_plan(guid: String) -> Result<String, String> {
     if plans["ultimateGuid"].as_str() == Some(g.as_str()) && plans["ultimateAvailable"] == true {
         return Err("Cannot delete the Ultimate Performance plan.".into());
     }
-    ps::exec("powercfg.exe", &["/delete", &guid]).map(|_| format!("Plan {guid} deleted"))
+    // Deleting a custom plan is otherwise final: export it first, and do not
+    // delete without that backup. `powercfg /import <file>` restores it.
+    let dir = crate::safety::state_dir()?.join("powerplans");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("creating backup folder: {e}"))?;
+    let backup = dir.join(format!(
+        "{g}-{}.pow",
+        chrono::Local::now().format("%Y%m%d%H%M%S")
+    ));
+    let backup_str = backup.to_string_lossy().into_owned();
+    ps::exec("powercfg.exe", &["/export", &backup_str, &g])
+        .map_err(|e| format!("Backup of plan {g} failed, nothing deleted: {}", e.trim()))?;
+    ps::exec("powercfg.exe", &["/delete", &g])
+        .map(|_| format!("Plan {g} deleted (backup: {backup_str}; restore with powercfg /import)"))
 }
 
 pub fn create_custom(name: String, base_guid: String) -> Result<String, String> {
