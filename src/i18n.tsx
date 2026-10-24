@@ -1694,6 +1694,13 @@ const de = {
   wdReason_error_reporting_off: "Derselbe Dienst wie im Datenschutz-Center, das jetzt der einzige Ort dafür ist.",
   wdRelated_location_off: "Das Datenschutz-Center deaktiviert stattdessen den Standortdienst (lfsvc); hier wird der Standort-Schalter der Windows-Einstellungen gesetzt.",
   updatesDriverRpNote: "Vor der Installation wird ein Wiederherstellungspunkt erstellt; gelingt das nicht, wird nichts installiert.",
+  logApplying: "Wende an:",
+  logReverting: "Setze zurück:",
+  applyAnyway: "Trotzdem anwenden",
+  gpuRiskReviewTitle: "Dieser Tweak hat für deine erkannte Hardware ein bekanntes Risiko, vor dem Anwenden prüfen",
+  diskDupesMethod: "SHA-256 · ab 100 KB · nur Dateien gleicher Größe werden gehasht",
+  diskTempCleanHint: "Zum Bereinigen: Seite „Bereinigung“ öffnen und „Temporäre Dateien“ wählen.",
+  regRestoredWord: "wiederhergestellt",
 };
 
 // ── English ───────────────────────────────────────────────────────────────────
@@ -3361,6 +3368,13 @@ const en: typeof de = {
   wdReason_error_reporting_off: "Same service as in the Privacy Center, which is now the single place for it.",
   wdRelated_location_off: "The Privacy Center disables the location service (lfsvc) instead; this sets the Location switch in Windows Settings.",
   updatesDriverRpNote: "A restore point is created before the installation; if that fails, nothing is installed.",
+  logApplying: "Applying:",
+  logReverting: "Reverting:",
+  applyAnyway: "Apply anyway",
+  gpuRiskReviewTitle: "This tweak has a known risk for your detected hardware, review it before applying",
+  diskDupesMethod: "SHA-256 · from 100 KB · only files of equal size are hashed",
+  diskTempCleanHint: "To clean up: open the Cleanup page and select \"Temp Files\".",
+  regRestoredWord: "restored",
 };
 
 export type UiText = typeof en;

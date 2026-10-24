@@ -457,7 +457,7 @@ function DuplicatesTab({ path, drives, currentRoot }: DuplicatesTabProps) {
       {err && <div style={{ color: "var(--red)", marginBottom: 10 }}>{err}</div>}
       {!data && !loading && (
         <div style={{ textAlign: "center", padding: "40px 0" }}>
-          <div className="muted" style={{ marginBottom: 14 }}>SHA-256 · Min. 100 KB · Only size-matched candidates are hashed</div>
+          <div className="muted" style={{ marginBottom: 14 }}>{t("diskDupesMethod")}</div>
           <button className="btn" onClick={load} disabled={loading}>🔍 {t("diskScanDupes")}</button>
         </div>
       )}
@@ -574,7 +574,7 @@ function TempTab() {
         ))}
       </div>
       <div className="muted" style={{ fontSize: 11, marginTop: 16 }}>
-        ℹ To clean: go to the Cleanup page → select "Temp Files".
+        ℹ {t("diskTempCleanHint")}
       </div>
     </div>
   );

@@ -60,7 +60,6 @@ export default function GpuTweaks({ admin, focusId }: { admin: boolean; focusId?
   const [loading, setLoading] = useState(true);
   const [busy, setBusy]   = useState<string | null>(null);
   const [lastLog, setLastLog] = useState<Record<string, string>>({});
-  const [log, setLog]     = useState<string[]>([]);
   const [open, setOpen]   = useState<string | null>(null);
   const [err, setErr]     = useState("");
   useFeatureFocus(focusId, !!data);
@@ -81,10 +80,7 @@ export default function GpuTweaks({ admin, focusId }: { admin: boolean; focusId?
     unknown:     t("unknown"),
   };
 
-  const push = (m: string) =>
-    setLog((l) => [`[${new Date().toLocaleTimeString()}] ${m}`, ...l.slice(0, 49)]);
   const pushFor = (id: string, m: string) => {
-    push(m);
     setLastLog((prev) => ({ ...prev, [id]: m }));
   };
 
@@ -102,7 +98,7 @@ export default function GpuTweaks({ admin, focusId }: { admin: boolean; focusId?
   const doApply = async (tw: GpuTweak) => {
     if (!data) return;
     setBusy(tw.id);
-    pushFor(tw.id, `Applying: ${tw.name}…`);
+    pushFor(tw.id, `${t("logApplying")} ${tw.name}…`);
     try {
       await api.gpuTweakApply(tw.id, data.driverKey);
       pushFor(tw.id, `✔ ${tw.name} ${t("gpuLogApplied")}${tw.reboot ? ` ${t("gpuRebootLog")}` : ""}`);
@@ -118,7 +114,7 @@ export default function GpuTweaks({ admin, focusId }: { admin: boolean; focusId?
   const doRevert = async (tw: GpuTweak) => {
     if (!data) return;
     setBusy(tw.id);
-    pushFor(tw.id, `Reverting: ${tw.name}…`);
+    pushFor(tw.id, `${t("logReverting")} ${tw.name}…`);
     try {
       await api.gpuTweakRevert(tw.id, data.driverKey);
       pushFor(tw.id, `↩ ${tw.name} ${t("gpuLogReset")}`);
@@ -307,7 +303,7 @@ export default function GpuTweaks({ admin, focusId }: { admin: boolean; focusId?
                             style={{ background: "var(--red)", borderColor: "var(--red)" }}
                             disabled={isBusy || blocked || needsAdmin}
                             onClick={() => { setPendingApply(tw.id); setOpen(tw.id); }}
-                            title="This tweak has a known risk for your detected hardware, review before applying"
+                            title={t("gpuRiskReviewTitle")}
                           >
                             {t("gpuReviewRisk")}
                           </button>
@@ -321,7 +317,7 @@ export default function GpuTweaks({ admin, focusId }: { admin: boolean; focusId?
                               needsAdmin ? t("bootAdminNeeded") : ""
                             }
                           >
-                                                   {isBusy ? <Spinner /> : (pendingApply === tw.id ? `⚠ ${t("apply")} anyway` : t("apply"))}
+                                                   {isBusy ? <Spinner /> : (pendingApply === tw.id ? `⚠ ${t("applyAnyway")}` : t("apply"))}
                           </button>
                         )}
                       </div>
@@ -345,7 +341,7 @@ export default function GpuTweaks({ admin, focusId }: { admin: boolean; focusId?
                           {pendingApply === tw.id && (
                             <div style={{ marginTop: 8 }}>
                               <button className="btn small ghost" onClick={() => setPendingApply(null)}>
-                                Cancel
+                                {t("cancel")}
                               </button>
                             </div>
                           )}

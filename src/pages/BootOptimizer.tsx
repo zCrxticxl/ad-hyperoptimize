@@ -212,7 +212,7 @@ function TweakRow({ tweak, admin, busy, onApply, onRevert }: {
           <p>{tweak.description}</p>
           <p><b>{t("bootImpact")}:</b> {tweak.impact}</p>
           {!admin && needsAdmin && (
-            <p style={{ color: "var(--yellow)" }}>⚠ {t("bootAdminNeeded")} (Risk: {tweak.risk})</p>
+            <p style={{ color: "var(--yellow)" }}>⚠ {t("bootAdminNeeded")}</p>
           )}
         </div>
       )}
@@ -249,16 +249,16 @@ export default function BootOptimizer({ admin }: { admin: boolean }) {
   const doApply = async (id: string) => {
     if (!admin || busy) return;
     if (!window.confirm(t("bootConfirmApply").replace("{name}", nameOf(id)))) return;
-    setBusy(id); push(`Applying ${id}…`);
-    try { await api.bootTweakApply(id); push(`✔ ${id} applied`); }
+    setBusy(id); push(`${t("logApplying")} ${nameOf(id)}…`);
+    try { await api.bootTweakApply(id); push(`✔ ${nameOf(id)} ${t("gpuLogApplied")}`); }
     catch (e: any) { push(`✘ ${id}: ${e}`); setErr(String(e)); }
     finally { setBusy(null); refresh(); }
   };
   const doRevert = async (id: string) => {
     if (!admin || busy) return;
     if (!window.confirm(t("bootConfirmRevert").replace("{name}", nameOf(id)))) return;
-    setBusy(id); push(`Reverting ${id}…`);
-    try { await api.bootTweakRevert(id); push(`↩ ${id} reverted`); }
+    setBusy(id); push(`${t("logReverting")} ${nameOf(id)}…`);
+    try { await api.bootTweakRevert(id); push(`↩ ${nameOf(id)} ${t("gpuLogReset")}`); }
     catch (e: any) { push(`✘ ${id}: ${e}`); setErr(String(e)); }
     finally { setBusy(null); refresh(); }
   };
@@ -290,7 +290,7 @@ export default function BootOptimizer({ admin }: { admin: boolean }) {
               <div className="chip-lbl">{t("bootTweaksActive")}</div>
             </div>
             <button className="btn small ghost" style={{ alignSelf: "center" }} onClick={refresh} disabled={loading}>
-              {loading ? <Spinner /> : "↻ Rescan"}
+              {loading ? <Spinner /> : `↻ ${t("rescan")}`}
             </button>
           </div>
 
