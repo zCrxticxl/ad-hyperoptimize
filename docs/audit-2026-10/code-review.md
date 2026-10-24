@@ -69,6 +69,7 @@ Severity:
 | `cache.rs` | 115 | reviewed |
 | `analysis.rs` | 560 | reviewed |
 | `hwprofile.rs` | 510 | reviewed |
+| `frametime.rs` | 500 | reviewed |
 
 ## Findings
 
@@ -155,3 +156,4 @@ Severity:
 | 79 | `analysis.rs` (temperature, RAM speed) | Low | ACPI thermal zones (`MSAcpi_ThermalZoneTemperature`) are often not the CPU temperature, yet the finding is "Critical CPU temperature". The RAM-speed check (avg < 2666 "MHz") overlaps `optimizer::ram_check` and also hits DDR4-2400 laptops that are correctly at JEDEC speed. | open (low) |
 | 80 | `hwprofile.rs` warnings/verdicts + 7 overlays | Low | Invented numbers and stale statements: "battery life −30-60%", "SSD 5-10× faster", "Power Plan is High Impact" for budget CPUs (unmeasured). There was also a warning about the removed Game Booster "GPU Performance Mode", and a risk verdict for `nv_power_max_perf` ("locks your GPU at maximum clock"), although that tweak is a legacy no-op that is no longer offered. | fixed: texts without numbers (budget CPU: "compare with the FPS measurement"); warning and verdict removed; es/fr/pl/pt/ru/sv/tr updated |
 | 81 | `localize.ts` | Low | Hardware warnings and risk verdicts have overlays for 7 languages, but **not for German**: German users see these texts in English. | open (HANDOFF item 2, translations) |
+| 82 | `frametime.rs:compare_metric` | Medium | The before/after verdict used 2 × standard error as "about a 95 % interval". That only holds for many runs. With 3 runs per state (the minimum allowed) the correct factor is 2.8–4.3 (t distribution, Welch df 2–4). Ordinary run-to-run variation could be reported as "better/worse", which defeats the purpose of the feature. | fixed: Welch–Satterthwaite df + t table (rounded down, conservative), still at least 1 %; test `small_samples_use_the_t_distribution`; method text (de/en) adjusted |

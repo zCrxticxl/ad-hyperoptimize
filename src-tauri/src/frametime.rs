@@ -221,10 +221,41 @@ fn mean_sd(xs: &[f64]) -> (f64, f64) {
     (mean, sd)
 }
 
+/// Two-sided 95 % critical value of Student's t for `df` degrees of freedom
+/// (rounded down to the next tabulated df, so the bound is never too small).
+fn t_critical_95(df: f64) -> f64 {
+    const TABLE: &[(f64, f64)] = &[
+        (1.0, 12.706),
+        (2.0, 4.303),
+        (3.0, 3.182),
+        (4.0, 2.776),
+        (5.0, 2.571),
+        (6.0, 2.447),
+        (7.0, 2.365),
+        (8.0, 2.306),
+        (9.0, 2.262),
+        (10.0, 2.228),
+        (12.0, 2.179),
+        (15.0, 2.131),
+        (20.0, 2.086),
+        (30.0, 2.042),
+        (60.0, 2.000),
+    ];
+    if !df.is_finite() || df > 60.0 {
+        return 1.96;
+    }
+    TABLE
+        .iter()
+        .rev()
+        .find(|(d, _)| *d <= df)
+        .map_or(TABLE[0].1, |(_, t)| *t)
+}
+
 /// Compares a metric (higher is better) between "before" and "after" runs.
-/// A change counts only if it exceeds twice the standard error of the
-/// difference (about a 95 % interval) and at least 1 % of the baseline, so
-/// normal run-to-run variation is never reported as a gain.
+/// A change counts only if it exceeds the 95 % interval of the difference
+/// (Welch's t: with three runs per state that is roughly 3-4 standard
+/// errors, not 2) and at least 1 % of the baseline, so normal run-to-run
+/// variation is never reported as a gain.
 pub fn compare_metric(before: &[f64], after: &[f64]) -> (Verdict, Value) {
     if before.len() < MIN_RUNS || after.len() < MIN_RUNS {
         return (
@@ -235,7 +266,14 @@ pub fn compare_metric(before: &[f64], after: &[f64]) -> (Verdict, Value) {
     let (mb, sb) = mean_sd(before);
     let (ma, sa) = mean_sd(after);
     let diff = ma - mb;
-    let noise = 2.0 * (sb.powi(2) / before.len() as f64 + sa.powi(2) / after.len() as f64).sqrt();
+    let (vb, va) = (
+        sb.powi(2) / before.len() as f64,
+        sa.powi(2) / after.len() as f64,
+    );
+    // Welch–Satterthwaite degrees of freedom.
+    let df = (vb + va).powi(2)
+        / (vb.powi(2) / (before.len() - 1) as f64 + va.powi(2) / (after.len() - 1) as f64);
+    let noise = t_critical_95(df) * (vb + va).sqrt();
     let threshold = noise.max(0.01 * mb.abs());
     let verdict = if diff.abs() <= threshold {
         Verdict::WithinNoise
@@ -445,6 +483,19 @@ mod tests {
             compare_metric(&[200.0; 3], &[201.0; 3]).0,
             Verdict::WithinNoise
         );
+    }
+
+    #[test]
+    fn small_samples_use_the_t_distribution() {
+        // 3 runs each, SE of the difference ~1.63: the +4 FPS gap is above
+        // 2·SE (3.3) but inside the Welch t interval (df 4: 2.776·SE = 4.5).
+        let before = [200.0, 202.0, 204.0];
+        let after = [204.0, 206.0, 208.0];
+        assert_eq!(compare_metric(&before, &after).0, Verdict::WithinNoise);
+        assert_eq!(t_critical_95(4.0), 2.776);
+        assert_eq!(t_critical_95(4.9), 2.776);
+        assert_eq!(t_critical_95(f64::NAN), 1.96);
+        assert_eq!(t_critical_95(0.5), 12.706);
     }
 
     #[test]
