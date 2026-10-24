@@ -189,7 +189,6 @@ const de = {
   updatesDriverInstallBtn: "Treiber installieren…",
   updatesDriverConfirm: "Empfehlung: erst Wiederherstellungspunkt erstellen.",
   updatesDriverQuestion: "WHQL-Treiber installieren?",
-  updatesRestorePoint: "Wiederherstellungspunkt",
   updatesAdminNeeded: "Admin erforderlich",
   updatesReboot: "⟳ Neustart erforderlich",
   updatesGpuTitle: "GPU-Treiber, direkt vom Hersteller",
@@ -534,7 +533,6 @@ const de = {
   ctxmenuReenableAll: "Alle wieder aktivieren",
   ctxmenuDisableAllConfirm: "Alle unnötigen Kontextmenüeinträge deaktivieren?",
   ctxmenuReenableAllConfirm: "Wirklich alle deaktivierten Kontextmenü-Einträge wieder aktivieren?",
-  updatesRestorePointDone: "✓ Wiederherstellungspunkt erstellt. Treiber-Updates können jetzt sicher installiert werden.",
   ctxmenuOn: "Aktiv",
   ctxmenuOff: "Aus",
   ctxmenuAdminTag: "Admin",
@@ -1693,6 +1691,7 @@ const de = {
   wdReason_feedback_off: "Dieselbe Einstellung wie im Datenschutz-Center, das jetzt der einzige Ort dafür ist.",
   wdReason_error_reporting_off: "Derselbe Dienst wie im Datenschutz-Center, das jetzt der einzige Ort dafür ist.",
   wdRelated_location_off: "Das Datenschutz-Center deaktiviert stattdessen den Standortdienst (lfsvc); hier wird der Standort-Schalter der Windows-Einstellungen gesetzt.",
+  updatesDriverRpNote: "Vor der Installation wird ein Wiederherstellungspunkt erstellt; gelingt das nicht, wird nichts installiert.",
 };
 
 // ── English ───────────────────────────────────────────────────────────────────
@@ -1855,7 +1854,6 @@ const en: typeof de = {
   updatesDriverInstallBtn: "Install drivers…",
   updatesDriverConfirm: "Recommendation: create a restore point first.",
   updatesDriverQuestion: "Install WHQL drivers?",
-  updatesRestorePoint: "Restore Point",
   updatesAdminNeeded: "Admin required",
   updatesReboot: "⟳ Reboot required",
   updatesGpuTitle: "GPU Drivers, directly from the manufacturer",
@@ -2200,7 +2198,6 @@ const en: typeof de = {
   ctxmenuReenableAll: "Re-enable All",
   ctxmenuDisableAllConfirm: "Disable all unnecessary context menu entries?",
   ctxmenuReenableAllConfirm: "Really re-enable all disabled context menu entries?",
-  updatesRestorePointDone: "Restore point created. Driver updates are now safe to install.",
   ctxmenuOn: "On",
   ctxmenuOff: "Off",
   ctxmenuAdminTag: "Admin",
@@ -3359,6 +3356,7 @@ const en: typeof de = {
   wdReason_feedback_off: "Same setting as in the Privacy Center, which is now the single place for it.",
   wdReason_error_reporting_off: "Same service as in the Privacy Center, which is now the single place for it.",
   wdRelated_location_off: "The Privacy Center disables the location service (lfsvc) instead; this sets the Location switch in Windows Settings.",
+  updatesDriverRpNote: "A restore point is created before the installation; if that fails, nothing is installed.",
 };
 
 export type UiText = typeof en;

@@ -153,7 +153,6 @@ export const ui: Partial<UiText> = {
   updatesDriverInstallBtn: "Sürücüleri yükle…",
   updatesDriverConfirm: "Öneri: önce bir geri yükleme noktası oluşturun.",
   updatesDriverQuestion: "WHQL sürücüleri yüklensin mi?",
-  updatesRestorePoint: "Geri Yükleme Noktası",
   updatesAdminNeeded: "Yönetici gerekli",
   updatesReboot: "⟳ Yeniden başlatma gerekli",
   updatesGpuTitle: "GPU Sürücüleri, doğrudan üreticiden",
@@ -386,7 +385,6 @@ export const ui: Partial<UiText> = {
   ctxmenuReenableAll: "Tümünü Yeniden Etkinleştir",
   ctxmenuDisableAllConfirm: "Gereksiz tüm bağlam menüsü girişleri devre dışı bırakılsın mı?",
   ctxmenuReenableAllConfirm: "Devre dışı bırakılan tüm bağlam menüsü girdileri gerçekten yeniden etkinleştirilsin mi?",
-  updatesRestorePointDone: "Geri yükleme noktası oluşturuldu. Sürücü güncellemeleri artık güvenle yüklenebilir.",
   ctxmenuOn: "Açık",
   ctxmenuOff: "Kapalı",
   ctxmenuAdminTag: "Yönetici",
@@ -1334,6 +1332,7 @@ export const ui: Partial<UiText> = {
   pcconfCompositeNote: "GPU, bu tipik oyunlar ortalaması tahmininde en fazla ağırlığı (yüzde 55) taşır, bu yüzden yalnızca CPU yükseltmesi GPU/RAM/depolama aynı kaldığında toplamı ancak çok az değiştirir. CPU-bound oyunlarda, yüksek yenileme hızlarında (espor) veya %1 düşüklerde, gerçek dünya kazancı genellikle bu tek sayının gösterdiğinden çok daha büyüktür.",
   pcconfNone: "- hiçbir şey seçilmedi -",
   pcconfNoOptions: "Eşleşen seçenek bulunamadı",
+  updatesDriverRpNote: "Kurulumdan önce bir geri yükleme noktası oluşturulur; bu başarısız olursa hiçbir şey kurulmaz.",
 };
 
 export const tweaks: Record<string, { name?: string; description?: string; rationale?: string; impact?: string }> = {

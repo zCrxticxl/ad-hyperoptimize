@@ -153,7 +153,6 @@ export const ui: Partial<UiText> = {
   updatesDriverInstallBtn: "Installera drivrutiner…",
   updatesDriverConfirm: "Rekommendation: skapa en återställningspunkt först.",
   updatesDriverQuestion: "Installera WHQL-drivrutiner?",
-  updatesRestorePoint: "Återställningspunkt",
   updatesAdminNeeded: "Admin krävs",
   updatesReboot: "⟳ Omstart krävs",
   updatesGpuTitle: "GPU-drivrutiner, direkt från tillverkaren",
@@ -386,7 +385,6 @@ export const ui: Partial<UiText> = {
   ctxmenuReenableAll: "Återaktivera alla",
   ctxmenuDisableAllConfirm: "Inaktivera alla onödiga snabbmenyposter?",
   ctxmenuReenableAllConfirm: "Verkligen återaktivera alla inaktiverade snabbmenyobjekt?",
-  updatesRestorePointDone: "Återställningspunkt skapad. Drivrutinsuppdateringar kan nu installeras säkert.",
   ctxmenuOn: "På",
   ctxmenuOff: "Av",
   ctxmenuAdminTag: "Admin",
@@ -1334,6 +1332,7 @@ export const ui: Partial<UiText> = {
   pcconfCompositeNote: "GPU:n bär den största vikten (55%) i denna genomsnittliga spelestimat, så en enbart CPU-uppgradering flyttar knappt totalen när GPU/RAM/lagring förblir desamma. I CPU-bundna spel, höga uppdateringfrekvenser (esport), eller 1% lows, är den verkliga vinsten ofta mycket större än detta enskilda tal visar.",
   pcconfNone: "- inga valda -",
   pcconfNoOptions: "Inga matchande alternativ hittades",
+  updatesDriverRpNote: "En återställningspunkt skapas före installationen; misslyckas det installeras ingenting.",
 };
 
 export const tweaks: Record<string, { name?: string; description?: string; rationale?: string; impact?: string }> = {

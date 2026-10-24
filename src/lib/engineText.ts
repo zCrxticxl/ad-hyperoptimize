@@ -270,6 +270,10 @@ const DE_PATTERNS: Pattern[] = [
   [/^(.+): driver from (.+)$/, (m) => `${m[1]}: Treiber vom ${m[2]}`],
   [/^(\d+) change\(s\) did not finish$/, (m) => `${m[1]} Änderung(en) nicht abgeschlossen`],
   [/^System detection failed: (.*)$/s, (m) => `Systemerkennung fehlgeschlagen: ${m[1]}`],
+  [/^No restore point was created \((.*)\); no driver was installed\.$/s,
+    (m) => `Es wurde kein Wiederherstellungspunkt erstellt (${m[1]}); kein Treiber wurde installiert.`],
+  [/^No restore point was created \((.*)\)\. Nothing was changed\. Untick the restore point to apply without one\.$/s,
+    (m) => `Es wurde kein Wiederherstellungspunkt erstellt (${m[1]}). Nichts wurde geändert. Den Haken beim Wiederherstellungspunkt entfernen, um ohne ihn anzuwenden.`],
 ];
 
 function translateDe(text: string): string {

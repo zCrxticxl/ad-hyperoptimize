@@ -153,7 +153,6 @@ export const ui: Partial<UiText> = {
   updatesDriverInstallBtn: "Instalar controladores…",
   updatesDriverConfirm: "Recomendación: crea primero un punto de restauración.",
   updatesDriverQuestion: "¿Instalar controladores WHQL?",
-  updatesRestorePoint: "Punto de restauración",
   updatesAdminNeeded: "Se requiere administrador",
   updatesReboot: "⟳ Se requiere reiniciar",
   updatesGpuTitle: "Controladores de GPU, directamente del fabricante",
@@ -386,7 +385,6 @@ export const ui: Partial<UiText> = {
   ctxmenuReenableAll: "Reactivar todo",
   ctxmenuDisableAllConfirm: "¿Desactivar todas las entradas innecesarias del menú contextual?",
   ctxmenuReenableAllConfirm: "¿Reactivar realmente todas las entradas desactivadas del menú contextual?",
-  updatesRestorePointDone: "Punto de restauración creado. Las actualizaciones de drivers ya se pueden instalar con seguridad.",
   ctxmenuOn: "Activo",
   ctxmenuOff: "Inactivo",
   ctxmenuAdminTag: "Admin",
@@ -1334,6 +1332,7 @@ export const ui: Partial<UiText> = {
   pcconfCompositeNote: "La GPU lleva el mayor peso (55%) en esta estimación promedio en juegos típicos, por lo que una actualización solo de CPU apenas mueve el total cuando GPU/RAM/almacenamiento se mantienen iguales. En juegos limitados por CPU, altas tasas de refresco (esports) o 1% lows, la ganancia real suele ser mucho mayor que este único número.",
   pcconfNone: "- ninguno seleccionado -",
   pcconfNoOptions: "No se encontraron opciones coincidentes",
+  updatesDriverRpNote: "Antes de la instalación se crea un punto de restauración; si falla, no se instala nada.",
 };
 
 export const tweaks: Record<string, { name?: string; description?: string; rationale?: string; impact?: string }> = {

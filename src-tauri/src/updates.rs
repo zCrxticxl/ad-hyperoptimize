@@ -301,6 +301,10 @@ pub fn install_driver_updates() -> Result<Value, String> {
             "Driver installation needs administrator rights. Restart the app as admin.".into(),
         );
     }
+    // Driver installs have no journal undo: a restore point (or a recent one
+    // Windows keeps instead) is required before anything is installed.
+    crate::safety::create_restore_point("AD HyperOptimize: driver updates")
+        .map_err(|e| format!("No restore point was created ({e}); no driver was installed."))?;
     let script = r#"
 $session = New-Object -ComObject Microsoft.Update.Session
 $searcher = $session.CreateUpdateSearcher()

@@ -153,7 +153,6 @@ export const ui: Partial<UiText> = {
   updatesDriverInstallBtn: "Zainstaluj sterowniki…",
   updatesDriverConfirm: "Zalecenie: najpierw utwórz punkt przywracania.",
   updatesDriverQuestion: "Zainstalować sterowniki WHQL?",
-  updatesRestorePoint: "Punkt przywracania",
   updatesAdminNeeded: "Wymagane uprawnienia administratora",
   updatesReboot: "⟳ Wymagany restart",
   updatesGpuTitle: "Sterowniki GPU, bezpośrednio od producenta",
@@ -386,7 +385,6 @@ export const ui: Partial<UiText> = {
   ctxmenuReenableAll: "Włącz wszystko ponownie",
   ctxmenuDisableAllConfirm: "Wyłączyć wszystkie niepotrzebne wpisy menu kontekstowego?",
   ctxmenuReenableAllConfirm: "Naprawdę ponownie włączyć wszystkie wyłączone wpisy menu kontekstowego?",
-  updatesRestorePointDone: "Punkt przywracania utworzony. Aktualizacje sterowników można teraz bezpiecznie zainstalować.",
   ctxmenuOn: "Włączone",
   ctxmenuOff: "Wyłączone",
   ctxmenuAdminTag: "Admin",
@@ -1334,6 +1332,7 @@ export const ui: Partial<UiText> = {
   pcconfCompositeNote: "GPU ma największy wkład (55%) w tej średniej dla typowych gier, więc modernizacja tylko CPU ledwo przesuwa łączny wynik, jeśli GPU/RAM/dyski pozostają bez zmian. W grach obciążających CPU, przy wysokich częstotliwościach odświeżania (esport) lub 1% low, realny zysk jest często znacznie większy niż sugeruje ta pojedyncza liczba.",
   pcconfNone: "- nie wybrano -",
   pcconfNoOptions: "Nie znaleziono pasujących opcji",
+  updatesDriverRpNote: "Przed instalacją tworzony jest punkt przywracania; jeśli się nie uda, nic nie zostanie zainstalowane.",
 };
 
 export const tweaks: Record<string, { name?: string; description?: string; rationale?: string; impact?: string }> = {

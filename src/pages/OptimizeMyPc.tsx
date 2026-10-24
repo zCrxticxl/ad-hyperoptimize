@@ -66,7 +66,7 @@ export default function OptimizeMyPc({ admin, go }: { admin: boolean; go: (id: s
       <h1 className="page-title">⚡ {t("omTitle")}</h1>
       <div className="page-sub">{t("omSub")}</div>
       {error && <ErrorBanner msg={error} onRetry={rescan} />}
-      {applyErr && <ErrorBanner msg={applyErr} />}
+      {applyErr && <ErrorBanner msg={engineText(applyErr, lang)} />}
 
       {result && (
         <Card title={t("omResults")}>

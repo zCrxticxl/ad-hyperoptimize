@@ -1747,9 +1747,20 @@ pub fn apply(tweak_id: &str) -> Result<Value, String> {
     //    driver reinstall or the user), reporting success would be false and
     //    re-capturing would lose the original: the earlier entry must be
     //    undone first.
+    //    Only a fully active earlier apply counts as success; a partial one
+    //    (some values reset since) would report success for settings that
+    //    are not in effect.
     if let Some(open) = open_entry_id(&safety::load_journal()?, t.id) {
-        if matches!(detect_status(&t), "applied" | "partial") {
-            return Ok(json!({ "entryId": open, "status": "already_applied" }));
+        match detect_status(&t) {
+            "applied" => return Ok(json!({ "entryId": open, "status": "already_applied" })),
+            "partial" => {
+                return Err(format!(
+                    "'{}' was applied earlier but is only partly in effect now. Undo the \
+                     earlier change first (it restores the original values), then apply again.",
+                    t.name
+                ))
+            }
+            _ => {}
         }
         return Err(format!(
             "'{}' was applied earlier but is no longer in effect. Undo the earlier change \

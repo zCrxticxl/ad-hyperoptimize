@@ -4,6 +4,7 @@ import { relaunch } from "@tauri-apps/plugin-process";
 import { getVersion } from "@tauri-apps/api/app";
 import { api } from "../api";
 import { Card, Spinner } from "../components/ui";
+import { engineText } from "../lib/engineText";
 import { useLang } from "../i18n";
 
 // ─── Self-Update Card ─────────────────────────────────────────────────────────
@@ -137,7 +138,7 @@ type AppRow = {
 type RowStatus = { state: "idle" | "updating" | "done" | "error"; msg?: string };
 
 export default function Updates({ admin }: { admin: boolean }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const [apps, setApps]           = useState<AppRow[]>([]);
   const [appsMeta, setAppsMeta]   = useState<{ count: number } | null>(null);
   const [scanBusy, setScanBusy]   = useState(false);
@@ -151,8 +152,6 @@ export default function Updates({ admin }: { admin: boolean }) {
   const [drvResult, setDrvResult] = useState<any | null>(null);
   const [confirmDrv, setConfirmDrv] = useState(false);
   const [drvInstalling, setDrvInstalling] = useState(false);
-  const [rpBusy, setRpBusy]       = useState(false);
-  const [rpMsg, setRpMsg]         = useState<{ ok: boolean; text: string } | null>(null);
   const [gpu, setGpu]             = useState<any | null>(null);
 
   const pushLog = (msg: string) => {
@@ -200,7 +199,7 @@ export default function Updates({ admin }: { admin: boolean }) {
   };
 
   const scanDrivers = async () => {
-    setDrvBusy(true); setDrivers(null); setDrvResult(null); setRpMsg(null);
+    setDrvBusy(true); setDrivers(null); setDrvResult(null);
     try { setDrivers(await api.scanDriverUpdates()); }
     catch (e: any) { setDrivers({ error: String(e) }); }
     finally { setDrvBusy(false); }
@@ -381,16 +380,8 @@ export default function Updates({ admin }: { admin: boolean }) {
                     <span style={{ color: "var(--yellow)", fontSize: 13 }}>
                       {t("updatesDriverConfirm")} {drivers.count} {t("updatesDriverQuestion")}
                     </span>
-                    <button className="btn ghost" disabled={rpBusy || drvInstalling} onClick={async () => {
-                      setRpBusy(true); setRpMsg(null);
-                      try {
-                        await api.createRestorePoint("Before driver updates");
-                        setRpMsg({ ok: true, text: t("updatesRestorePointDone") });
-                      }
-                      catch (e: any) { setRpMsg({ ok: false, text: `${t("updatesRestorePoint")}: ${String(e)}` }); }
-                      finally { setRpBusy(false); }
-                    }}>{rpBusy ? <Spinner /> : t("updatesRestorePoint")}</button>
-                    <button className="btn" style={{ background: "var(--red)" }} disabled={drvInstalling || rpBusy || !admin} onClick={async () => {
+                    <span className="muted" style={{ fontSize: 12 }}>{t("updatesDriverRpNote")}</span>
+                    <button className="btn" style={{ background: "var(--red)" }} disabled={drvInstalling || !admin} onClick={async () => {
                       setDrvInstalling(true); setDrvResult(null);
                       try { setDrvResult(await api.installDriverUpdates()); }
                       catch (e: any) { setDrvResult({ error: String(e) }); }
@@ -414,8 +405,7 @@ export default function Updates({ admin }: { admin: boolean }) {
               )}
             </div>
           )}
-          {rpMsg && <div style={{ color: rpMsg.ok ? "var(--green)" : "var(--red)", marginTop: 8 }}>{rpMsg.text}</div>}
-          {drvResult?.error && <div style={{ color: "var(--red)", marginTop: 8 }}>{drvResult.error}</div>}
+          {drvResult?.error && <div style={{ color: "var(--red)", marginTop: 8 }}>{engineText(drvResult.error, lang)}</div>}
         </Card>
       </div>
 

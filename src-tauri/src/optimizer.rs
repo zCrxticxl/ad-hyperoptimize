@@ -1190,13 +1190,19 @@ pub fn apply(ids: Vec<String>, create_restore_point: bool) -> Value {
         let journal = crate::safety::load_journal().unwrap_or_default();
         let items = evaluate(&system, &journal);
 
+        // A requested restore point that Windows did not create stops the
+        // apply: the user asked for that safety net before any change.
         let restore_point = if create_restore_point && admin && !ids.is_empty() {
-            Some(
-                match crate::safety::create_restore_point("AD HyperOptimize: Optimize My PC") {
-                    Ok(m) => json!({ "ok": true, "message": m }),
-                    Err(e) => json!({ "ok": false, "message": e }),
-                },
-            )
+            match crate::safety::create_restore_point("AD HyperOptimize: Optimize My PC") {
+                Ok(m) => Some(json!({ "ok": true, "message": m })),
+                Err(e) => {
+                    return json!({
+                        "error": format!(
+                            "No restore point was created ({e}). Nothing was changed. Untick the restore point to apply without one."
+                        )
+                    })
+                }
+            }
         } else {
             None
         };

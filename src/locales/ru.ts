@@ -153,7 +153,6 @@ export const ui: Partial<UiText> = {
   updatesDriverInstallBtn: "Установить драйверы…",
   updatesDriverConfirm: "Рекомендация: сначала создайте точку восстановления.",
   updatesDriverQuestion: "Установить драйверы WHQL?",
-  updatesRestorePoint: "Точка восстановления",
   updatesAdminNeeded: "Требуются права администратора",
   updatesReboot: "⟳ Требуется перезагрузка",
   updatesGpuTitle: "Драйверы GPU, напрямую от производителя",
@@ -386,7 +385,6 @@ export const ui: Partial<UiText> = {
   ctxmenuReenableAll: "Снова включить всё",
   ctxmenuDisableAllConfirm: "Отключить все ненужные пункты контекстного меню?",
   ctxmenuReenableAllConfirm: "Действительно снова включить все отключённые пункты контекстного меню?",
-  updatesRestorePointDone: "Точка восстановления создана. Обновления драйверов теперь можно безопасно установить.",
   ctxmenuOn: "Включено",
   ctxmenuOff: "Отключено",
   ctxmenuAdminTag: "Админ",
@@ -1334,6 +1332,7 @@ export const ui: Partial<UiText> = {
   pcconfCompositeNote: "GPU имеет наибольший вес (55%) в этой оценке в среднем по типичным играм, поэтому апгрейд только CPU едва двигает итог, когда GPU/RAM/накопитель остаются теми же. В CPU-интенсивных играх, высоких частотах (киберпанк), или 1% lows реальный прирост часто значительно больше, чем показывает это одно число.",
   pcconfNone: "- не выбрано -",
   pcconfNoOptions: "Нет подходящих вариантов",
+  updatesDriverRpNote: "Перед установкой создаётся точка восстановления; если это не удаётся, ничего не устанавливается.",
 };
 
 export const tweaks: Record<string, { name?: string; description?: string; rationale?: string; impact?: string }> = {

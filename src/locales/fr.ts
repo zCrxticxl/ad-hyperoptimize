@@ -153,7 +153,6 @@ export const ui: Partial<UiText> = {
   updatesDriverInstallBtn: "Installer les pilotes…",
   updatesDriverConfirm: "Recommandation : créez d'abord un point de restauration.",
   updatesDriverQuestion: "Installer les pilotes WHQL ?",
-  updatesRestorePoint: "Point de restauration",
   updatesAdminNeeded: "Droits admin requis",
   updatesReboot: "⟳ Redémarrage requis",
   updatesGpuTitle: "Pilotes GPU, directement depuis le fabricant",
@@ -386,7 +385,6 @@ export const ui: Partial<UiText> = {
   ctxmenuReenableAll: "Tout réactiver",
   ctxmenuDisableAllConfirm: "Désactiver toutes les entrées de menu contextuel inutiles ?",
   ctxmenuReenableAllConfirm: "Réactiver vraiment toutes les entrées désactivées du menu contextuel ?",
-  updatesRestorePointDone: "Point de restauration créé. Les mises à jour des pilotes peuvent maintenant être installées en toute sécurité.",
   ctxmenuOn: "Actif",
   ctxmenuOff: "Inactif",
   ctxmenuAdminTag: "Admin",
@@ -1334,6 +1332,7 @@ export const ui: Partial<UiText> = {
   pcconfCompositeNote: "Le GPU a le plus de poids (55 %) dans cette estimation moyenne sur des jeux typiques, donc une mise à niveau du CPU ne bouge presque pas le total quand le GPU/RAM/stockage restent les mêmes. Dans les jeux gourmands en CPU, les fréquences élevées (esport), ou les 1 % bas, le gain dans le monde réel est souvent bien plus grand que ce seul nombre ne le montre.",
   pcconfNone: "- aucun sélectionné -",
   pcconfNoOptions: "Aucune option correspondante trouvée",
+  updatesDriverRpNote: "Un point de restauration est créé avant l'installation ; en cas d'échec, rien n'est installé.",
 };
 
 export const tweaks: Record<string, { name?: string; description?: string; rationale?: string; impact?: string }> = {
