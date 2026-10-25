@@ -272,6 +272,16 @@ pub static COMMANDS: &[(&str, Class, &str)] = &[
         "HKLM Enum Affinity Policy (journaled)",
     ),
     (
+        "cmd_rebar_status",
+        Read,
+        "NVIDIA driver profile (NVAPI DRS) read",
+    ),
+    (
+        "cmd_rebar_set",
+        Privileged,
+        "NVIDIA driver profile write (machine-wide DRS database)",
+    ),
+    (
         "cmd_stall_probe",
         Read,
         "timer measurement in the app process",
