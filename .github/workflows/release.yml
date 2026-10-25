@@ -14,6 +14,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Fail before anything is built or published: a tag on the wrong commit
+      # once published a "v1.7.0" release with 1.6.4 installers, because the
+      # version check only ran after the upload.
+      - name: Verify tag matches app version
+        shell: pwsh
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = $env:TAG_NAME.TrimStart('v')
+          $conf = (Get-Content 'src-tauri/tauri.conf.json' -Raw | ConvertFrom-Json).version
+          $pkg = (Get-Content 'package.json' -Raw | ConvertFrom-Json).version
+          $cargo = ((Select-String -Path 'src-tauri/Cargo.toml' -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1).Matches[0].Groups[1].Value)
+          foreach ($pair in @(@('tauri.conf.json', $conf), @('package.json', $pkg), @('Cargo.toml', $cargo))) {
+            if ($pair[1] -ne $tag) {
+              Write-Error "Tag 'v$tag' does not match $($pair[0]) version '$($pair[1])'. Tag the commit that carries the version bump."
+              exit 1
+            }
+          }
+          Write-Host "Tag v$tag matches tauri.conf.json, package.json and Cargo.toml."
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20.19.0
