@@ -4,9 +4,14 @@ on:
   push:
     tags:
       - 'v*'
+  # Release the version on main without pushing a tag by hand: the job tags
+  # the commit as v<tauri.conf.json version> itself.
+  workflow_dispatch:
 
 jobs:
   release:
+    # A manual run publishes only from main.
+    if: github.event_name == 'push' || github.ref == 'refs/heads/main'
     permissions:
       contents: write
     runs-on: windows-latest
@@ -20,11 +25,11 @@ jobs:
       - name: Verify tag matches app version
         shell: pwsh
         env:
-          TAG_NAME: ${{ github.ref_name }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $tag = $env:TAG_NAME.TrimStart('v')
           $conf = (Get-Content 'src-tauri/tauri.conf.json' -Raw | ConvertFrom-Json).version
+          $tag = if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') { $conf } else { $env:REF_NAME.TrimStart('v') }
           $pkg = (Get-Content 'package.json' -Raw | ConvertFrom-Json).version
           $cargo = ((Select-String -Path 'src-tauri/Cargo.toml' -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1).Matches[0].Groups[1].Value)
           foreach ($pair in @(@('tauri.conf.json', $conf), @('package.json', $pkg), @('Cargo.toml', $cargo))) {
@@ -34,6 +39,32 @@ jobs:
             }
           }
           Write-Host "Tag v$tag matches tauri.conf.json, package.json and Cargo.toml."
+          "TAG_NAME=v$tag" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Create tag (manual run)
+        if: github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = $env:TAG_NAME
+          $lines = @(git ls-remote --tags origin "refs/tags/$tag" "refs/tags/$tag^{}")
+          if ($LASTEXITCODE -ne 0) { Write-Error "git ls-remote failed"; exit 1 }
+          if ($lines.Count -gt 0) {
+            # An annotated tag also lists its commit as the peeled ^{} line.
+            $line = ($lines | Where-Object { $_ -like '*^{}' } | Select-Object -First 1)
+            if (!$line) { $line = $lines[0] }
+            $sha = ($line -split '\s+')[0]
+            if ($sha -ne $env:GITHUB_SHA) {
+              Write-Error "Tag $tag already exists on $sha, not on $env:GITHUB_SHA. Bump the version first."
+              exit 1
+            }
+            Write-Host "Tag $tag already points at this commit."
+            exit 0
+          }
+          git tag $tag $env:GITHUB_SHA
+          git push origin "refs/tags/$tag"
+          if ($LASTEXITCODE -ne 0) { Write-Error "Pushing tag $tag failed"; exit 1 }
+          Write-Host "Created tag $tag on $env:GITHUB_SHA."
 
       - uses: actions/setup-node@v4
         with:
@@ -95,7 +126,7 @@ jobs:
           $ErrorActionPreference = 'Continue'
           $notes = ''
           try {
-            $ver = $env:GITHUB_REF_NAME.TrimStart('v')
+            $ver = $env:TAG_NAME.TrimStart('v')
             if (Test-Path 'CHANGELOG.md') {
               $collecting = $false
               $out = New-Object System.Collections.Generic.List[string]
@@ -119,8 +150,8 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: 'AD HyperOptimize ${{ github.ref_name }}'
+          tagName: ${{ env.TAG_NAME }}
+          releaseName: 'AD HyperOptimize ${{ env.TAG_NAME }}'
           releaseBody: ${{ env.RELEASE_NOTES || github.event.head_commit.message }}
           releaseDraft: false
           prerelease: false
@@ -150,7 +181,7 @@ jobs:
             "$hash  $($artifact.Name)"
           }
           [System.IO.File]::WriteAllLines((Join-Path $PWD 'SHA256SUMS.txt'), [string[]]$lines, (New-Object System.Text.UTF8Encoding $false))
-          gh release upload $env:GITHUB_REF_NAME 'SHA256SUMS.txt' --clobber
+          gh release upload $env:TAG_NAME 'SHA256SUMS.txt' --clobber
 
       - name: Generate latest.json
         shell: pwsh
@@ -158,8 +189,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          RELEASE_NOTES: ${{ github.event.head_commit.message }}
-          TAG_NAME: ${{ github.ref_name }}
         run: |
           $ErrorActionPreference = 'Stop'
           # Version of truth = tauri.conf.json, NOT the git tag name.
