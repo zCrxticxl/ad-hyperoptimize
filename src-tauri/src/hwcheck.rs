@@ -41,6 +41,8 @@ pub struct Module {
     pub gb: u64,
     pub speed: u32,
     pub part: String,
+    /// SMBIOS memory type: 26 = DDR4, 34 = DDR5.
+    pub ddr: u32,
 }
 
 /// Verdict and hints for the installed modules on a board with `slots`.
@@ -105,7 +107,7 @@ const RAM_PS: &str = r#"
 $slots = (Get-CimInstance Win32_PhysicalMemoryArray -ErrorAction SilentlyContinue | Measure-Object -Property MemoryDevices -Sum).Sum
 $mods = @(Get-CimInstance Win32_PhysicalMemory -ErrorAction SilentlyContinue | ForEach-Object {
     @{ bank = [string]$_.BankLabel; locator = [string]$_.DeviceLocator; gb = [int64]([math]::Round($_.Capacity / 1GB));
-       speed = [int]$_.ConfiguredClockSpeed; part = ([string]$_.PartNumber).Trim() } })
+       speed = [int]$_.ConfiguredClockSpeed; part = ([string]$_.PartNumber).Trim(); type = [int]$_.SMBIOSMemoryType } })
 @{ slots = [int]$slots; modules = $mods } | ConvertTo-Json -Depth 3 -Compress
 "#;
 
@@ -126,9 +128,167 @@ fn ram() -> Value {
             gb: m["gb"].as_u64().unwrap_or(0),
             speed: m["speed"].as_u64().unwrap_or(0) as u32,
             part: s(m, "part"),
+            ddr: m["type"].as_u64().unwrap_or(0) as u32,
         })
         .collect();
-    ram_verdict(&mods, v["slots"].as_u64().unwrap_or(0) as u32)
+    let mut out = ram_verdict(&mods, v["slots"].as_u64().unwrap_or(0) as u32);
+    out["plan"] = ram_plan(&mods, &cpu_name());
+    out
+}
+
+// ── RAM tuning plan ──────────────────────────────────────────────────────────
+
+/// CPU platform as far as memory tuning is concerned.
+pub fn platform(cpu: &str, ddr: u32) -> &'static str {
+    let c = cpu.to_ascii_lowercase();
+    if c.contains("ryzen") || c.contains("amd") {
+        if ddr == 34 {
+            "am5"
+        } else {
+            "am4"
+        }
+    } else if c.contains("intel") || c.contains("core") {
+        if ddr == 34 {
+            "intelDdr5"
+        } else {
+            "intelDdr4"
+        }
+    } else {
+        "other"
+    }
+}
+
+/// Step-by-step plan for the BIOS: which steps apply and the target values.
+/// The app cannot read or set timings itself (that needs a kernel driver);
+/// it reads back the configured speed afterwards.
+pub fn ram_plan(mods: &[Module], cpu: &str) -> Value {
+    let configured = mods
+        .iter()
+        .map(|m| m.speed)
+        .filter(|&s| s > 0)
+        .min()
+        .unwrap_or(0);
+    let rated = mods
+        .iter()
+        .filter_map(|m| crate::optimizer::ram_rated_from_part(&m.part))
+        .min();
+    let ddr = mods.first().map(|m| m.ddr).unwrap_or(0);
+    let plat = platform(cpu, ddr);
+    let mut steps = vec![];
+    let xmp_off = rated.is_some_and(|r| configured + 50 < r);
+    if xmp_off {
+        steps.push("xmp");
+    }
+    // Target for the 1:1 fabric/memory ratio.
+    let (target, fclk) = match plat {
+        "am4" => {
+            let t = rated.unwrap_or(configured).clamp(3200, 3800);
+            (t, Some(t / 2))
+        }
+        "am5" => (rated.unwrap_or(configured).min(6400), None),
+        _ => (rated.unwrap_or(configured), None),
+    };
+    match plat {
+        "am4" => {
+            steps.push("am4Fclk");
+            if rated.is_some_and(|r| r > 3800) {
+                steps.push("am4FastKit");
+            }
+            if rated.is_some_and(|r| r <= 3200) {
+                steps.push("am4Try3600");
+            }
+        }
+        "am5" => steps.push("am5Uclk"),
+        "intelDdr4" => steps.push("intelGear1"),
+        "intelDdr5" => steps.push("intelDdr5"),
+        _ => {}
+    }
+    steps.extend(["stability", "measure", "readTimings", "safety"]);
+    json!({
+        "platform": plat,
+        "ddr": match ddr { 26 => "DDR4", 34 => "DDR5", _ => "" },
+        "configured": configured,
+        "rated": rated,
+        "xmpOff": xmp_off,
+        "target": target,
+        "fclk": fclk,
+        "steps": steps,
+    })
+}
+
+// ── Windows build and the AMD branch-prediction fix ──────────────────────────
+
+/// True for Ryzen CPUs with Zen 3 or newer cores (the fix targets those).
+/// Mobile 5x00U/7x20U parts with an odd hundreds digit are Zen 2.
+pub fn amd_zen3_plus(cpu: &str) -> bool {
+    let c = cpu.to_ascii_uppercase();
+    if !c.contains("RYZEN") {
+        return false;
+    }
+    let Some(tok) = c
+        .split_whitespace()
+        .find(|t| t.len() >= 4 && t[..4].chars().all(|d| d.is_ascii_digit()))
+    else {
+        return false;
+    };
+    let model: u32 = tok[..4].parse().unwrap_or(0);
+    let suffix = &tok[4..];
+    if model < 5000 {
+        return false;
+    }
+    let hundreds = (model / 100) % 10;
+    if suffix.starts_with('U')
+        && ((5000..6000).contains(&model) && hundreds % 2 == 1 || model % 100 == 20)
+    {
+        return false;
+    }
+    true
+}
+
+/// Status of the AMD branch-prediction optimization: built into 24H2+, and
+/// shipped for 22H2/23H2 with KB5041587 (builds 22621/22631.4112).
+pub fn branch_fix(build: u32, ubr: u32) -> &'static str {
+    match build {
+        b if b >= 26100 => "included",
+        22621 | 22631 if ubr >= 4112 => "included",
+        22621 | 22631 => "missing",
+        b if b >= 22000 => "oldWindows11",
+        _ => "windows10",
+    }
+}
+
+#[cfg(windows)]
+fn cpu_name() -> String {
+    let mut s = sysinfo::System::new();
+    s.refresh_cpu();
+    s.cpus()
+        .first()
+        .map(|c| c.brand().trim().to_string())
+        .unwrap_or_default()
+}
+
+#[cfg(windows)]
+fn windows() -> Value {
+    const CV: &str = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion";
+    let build = match crate::tweaks::reg_read("HKLM", CV, "CurrentBuild") {
+        Ok(Some(crate::safety::RegVal::Str(s))) => s.trim().parse().unwrap_or(0),
+        _ => 0,
+    };
+    let ubr = match crate::tweaks::reg_read("HKLM", CV, "UBR") {
+        Ok(Some(crate::safety::RegVal::Dword(d))) => d,
+        _ => 0,
+    };
+    let display = match crate::tweaks::reg_read("HKLM", CV, "DisplayVersion") {
+        Ok(Some(crate::safety::RegVal::Str(s))) => s,
+        _ => String::new(),
+    };
+    let cpu = cpu_name();
+    let zen3 = amd_zen3_plus(&cpu);
+    json!({
+        "build": build, "ubr": ubr, "version": display, "cpu": cpu,
+        "amdZen3Plus": zen3,
+        "branchFix": if zen3 { branch_fix(build, ubr) } else { "notApplicable" },
+    })
 }
 
 // ── PCIe links ───────────────────────────────────────────────────────────────
@@ -405,7 +565,7 @@ fn usb() -> Value {
 pub fn check() -> Value {
     #[cfg(windows)]
     {
-        json!({ "ram": ram(), "links": links(), "power": power(), "usb": usb() })
+        json!({ "windows": windows(), "ram": ram(), "links": links(), "power": power(), "usb": usb() })
     }
     #[cfg(not(windows))]
     json!({ "error": "Windows only" })
@@ -422,6 +582,7 @@ mod tests {
             gb,
             speed: 3600,
             part: "X".into(),
+            ddr: 26,
         }
     }
 
@@ -450,6 +611,61 @@ mod tests {
         assert_eq!(a1b1["hints"], json!(["checkA2B2"]));
         let mixed = ram_verdict(&[m("BANK 1", "DIMM_A2", 16), m("BANK 3", "DIMM_B2", 8)], 4);
         assert_eq!(mixed["hints"], json!(["mixedCapacity"]));
+    }
+
+    #[test]
+    fn zen3_detection_and_branch_fix() {
+        assert!(amd_zen3_plus("AMD Ryzen 7 5800X 8-Core Processor"));
+        assert!(amd_zen3_plus("AMD Ryzen 7 7800X3D 8-Core Processor"));
+        assert!(amd_zen3_plus("AMD Ryzen 5 5600U with Radeon Graphics"));
+        assert!(
+            !amd_zen3_plus("AMD Ryzen 7 5700U with Radeon Graphics"),
+            "Zen 2"
+        );
+        assert!(
+            !amd_zen3_plus("AMD Ryzen 5 7520U with Radeon Graphics"),
+            "Zen 2"
+        );
+        assert!(!amd_zen3_plus("AMD Ryzen 7 3700X 8-Core Processor"));
+        assert!(!amd_zen3_plus("Intel(R) Core(TM) i7-12700K"));
+        assert_eq!(branch_fix(26100, 1), "included");
+        assert_eq!(branch_fix(22631, 4112), "included");
+        assert_eq!(branch_fix(22631, 3880), "missing");
+        assert_eq!(branch_fix(22000, 3000), "oldWindows11");
+        assert_eq!(branch_fix(19045, 5000), "windows10");
+    }
+
+    #[test]
+    fn ram_plans() {
+        let kit = |part: &str, speed: u32, ddr: u32| Module {
+            bank: "P0 CHANNEL A".into(),
+            locator: "DIMM 0".into(),
+            gb: 16,
+            speed,
+            part: part.into(),
+            ddr,
+        };
+        let p = ram_plan(
+            &[
+                kit("F4-3600C16-16GTZNC", 2133, 26),
+                kit("F4-3600C16-16GTZNC", 2133, 26),
+            ],
+            "AMD Ryzen 7 5800X 8-Core Processor",
+        );
+        assert_eq!(p["platform"], "am4");
+        assert_eq!(p["xmpOff"], true);
+        assert_eq!(p["fclk"], 1800);
+        assert_eq!(p["steps"][0], "xmp");
+        let fast = ram_plan(&[kit("F4-4400C19-16GTZR", 4400, 26)], "AMD Ryzen 7 5800X");
+        assert_eq!(fast["target"], 3800);
+        assert!(fast["steps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|s| s == "am4FastKit"));
+        let am5 = ram_plan(&[kit("F5-6000J3038F16G", 6000, 34)], "AMD Ryzen 7 7800X3D");
+        assert_eq!(am5["platform"], "am5");
+        assert_eq!(am5["xmpOff"], false);
     }
 
     #[test]

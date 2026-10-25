@@ -3,6 +3,7 @@ import { api } from "../../api";
 import { Card, Spinner } from "../ui";
 import { useLang, TKey } from "../../i18n";
 import { gpuLoad } from "../../lib/gpuLoad";
+import { RamAssistant } from "./RamAssistant";
 
 type Link = { name?: string; curGen: number; maxGen: number; curWidth: number; maxWidth: number; verdict: string; util?: number };
 const VCOLOR: Record<string, string> = { ok: "var(--green)", gen: "var(--orange)", lanes: "var(--red)", unknown: "var(--muted)" };
@@ -59,6 +60,16 @@ export function HardwareCard({ admin }: { admin: boolean }) {
       {data?.error && <div style={{ color: "var(--red)", fontSize: 12 }}>{data.error}</div>}
       {data && !data.error && (
         <>
+          {data.windows && (
+            <>
+              {section(t("hwWin"))}
+              <div style={{ fontSize: 13 }}>
+                Windows {data.windows.version || ""} ({data.windows.build}.{data.windows.ubr}) · {data.windows.cpu}
+              </div>
+              {data.windows.branchFix !== "notApplicable" && hint(`hwFix_${data.windows.branchFix}`,
+                data.windows.branchFix === "included" ? "var(--green)" : "var(--orange)")}
+            </>
+          )}
           {section(t("hwRam"))}
           <div style={{ fontSize: 13, color: data.ram.mode === "multi" ? "var(--green)" : data.ram.mode === "unknown" ? "var(--muted)" : "var(--red)" }}>
             {t(`hwRamMode_${data.ram.mode}` as TKey).replace("{c}", data.ram.channels.join(", "))}
@@ -68,6 +79,7 @@ export function HardwareCard({ admin }: { admin: boolean }) {
             {data.ram.slots ? ` · ${t("hwSlots").replace("{n}", String(data.ram.slots))}` : ""}
           </div>
           {data.ram.hints.map((h: string) => hint(`hwRamHint_${h}`, h === "wrongSlots" || h === "addModule" ? "var(--orange)" : "var(--muted)"))}
+          {data.ram.plan && <RamAssistant plan={data.ram.plan} onRecheck={load} />}
 
           {section(t("hwGpuLink"))}
           {data.links.gpus.map((g: Link, i: number) => (

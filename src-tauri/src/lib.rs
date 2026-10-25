@@ -28,6 +28,7 @@ mod hwprofile;
 mod latency;
 mod leftovers;
 mod monitor;
+mod nvprofile;
 mod optimizer;
 mod optregistry;
 mod organizer;
@@ -561,6 +562,23 @@ async fn cmd_irq_set(reg_path: String, core: Option<u32>) -> Result<String, Stri
         return Err("Administrator rights required".into());
     }
     tauri::async_runtime::spawn_blocking(move || perftweaks::irq_set(reg_path, core))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command(async)]
+async fn cmd_rebar_status(extra: Option<String>) -> Value {
+    tauri::async_runtime::spawn_blocking(move || nvprofile::status(extra))
+        .await
+        .unwrap_or_default()
+}
+
+#[tauri::command(async)]
+async fn cmd_rebar_set(exe: String, enable: bool) -> Result<Value, String> {
+    if !ps::is_admin() {
+        return Err("Administrator rights required".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || nvprofile::set(exe, enable))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -2055,6 +2073,8 @@ pub fn run() {
             cmd_leftover_reset,
             cmd_irq_list,
             cmd_irq_set,
+            cmd_rebar_status,
+            cmd_rebar_set,
             cmd_stall_probe,
             cmd_wpr_start,
             cmd_wpr_stop,
