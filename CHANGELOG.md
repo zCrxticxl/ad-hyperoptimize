@@ -4,9 +4,37 @@ All notable changes to AD HyperOptimize are documented here. The in-app
 changelog is generated from this file, and each GitHub release uses the matching
 section below as its release notes.
 
-## Unreleased
+## v1.7.0 — Gaming diagnostics, Deep check, ReBAR per game
 
-Collected on branch `audit/2026-10-overhaul`; moves into a version section at release time (see docs/RELEASING.md).
+### New: Gaming diagnostics (Monitoring & Benchmark)
+- Before you play: shows what competes with a game right now (Windows Update, Defender scan, indexing, .NET optimization, sync, updaters) and pauses what can be paused safely until you resume.
+- Throttling (live): CPU power/temperature limit and the NVIDIA driver's own throttle reasons; power limit under load is shown as normal, thermal and hardware slowdowns as problems.
+- Stutter log: records background activity every second while you play; with a PresentMon/CapFrameX/FrameView capture it shows what occurs noticeably often together with stutters.
+- Display (connection, refresh rate vs. highest available, HDR, bit depth), mouse polling-rate test, audio format and virtual audio layers, and the drives your Steam/Ubisoft/Epic games are on.
+
+### New: Deep check (Optimize)
+- Hardware: RAM channel layout and slots, PCIe link of the GPU (measured under load) and NVMe drives, processor power-plan limits with reset, USB layout of mouse and keyboard.
+- Windows and Ryzen update: shows whether the AMD branch-prediction optimization is installed on Zen 3 and newer.
+- RAM tuning assistant: BIOS steps with target values for the detected kit (XMP/EXPO, FCLK 1:1), stability test and before/after measurement.
+- Resizable BAR per game (NVIDIA): force ReBAR in the driver profile for games the driver does not whitelist, such as Rainbow Six Siege; the previous values are restored with the same switch.
+- Leftovers of other optimizers: finds settings that hurt latency, stability or security (mitigations off, forced HPET, LargeSystemCache, prefetcher off, TDR off, disabled core services, timer tools) and resets them with undo.
+- Interrupt affinity per GPU, network and USB controller (expert mode), with undo.
+
+### Optimization and undo
+- Latency: the deep trace now names the drivers behind DPC/ISR spikes, with advice per driver.
+- Memory integrity (HVCI) can be turned off in expert mode, with a clear security warning and undo.
+- Undo now works everywhere, also for changes made by older versions or other tools: values go back to the documented Windows default.
+- One on/off switch style across the app: green means on.
+- Restart as administrator from inside the app.
+- File organizer: preview, categories, never overwrites, history with "Move back".
+
+### Fixes
+- Widgets: clear message when Windows (UCPD) blocks the setting, with the Group Policy route.
+- "Open NVIDIA Control Panel" opened the Documents folder on DCH drivers.
+- Boot: TESTSIGNING apply failed with Secure Boot on.
+- Privacy and Debloater: changes failed when a value to remove was already absent.
+- Restore points page crashed when no restore point existed.
+- Windows inbox drivers were flagged as outdated.
 
 ### Highlights
 - System Health Check: reads hardware and Windows settings and judges every optimization for this PC; gaming setup checks for refresh rate, XMP/EXPO, windowed-game optimizations, VRR and Resizable BAR.
