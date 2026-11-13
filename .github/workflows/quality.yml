@@ -19,6 +19,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+      - run: npm test
 
   # The privileged Rust backend was never compiled in CI before — a broken
   # command or a bad tweak definition would only surface at release time.

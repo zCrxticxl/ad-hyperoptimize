@@ -43,7 +43,9 @@ $apps | Sort-Object name | ConvertTo-Json -Compress -Depth 2
     let apps = match ps::run_json(script) {
         Ok(v @ Value::Array(_)) => v,
         Ok(v @ Value::Object(_)) => json!([v]),
-        _ => json!([]),
+        Ok(Value::Null) => json!([]),
+        Ok(_) => return json!({ "error": "Invalid installed-app response" }),
+        Err(e) => return json!({ "error": e }),
     };
     remember_app_hives(&apps);
     json!({ "apps": apps })
@@ -99,7 +101,7 @@ static APP_HIVES: Mutex<Option<HashMap<String, (bool, bool)>>> = Mutex::new(None
 
 /// Exact leftover paths a backend scan offered. `clean_leftovers` only acts
 /// on these, never on arbitrary renderer-supplied paths.
-static OFFERED: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+static OFFERED: Mutex<Option<HashMap<String, String>>> = Mutex::new(None);
 
 fn remember_app_hives(apps: &Value) {
     let Some(arr) = apps.as_array() else { return };
@@ -181,8 +183,19 @@ pub fn scan_leftovers(app_name: String, publisher: String, install_location: Str
         return json!({ "leftovers": [] });
     }
 
-    // Refresh the hive map from the live registry, then decide on HKLM.
-    remember_app_hives(&list_apps()["apps"]);
+    // Absence must be established by a successful live registry query.
+    let listed = list_apps();
+    let Some(apps) = listed["apps"].as_array() else {
+        return json!({ "error": "Cannot verify that the application was uninstalled" });
+    };
+    if apps.iter().any(|a| {
+        a["name"]
+            .as_str()
+            .is_some_and(|n| n.eq_ignore_ascii_case(&name))
+    }) {
+        return json!({ "error": "Application is still installed; finish uninstalling before cleaning leftovers" });
+    }
+    remember_app_hives(&listed["apps"]);
     let hives = APP_HIVES
         .lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -253,10 +266,10 @@ pub fn scan_leftovers(app_name: String, publisher: String, install_location: Str
     let cleanable: Vec<Value> = found.into_iter().filter(leftover_cleanable).collect();
     {
         let mut offered = OFFERED.lock().unwrap_or_else(|e| e.into_inner());
-        let set = offered.get_or_insert_with(HashSet::new);
+        let set = offered.get_or_insert_with(HashMap::new);
         for it in &cleanable {
             if let Some(p) = it["path"].as_str() {
-                set.insert(p.to_string());
+                set.insert(p.to_string(), name.clone());
             }
         }
     }
@@ -392,6 +405,10 @@ fn split_reg_leftover(path: &str) -> Option<(&'static str, &str)> {
 }
 
 pub fn clean_leftovers(paths: Vec<String>) -> Result<String, String> {
+    let listed = list_apps();
+    let installed = listed["apps"]
+        .as_array()
+        .ok_or("Cannot verify installed applications; cleanup refused")?;
     let mut cleaned = 0usize;
     let mut errors = Vec::<String>::new();
     #[cfg(windows)]
@@ -404,7 +421,14 @@ pub fn clean_leftovers(paths: Vec<String>) -> Result<String, String> {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .as_ref()
-            .is_some_and(|s| s.contains(path));
+            .and_then(|s| s.get(path))
+            .is_some_and(|name| {
+                !installed.iter().any(|a| {
+                    a["name"]
+                        .as_str()
+                        .is_some_and(|n| n.eq_ignore_ascii_case(name))
+                })
+            });
         if !offered {
             errors.push(format!("{path}: not offered by a leftover scan"));
             continue;

@@ -76,7 +76,7 @@ export function StutterCard() {
     <Card title={t("stuTitle")}>
       <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>{t("stuDesc")}</div>
       <div className="row" style={{ gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-        {running ? (
+        {running || status?.savePending || status?.capReached ? (
           <button className="btn danger small" disabled={busy} onClick={stop}>■ {t("stuStop")}</button>
         ) : (
           <button className="btn small" disabled={busy} onClick={start}>● {t("stuStart")}</button>

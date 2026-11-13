@@ -745,6 +745,14 @@ pub fn do_tweak(id: String, driver_key: String, applying: bool) -> Result<String
 /// up. Used when the tweak was applied outside this app or its journal entry
 /// cannot be verified.
 pub(crate) fn reset_to_defaults(id: &str) -> Result<String, String> {
+    let engine = tweaks::engine_guard()?;
+    reset_to_defaults_locked(id, &engine)
+}
+
+pub(crate) fn reset_to_defaults_locked(
+    id: &str,
+    _engine: &tweaks::EngineGuard,
+) -> Result<String, String> {
     let tweaks = catalog();
     let tw = tweaks
         .iter()
@@ -759,7 +767,6 @@ pub(crate) fn reset_to_defaults(id: &str) -> Result<String, String> {
             "Undoing GPU tweaks needs administrator rights. Restart the app as admin.".into(),
         );
     }
-    let _engine = tweaks::engine_guard()?;
     for action in &tw.actions {
         let key = match action {
             TweakAction::DriverReg { .. } => Some(("HKLM", driver_key.as_str())),

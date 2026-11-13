@@ -172,6 +172,7 @@ pub fn list() -> Value {
 
 /// Toggle exactly like Task Manager: 12-byte REG_BINARY in StartupApproved.
 pub fn toggle(scope: String, name: String, enable: bool) -> Result<Value, String> {
+    let _engine = crate::tweaks::engine_guard()?;
     #[cfg(windows)]
     {
         let (root, approved) =

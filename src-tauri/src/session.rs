@@ -51,7 +51,7 @@ pub struct Recording {
 }
 
 type Running = (
-    std::thread::JoinHandle<()>,
+    Option<std::thread::JoinHandle<()>>,
     Arc<AtomicBool>,
     Arc<Mutex<Recording>>,
 );
@@ -81,15 +81,16 @@ fn path_for(id: &str) -> Result<std::path::PathBuf, String> {
 pub fn start(st: &SessionState) -> Result<Value, String> {
     let mut slot = st.current.lock().unwrap_or_else(|e| e.into_inner());
     if let Some((h, _, rec)) = slot.as_ref() {
-        if !h.is_finished() {
+        if h.as_ref().is_some_and(|h| !h.is_finished()) {
             let id = rec.lock().unwrap_or_else(|e| e.into_inner()).id.clone();
             return Ok(json!({ "running": true, "id": id }));
         }
     }
     // A loop that ended on its own (cap reached) is saved before a new start.
-    if let Some(prev) = slot.take() {
+    if let Some(prev) = slot.as_mut() {
         finish(prev)?;
     }
+    *slot = None;
     let now = chrono::Local::now();
     let rec = Arc::new(Mutex::new(Recording {
         id: format!("sess-{}", now.format("%Y%m%d-%H%M%S")),
@@ -102,7 +103,7 @@ pub fn start(st: &SessionState) -> Result<Value, String> {
         .spawn(move || record(run, out))
         .map_err(|e| format!("failed to start the recorder: {e}"))?;
     let id = rec.lock().unwrap_or_else(|e| e.into_inner()).id.clone();
-    *slot = Some((handle, flag, rec));
+    *slot = Some((Some(handle), flag, rec));
     Ok(json!({ "running": true, "id": id }))
 }
 
@@ -130,7 +131,7 @@ fn record(running: Arc<AtomicBool>, out: Arc<Mutex<Recording>>) {
         sys.refresh_cpu();
         sys.refresh_processes();
         // nvidia-smi costs ~0.1-0.3 s: every other second is enough.
-        if tick % 2 == 0 {
+        if tick.is_multiple_of(2) {
             gpu = crate::throttle::gpu_sample();
         }
         tick += 1;
@@ -193,28 +194,51 @@ fn record(running: Arc<AtomicBool>, out: Arc<Mutex<Recording>>) {
     }
 }
 
-fn finish((handle, flag, rec): Running) -> Result<Value, String> {
+fn finish(running: &mut Running) -> Result<Value, String> {
+    finish_with(running, |r| {
+        let path = path_for(&r.id)?;
+        std::fs::create_dir_all(sessions_dir())
+            .map_err(|e| format!("creating data folder: {e}"))?;
+        let data = serde_json::to_vec(r).map_err(|e| format!("serializing recording: {e}"))?;
+        crate::safety::write_user_file(&path, &data)
+    })
+}
+
+fn finish_with(
+    (handle, flag, rec): &mut Running,
+    save: impl FnOnce(&Recording) -> Result<(), String>,
+) -> Result<Value, String> {
     flag.store(false, Ordering::SeqCst);
-    let _ = handle.join();
+    if let Some(handle) = handle.take() {
+        handle
+            .join()
+            .map_err(|_| "Recording worker panicked; samples retained for retry")?;
+    }
     let r = rec.lock().unwrap_or_else(|e| e.into_inner()).clone();
     if r.samples.len() < 5 {
         return Ok(
             json!({ "saved": false, "reason": "Recording too short (under 5 seconds); not saved." }),
         );
     }
-    let path = path_for(&r.id)?;
-    std::fs::create_dir_all(sessions_dir()).map_err(|e| format!("creating data folder: {e}"))?;
-    crate::safety::write_user_file(
-        &path,
-        serde_json::to_string(&r).unwrap_or_default().as_bytes(),
-    )?;
+    save(&r)?;
     Ok(json!({ "saved": true, "id": r.id, "summary": summary(&r) }))
 }
 
 pub fn stop(st: &SessionState) -> Result<Value, String> {
+    stop_with(st, finish)
+}
+
+fn stop_with(
+    st: &SessionState,
+    finish: impl FnOnce(&mut Running) -> Result<Value, String>,
+) -> Result<Value, String> {
     let mut slot = st.current.lock().unwrap_or_else(|e| e.into_inner());
-    match slot.take() {
-        Some(running) => finish(running),
+    match slot.as_mut() {
+        Some(running) => {
+            let result = finish(running)?;
+            *slot = None;
+            Ok(result)
+        }
         None => Ok(json!({ "saved": false, "reason": "No recording is running." })),
     }
 }
@@ -225,7 +249,8 @@ pub fn status(st: &SessionState) -> Value {
         Some((h, _, rec)) => {
             let r = rec.lock().unwrap_or_else(|e| e.into_inner());
             json!({
-                "running": !h.is_finished(),
+                "running": h.as_ref().is_some_and(|h| !h.is_finished()),
+                "savePending": h.is_none(),
                 "capReached": r.samples.len() >= MAX_SAMPLES,
                 "id": r.id,
                 "seconds": r.samples.len(),
@@ -464,6 +489,39 @@ pub fn analyze(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn failed_save_retains_samples_and_retry_clears_only_after_persistence() {
+        use super::*;
+        let recording = Recording {
+            id: "sess-retry".into(),
+            started: "test".into(),
+            samples: vec![Sample::default(); 5],
+        };
+        let st = SessionState {
+            current: Mutex::new(Some((
+                Some(std::thread::spawn(|| {})),
+                Arc::new(AtomicBool::new(true)),
+                Arc::new(Mutex::new(recording)),
+            ))),
+        };
+        let result = stop_with(&st, |running| {
+            finish_with(running, |_| Err("disk full".into()))
+        });
+        assert_eq!(result.unwrap_err(), "disk full");
+        assert_eq!(status(&st)["savePending"], true);
+        assert_eq!(status(&st)["seconds"], 5);
+        let result = stop_with(&st, |running| {
+            finish_with(running, |r| {
+                assert_eq!(r.id, "sess-retry");
+                assert_eq!(r.samples.len(), 5);
+                Ok(())
+            })
+        })
+        .unwrap();
+        assert_eq!(result["saved"], true);
+        assert!(st.current.lock().unwrap().is_none());
+    }
+
     use super::*;
 
     fn sample(t: i64, top: Vec<(&str, f32, f64)>) -> Sample {

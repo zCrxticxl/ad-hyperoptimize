@@ -102,20 +102,24 @@ fn trusted_env(windows: &str) -> Vec<(&'static str, String)> {
 fn wait_with_timeout(
     child: &mut Child,
     timeout: Duration,
+    mut terminate: impl FnMut(&mut Child) -> std::io::Result<()>,
 ) -> Result<(std::process::ExitStatus, Vec<u8>, Vec<u8>), String> {
+    struct CancelOnDrop(std::sync::Arc<std::sync::atomic::AtomicBool>);
+    impl Drop for CancelOnDrop {
+        fn drop(&mut self) {
+            self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+    let cancel = CancelOnDrop(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
+        false,
+    )));
     let t_out = child.stdout.take().map(|mut s| {
-        std::thread::spawn(move || {
-            let mut v = Vec::new();
-            let _ = s.read_to_end(&mut v);
-            v
-        })
+        let flag = cancel.0.clone();
+        std::thread::spawn(move || read_pipe(&mut s, &flag))
     });
     let t_err = child.stderr.take().map(|mut s| {
-        std::thread::spawn(move || {
-            let mut v = Vec::new();
-            let _ = s.read_to_end(&mut v);
-            v
-        })
+        let flag = cancel.0.clone();
+        std::thread::spawn(move || read_pipe(&mut s, &flag))
     });
 
     let deadline = Instant::now() + timeout;
@@ -124,17 +128,15 @@ fn wait_with_timeout(
             Ok(Some(st)) => break st,
             Ok(None) => {}
             Err(e) => {
-                let _ = child.kill();
+                terminate(child).map_err(|termination| {
+                    format!("waiting for child failed: {e}; termination failed: {termination}")
+                })?;
                 let _ = child.wait(); // reap so no zombie is left behind
                 return Err(format!("waiting for child failed: {e}"));
             }
         }
         if Instant::now() >= deadline {
-            // Kill the whole tree, not just the parent: a killed powershell
-            // leaves its children (winget, DISM, …) alive and holding the pipe
-            // handles, which would leak the reader threads below. taskkill /T
-            // terminates the tree so EOF arrives and every thread exits.
-            let _ = kill_tree(child);
+            terminate(child).map_err(|e| format!("command timed out; termination failed: {e}"))?;
             let _ = child.wait();
             return Err(format!(
                 "command timed out after {}s and was killed",
@@ -144,26 +146,103 @@ fn wait_with_timeout(
         std::thread::sleep(Duration::from_millis(50));
     };
 
-    let out = t_out.and_then(|h| h.join().ok()).unwrap_or_default();
-    let err = t_err.and_then(|h| h.join().ok()).unwrap_or_default();
+    // Descendants can retain inherited pipes after the direct child exits.
+    // The same deadline covers draining, not only the parent's lifetime.
+    while t_out.as_ref().is_some_and(|h| !h.is_finished())
+        || t_err.as_ref().is_some_and(|h| !h.is_finished())
+    {
+        if Instant::now() >= deadline {
+            terminate(child)
+                .map_err(|e| format!("command output timed out; termination failed: {e}"))?;
+            return Err(format!(
+                "command output timed out after {}s",
+                timeout.as_secs()
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let out = t_out
+        .map(|h| {
+            h.join()
+                .map_err(|_| "stdout reader panicked".to_string())?
+                .map_err(|e| e.to_string())
+        })
+        .transpose()?
+        .unwrap_or_default();
+    let err = t_err
+        .map(|h| {
+            h.join()
+                .map_err(|_| "stderr reader panicked".to_string())?
+                .map_err(|e| e.to_string())
+        })
+        .transpose()?
+        .unwrap_or_default();
     Ok((status, out, err))
 }
 
-/// Kill `child` and, on Windows, its entire descendant tree so no orphaned
-/// grandchild survives a timeout.
-fn kill_tree(child: &mut Child) -> std::io::Result<()> {
-    let _ = child.kill();
-    #[cfg(windows)]
-    {
-        // taskkill /T /F terminates the whole tree; child.id() is the PID.
-        // configure() suppresses its console window (same "no flash" rule as
-        // every other external command).
-        let mut k = std::process::Command::new("taskkill");
-        k.args(["/PID", &child.id().to_string(), "/T", "/F"]);
-        configure(&mut k);
-        let _ = k.stdout(Stdio::null()).stderr(Stdio::null()).status();
+#[cfg(windows)]
+fn read_pipe<R: Read + std::os::windows::io::AsRawHandle>(
+    reader: &mut R,
+    cancel: &std::sync::atomic::AtomicBool,
+) -> std::io::Result<Vec<u8>> {
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn PeekNamedPipe(
+            handle: *mut std::ffi::c_void,
+            buffer: *mut std::ffi::c_void,
+            size: u32,
+            read: *mut u32,
+            available: *mut u32,
+            left: *mut u32,
+        ) -> i32;
     }
-    Ok(())
+    let mut output = Vec::new();
+    let mut buffer = [0u8; 8192];
+    while !cancel.load(std::sync::atomic::Ordering::SeqCst) {
+        let mut available = 0;
+        // SAFETY: the reader owns a pipe handle; only available is written.
+        let ok = unsafe {
+            PeekNamedPipe(
+                reader.as_raw_handle(),
+                std::ptr::null_mut(),
+                0,
+                std::ptr::null_mut(),
+                &mut available,
+                std::ptr::null_mut(),
+            )
+        };
+        if ok == 0 {
+            let error = std::io::Error::last_os_error();
+            if error.raw_os_error() == Some(109) {
+                return Ok(output);
+            }
+            return Err(error);
+        }
+        if available == 0 {
+            std::thread::sleep(Duration::from_millis(10));
+            continue;
+        }
+        let limit = (available as usize).min(buffer.len());
+        let n = reader.read(&mut buffer[..limit])?;
+        if n == 0 {
+            return Ok(output);
+        }
+        output.extend_from_slice(&buffer[..n]);
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Interrupted,
+        "output drain cancelled",
+    ))
+}
+
+#[cfg(not(windows))]
+fn read_pipe<R: Read>(
+    reader: &mut R,
+    _: &std::sync::atomic::AtomicBool,
+) -> std::io::Result<Vec<u8>> {
+    let mut output = Vec::new();
+    reader.read_to_end(&mut output)?;
+    Ok(output)
 }
 
 /// Forces UTF-8 stdout/stderr for every PowerShell child: localized Windows
@@ -177,25 +256,45 @@ fn run_checked(
     what: &str,
     timeout: Duration,
 ) -> Result<(String, String), String> {
-    let mut child = cmd
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("{what} spawn: {e}"))?;
-    let (status, out, err) = wait_with_timeout(&mut child, timeout)?;
+    let (status, out, err) = run_captured(cmd, what, timeout)?;
     if status.success() {
-        Ok((
-            String::from_utf8_lossy(&out).into_owned(),
-            String::from_utf8_lossy(&err).into_owned(),
-        ))
+        Ok((out, err))
     } else {
-        let err = String::from_utf8_lossy(&err).into_owned();
         Err(if err.trim().is_empty() {
             format!("{what} exited with {status}")
         } else {
             err
         })
     }
+}
+
+fn run_captured(
+    cmd: &mut Command,
+    what: &str,
+    timeout: Duration,
+) -> Result<(std::process::ExitStatus, String, String), String> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000 | 0x0000_0004); // NO_WINDOW | SUSPENDED
+    }
+    let mut child = cmd
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("{what} spawn: {e}"))?;
+    #[cfg(windows)]
+    let job = crate::processjob::contain_and_resume(&mut child)?;
+    #[cfg(windows)]
+    let terminate = |_: &mut Child| job.terminate();
+    #[cfg(not(windows))]
+    let terminate = |child: &mut Child| child.kill();
+    let (status, out, err) = wait_with_timeout(&mut child, timeout, terminate)?;
+    Ok((
+        status,
+        String::from_utf8_lossy(&out).into_owned(),
+        String::from_utf8_lossy(&err).into_owned(),
+    ))
 }
 
 /// Run a PowerShell script, return stdout. Errors carry stderr.
@@ -324,17 +423,7 @@ pub fn exec_capture(
     let mut cmd = Command::new(exe);
     cmd.args(args);
     configure(&mut cmd);
-    let mut child = cmd
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("{exe} spawn: {e}"))?;
-    let (status, out, err) = wait_with_timeout(&mut child, CMD_TIMEOUT_LONG)?;
-    Ok((
-        status,
-        String::from_utf8_lossy(&out).into_owned(),
-        String::from_utf8_lossy(&err).into_owned(),
-    ))
+    run_captured(&mut cmd, exe, CMD_TIMEOUT_LONG)
 }
 
 /// True when the process runs elevated.
@@ -533,12 +622,11 @@ mod tests {
         }
         assert_eq!(winget_exe_in(loc, ""), None);
     }
-    #[cfg(not(windows))]
     use super::{run_checked, wait_with_timeout};
-    #[cfg(not(windows))]
     use std::process::{Command, Stdio};
-    #[cfg(not(windows))]
     use std::time::Duration;
+    #[cfg(windows)]
+    use std::time::Instant;
 
     #[test]
     fn safe_idents_are_accepted() {
@@ -618,6 +706,64 @@ mod tests {
         assert!(!is_safe_regkey_name(""));
     }
 
+    #[cfg(windows)]
+    #[test]
+    #[allow(clippy::zombie_processes)] // This fixture must exit before its descendant to test containment.
+    fn inherited_pipe_helper() {
+        match std::env::var("AD_PIPE_HELPER").as_deref() {
+            Ok("parent") => {
+                let _child = Command::new(std::env::current_exe().unwrap())
+                    .args(["--exact", "ps::tests::inherited_pipe_helper", "--nocapture"])
+                    .env("AD_PIPE_HELPER", "holder")
+                    .stdout(Stdio::inherit())
+                    .stderr(Stdio::inherit())
+                    .spawn()
+                    .unwrap();
+            }
+            Ok("holder") => {
+                std::thread::sleep(Duration::from_secs(2));
+                if let Some(path) = std::env::var_os("AD_PIPE_MARKER") {
+                    std::fs::write(path, "escaped").unwrap();
+                }
+            }
+            _ => {}
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn inherited_pipe_drain_obeys_deadline_after_parent_exit() {
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "ps::tests::inherited_pipe_helper", "--nocapture"])
+            .env("AD_PIPE_HELPER", "parent")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child.wait().unwrap();
+        let start = Instant::now();
+        let error =
+            wait_with_timeout(&mut child, Duration::from_millis(100), |_| Ok(())).unwrap_err();
+        assert!(error.contains("output timed out"), "{error}");
+        assert!(start.elapsed() < Duration::from_secs(1));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn checked_command_timeout_terminates_orphaned_descendant() {
+        let marker = std::env::temp_dir().join(format!("ad-pipe-marker-{}", rand::random::<u64>()));
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command
+            .args(["--exact", "ps::tests::inherited_pipe_helper", "--nocapture"])
+            .env("AD_PIPE_HELPER", "parent")
+            .env("AD_PIPE_MARKER", &marker);
+        let error =
+            run_checked(&mut command, "test helper", Duration::from_millis(500)).unwrap_err();
+        assert!(error.contains("timed out"), "{error}");
+        std::thread::sleep(Duration::from_millis(2200));
+        assert!(!marker.exists(), "descendant escaped command lifetime");
+    }
+
     // wait_with_timeout / run_checked are the heart of the PS bridge: output
     // must be captured (piped) and a hung child must be killed on timeout.
     // `sh` only exists on non-Windows dev hosts, the production powershell
@@ -632,7 +778,8 @@ mod tests {
             .stderr(Stdio::piped())
             .spawn()
             .unwrap();
-        let (status, out, err) = wait_with_timeout(&mut child, Duration::from_secs(10)).unwrap();
+        let (status, out, err) =
+            wait_with_timeout(&mut child, Duration::from_secs(10), |c| c.kill()).unwrap();
         assert!(status.success());
         assert_eq!(String::from_utf8_lossy(&out).trim(), "hello");
         assert_eq!(String::from_utf8_lossy(&err).trim(), "oops");
@@ -648,7 +795,8 @@ mod tests {
             .stderr(Stdio::piped())
             .spawn()
             .unwrap();
-        let err = wait_with_timeout(&mut child, Duration::from_millis(300)).unwrap_err();
+        let err =
+            wait_with_timeout(&mut child, Duration::from_millis(300), |c| c.kill()).unwrap_err();
         assert!(err.contains("timed out"), "unexpected error: {err}");
     }
 

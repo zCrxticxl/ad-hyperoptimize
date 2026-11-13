@@ -75,6 +75,7 @@ extern "system" {
         size: *mut u32,
     ) -> i32;
     fn CloseHandle(h: Handle) -> i32;
+    #[cfg(test)]
     fn GetCurrentProcess() -> Handle;
     fn GetCurrentProcessId() -> u32;
     fn GetProcessId(process: Handle) -> u32;
@@ -135,13 +136,18 @@ fn last_error(what: &str) -> String {
 }
 
 /// String SID of the user running this process.
+#[cfg(test)]
 fn current_user_sid() -> Result<String, String> {
+    process_user_sid(unsafe { GetCurrentProcess() })
+}
+
+fn process_user_sid(process: Handle) -> Result<String, String> {
     // SAFETY: the token handle is closed below; the buffer is sized by the
     // first GetTokenInformation call and holds a TOKEN_USER, whose first field
     // is the SID pointer into the same buffer.
     unsafe {
         let mut token: Handle = std::ptr::null_mut();
-        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) == 0 {
+        if OpenProcessToken(process, TOKEN_QUERY, &mut token) == 0 {
             return Err(last_error("OpenProcessToken"));
         }
         let mut len = 0u32;
@@ -201,8 +207,8 @@ pub fn pipe_sddl(user_sid: &str) -> String {
 
 /// Creates the only instance of the pipe; fails if the name already exists
 /// (someone squatting on it).
-fn create_pipe(name: &str) -> Result<Handle, String> {
-    let sddl = wide(&pipe_sddl(&current_user_sid()?));
+fn create_pipe(name: &str, user_sid: &str) -> Result<Handle, String> {
+    let sddl = wide(&pipe_sddl(user_sid));
     // SAFETY: the security descriptor is freed after CreateNamedPipeW, which
     // copies it into the pipe object.
     unsafe {
@@ -263,7 +269,23 @@ fn verify_client(pipe: Handle, expected_pid: u32) -> Result<(), String> {
 /// Serves one client on `name` and returns when it disconnects, breaks the
 /// protocol or stays idle. Exposed with an explicit client PID for tests.
 pub fn serve_on(name: &str, client_pid: u32, nonce: &str) -> Result<(), String> {
-    let pipe = create_pipe(name)?;
+    // Derive the ACL from the requesting UI, not the UAC administrator.
+    // Keep its process handle alive through authentication to prevent PID reuse.
+    let client = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, client_pid) };
+    if client.is_null() {
+        return Err(last_error("OpenProcess(client)"));
+    }
+    struct ClientHandle(Handle);
+    impl Drop for ClientHandle {
+        fn drop(&mut self) {
+            unsafe {
+                CloseHandle(self.0);
+            }
+        }
+    }
+    let client = ClientHandle(client);
+    let sid = process_user_sid(client.0)?;
+    let pipe = create_pipe(name, &sid)?;
     // Give up if nobody connects: ConnectNamedPipe blocks indefinitely.
     let connected = Arc::new(std::sync::atomic::AtomicBool::new(false));
     {
@@ -499,7 +521,10 @@ mod tests {
         let (p, n) = (pipe.clone(), nonce.clone());
         let server = std::thread::spawn(move || serve_on(&p, own_pid(), &n));
         let client = Client::connect(&pipe, own_pid(), &nonce, Duration::from_secs(10)).unwrap();
-        assert!(create_pipe(&pipe).is_err(), "squatting must fail");
+        assert!(
+            create_pipe(&pipe, &current_user_sid().unwrap()).is_err(),
+            "squatting must fail"
+        );
         drop(client);
         server.join().unwrap().unwrap();
     }

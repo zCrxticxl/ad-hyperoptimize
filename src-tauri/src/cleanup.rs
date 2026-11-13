@@ -208,6 +208,17 @@ pub fn clean(category_ids: Vec<String>) -> Value {
             if !root.exists() || !root_allowed(&root, per_user) {
                 continue;
             }
+            // Freeze the approved boundary before traversal. Never derive it
+            // again from a pathname an unprivileged process can replace.
+            let Ok(approved_root) = std::fs::canonicalize(&root) else {
+                continue;
+            };
+            if !root_allowed(&approved_root, per_user) {
+                continue;
+            }
+            let Ok(approved_root) = safe_delete::ApprovedRoot::open(&approved_root) else {
+                continue;
+            };
             let mut files = Vec::new();
             walk(
                 &root,
@@ -215,7 +226,7 @@ pub fn clean(category_ids: Vec<String>) -> Value {
                 &mut files,
             );
             for (path, size) in files {
-                match safe_delete::delete_file_under(&path, &root) {
+                match approved_root.delete_file(&path) {
                     Ok(()) => {
                         freed += size;
                         deleted += 1;
@@ -225,8 +236,8 @@ pub fn clean(category_ids: Vec<String>) -> Value {
                     Err(_) => skipped += 1,
                 }
             }
-            // Sweep now-empty subdirectories (ignore failures).
-            let _ = remove_empty_dirs(&root, false);
+            // Keep empty directories: pathname-based sweeps can follow a
+            // concurrently replaced junction outside the approved boundary.
         }
     }
     json!({ "freedBytes": freed, "deleted": deleted, "skippedInUse": skipped })
@@ -376,9 +387,78 @@ mod safe_delete {
         f.len() > r.len() + 1 && f.starts_with(&r) && f.as_bytes()[r.len()] == b'\\'
     }
 
+    #[cfg(test)]
     pub fn delete_file_under(path: &Path, root: &Path) -> Result<(), String> {
-        let root_canon = std::fs::canonicalize(root).map_err(|e| format!("root: {e}"))?;
-        let root_canon = root_canon.to_string_lossy().into_owned();
+        ApprovedRoot::open(root)?.delete_file(path)
+    }
+
+    pub struct ApprovedRoot {
+        path: String,
+        // No delete sharing: neither the root nor an ancestor may be renamed
+        // and replaced while files are being authorized against this boundary.
+        _handles: Vec<Owned>,
+    }
+
+    impl ApprovedRoot {
+        pub fn open(root: &Path) -> Result<Self, String> {
+            let canonical = std::fs::canonicalize(root).map_err(|e| e.to_string())?;
+            if norm(&canonical.to_string_lossy()) != norm(&root.to_string_lossy()) {
+                return Err("cleanup root was redirected".into());
+            }
+            let mut handles = Vec::new();
+            for ancestor in canonical.ancestors() {
+                if ancestor.parent().is_none() {
+                    continue;
+                }
+                let name = wide(ancestor);
+                // SAFETY: name is NUL-terminated; the handle is owned below.
+                let raw = unsafe {
+                    CreateFileW(
+                        name.as_ptr(),
+                        FILE_READ_ATTRIBUTES | 0x1, // FILE_LIST_DIRECTORY enforces share-access checks
+                        FILE_SHARE_READ | FILE_SHARE_WRITE,
+                        std::ptr::null_mut(),
+                        OPEN_EXISTING,
+                        FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS,
+                        std::ptr::null_mut(),
+                    )
+                };
+                if raw == INVALID_HANDLE_VALUE || raw.is_null() {
+                    return Err(std::io::Error::last_os_error().to_string());
+                }
+                let handle = Owned(raw);
+                let mut info = ByHandleFileInformation::default();
+                // SAFETY: handle and output buffer are valid.
+                if unsafe { GetFileInformationByHandle(handle.0, &mut info) } == 0 {
+                    return Err(std::io::Error::last_os_error().to_string());
+                }
+                if info.file_attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0
+                    || info.file_attributes & FILE_ATTRIBUTE_DIRECTORY == 0
+                {
+                    return Err("cleanup root contains a reparse point or non-directory".into());
+                }
+                handles.push(handle);
+            }
+            let path = canonical.to_string_lossy().into_owned();
+            if handles
+                .first()
+                .and_then(final_path)
+                .is_none_or(|p| norm(&p) != norm(&path))
+            {
+                return Err("cleanup root changed while opening".into());
+            }
+            Ok(Self {
+                path,
+                _handles: handles,
+            })
+        }
+
+        pub fn delete_file(&self, path: &Path) -> Result<(), String> {
+            delete_file_checked(path, &self.path)
+        }
+    }
+
+    fn delete_file_checked(path: &Path, root_canon: &str) -> Result<(), String> {
         let name = wide(path);
         // SAFETY: name is NUL-terminated; all other pointers are null/valid.
         let raw = unsafe {
@@ -410,7 +490,7 @@ mod safe_delete {
         }
 
         let fp = final_path(&h).ok_or("cannot resolve final path")?;
-        if !is_strictly_under(&fp, &root_canon) {
+        if !is_strictly_under(&fp, root_canon) {
             return Err(format!("{fp} is outside the cleanup root"));
         }
 
@@ -438,6 +518,18 @@ mod safe_delete {
 mod safe_delete {
     use std::path::Path;
 
+    pub struct ApprovedRoot(std::path::PathBuf);
+    impl ApprovedRoot {
+        pub fn open(root: &Path) -> Result<Self, String> {
+            std::fs::canonicalize(root)
+                .map(Self)
+                .map_err(|e| e.to_string())
+        }
+        pub fn delete_file(&self, path: &Path) -> Result<(), String> {
+            delete_file_under(path, &self.0)
+        }
+    }
+
     pub fn delete_file_under(path: &Path, root: &Path) -> Result<(), String> {
         if !path.starts_with(root) || crate::diskanalyzer::has_reparse_ancestor(path) {
             return Err("outside root or behind a link".into());
@@ -446,37 +538,29 @@ mod safe_delete {
     }
 }
 
-fn remove_empty_dirs(dir: &Path, remove_self: bool) -> std::io::Result<bool> {
-    if crate::diskanalyzer::is_reparse_point(dir) {
-        return Ok(false);
-    }
-    let mut empty = true;
-    for entry in fs::read_dir(dir)? {
-        let p = entry?.path();
-        if crate::diskanalyzer::is_reparse_point(&p) {
-            empty = false;
-            continue;
-        }
-        if p.is_dir() {
-            if !remove_empty_dirs(&p, true).unwrap_or(false) {
-                empty = false;
-            }
-        } else {
-            empty = false;
-        }
-    }
-    if empty && remove_self {
-        fs::remove_dir(dir)?;
-    }
-    Ok(empty)
-}
-
 #[cfg(all(test, windows))]
 mod tests {
     use super::walk;
     use std::fs;
     use std::process::Command;
     use std::time::Duration;
+
+    #[test]
+    fn approved_root_cannot_be_renamed_or_replaced_until_released() {
+        let base = std::env::temp_dir().join(format!("ad-clean-root-{}", rand::random::<u64>()));
+        let root = base.join("root");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("old.tmp"), "old").unwrap();
+        // Match clean(): resolve the approved boundary before pinning it.
+        let root = fs::canonicalize(root).unwrap();
+        let approved = super::safe_delete::ApprovedRoot::open(&root).unwrap();
+        assert!(fs::rename(&root, base.join("moved")).is_err());
+        assert!(fs::rename(&base, base.with_extension("moved")).is_err());
+        approved.delete_file(&root.join("old.tmp")).unwrap();
+        drop(approved);
+        fs::rename(&root, base.join("moved")).unwrap();
+        fs::remove_dir_all(base).unwrap();
+    }
 
     #[test]
     fn cleanup_scan_does_not_follow_junctions() {
@@ -538,6 +622,7 @@ mod tests {
         let outside = base.join("outside");
         fs::create_dir_all(root.join("sub")).unwrap();
         fs::create_dir_all(&outside).unwrap();
+        let root = fs::canonicalize(root).unwrap();
         let inside_file = root.join("sub").join("old.tmp");
         fs::write(&inside_file, "x").unwrap();
         let keep = outside.join("keep.txt");

@@ -3,6 +3,7 @@ import { check } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { getVersion } from "@tauri-apps/api/app";
 import { api } from "../api";
+import { trackOperation } from "../lib/pendingOperations";
 import { Card, Spinner } from "../components/ui";
 import { engineText } from "../lib/engineText";
 import { useLang } from "../i18n";
@@ -60,13 +61,14 @@ function SelfUpdateCard() {
     setStatus("downloading"); setProgress(0);
     try {
       let downloaded = 0, total = 0;
-      await update.downloadAndInstall((evt: any) => {
+      await trackOperation(() => update.downloadAndInstall((evt: any) => {
         switch (evt.event) {
           case "Started":   total = evt.data.contentLength ?? 0; break;
           case "Progress":  downloaded += evt.data.chunkLength; setProgress(total > 0 ? Math.round(downloaded / total * 100) : 0); break;
-          case "Finished":  setStatus("ready"); break;
+          case "Finished": break;
         }
-      });
+      }));
+      setStatus("ready");
     } catch (e: any) {
       setErrMsg(String(e));
       setStatus("error");

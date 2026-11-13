@@ -64,10 +64,10 @@ export default function Startup({ admin, focusId }: { admin: boolean; focusId?: 
               </tr>
             </thead>
             <tbody>
-              {items.map((it, i) => {
+              {items.map((it) => {
                 const needsAdmin = it.scope.startsWith("hklm") || it.scope === "folder_common";
                 return (
-                  <tr key={i} data-focus-id={it.name} style={{ opacity: it.enabled ? 1 : 0.55 }}>
+                  <tr key={JSON.stringify([it.scope, it.name])} data-focus-id={JSON.stringify([it.scope, it.name])} style={{ opacity: it.enabled ? 1 : 0.55 }}>
                     <td style={{ fontWeight: 600 }}>{it.name}</td>
                     <td className="mono muted" style={{ maxWidth: 420, wordBreak: "break-all", fontSize: 11 }}>
                       {it.command}

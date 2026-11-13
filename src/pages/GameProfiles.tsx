@@ -49,7 +49,7 @@ export default function GameProfiles() {
 
     const unSub1 = listen("game-detected", (e: any) => {
       setActiveEvt(e.payload);
-      setStatus((s: any) => ({ ...s, activeGame: e.payload.id }));
+      loadStatus();
       if (e.payload?.error) {
         showToast(`${t("gameprofToastError")}: ${e.payload.name ?? ""} ${e.payload.error}`);
       } else {
@@ -58,7 +58,7 @@ export default function GameProfiles() {
     });
     const unSub2 = listen("game-exited", (e: any) => {
       setActiveEvt(null);
-      setStatus((s: any) => ({ ...s, activeGame: null }));
+      loadStatus();
       showToast(e.payload?.error
         ? `${t("gameprofToastError")}: ${e.payload.error}`
         : `🔁 ${t("gameprofToastGameClosed")}${e.payload?.note ? ` (${e.payload.note})` : ""}`);
@@ -81,8 +81,9 @@ export default function GameProfiles() {
     if (!status) return;
     const next = !status.enabled;
     try {
-      await api.gameSwitcherConfigure(next, status.defaultPreset ?? "performance");
-      setStatus((s: any) => ({ ...s, enabled: next }));
+      const result = await api.gameSwitcherConfigure(next, status.defaultPreset ?? "performance");
+      await loadStatus();
+      if (result.error) throw new Error(result.error);
       showToast(next ? `✅ ${t("gameprofToastSwitcherEnabled")}` : `⏸ ${t("gameprofToastSwitcherDisabled")}`);
     } catch (e: any) { showToast(`${t("gameprofToastError")}: ${String(e)}`); }
   };
@@ -90,8 +91,9 @@ export default function GameProfiles() {
   const changeDefaultPreset = async (p: string) => {
     if (!status) return;
     try {
-      await api.gameSwitcherConfigure(status.enabled, p);
-      setStatus((s: any) => ({ ...s, defaultPreset: p }));
+      const result = await api.gameSwitcherConfigure(status.enabled, p);
+      await loadStatus();
+      if (result.error) throw new Error(result.error);
     } catch (e: any) { showToast(`${t("gameprofToastError")}: ${String(e)}`); }
   };
 
@@ -189,7 +191,7 @@ export default function GameProfiles() {
           </div>
         </div>
 
-        {status?.activeGame && (
+        {status?.canRevert && (
           <button className="btn small ghost danger" onClick={revert} disabled={busy}>
             {t("gameprofRevertNow")}
           </button>

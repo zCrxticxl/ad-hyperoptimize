@@ -237,12 +237,8 @@ pub fn amd_zen3_plus(cpu: &str) -> bool {
         return false;
     }
     let hundreds = (model / 100) % 10;
-    if suffix.starts_with('U')
-        && ((5000..6000).contains(&model) && hundreds % 2 == 1 || model % 100 == 20)
-    {
-        return false;
-    }
-    true
+    !(suffix.starts_with('U')
+        && ((5000..6000).contains(&model) && hundreds % 2 == 1 || model % 100 == 20))
 }
 
 /// Status of the AMD branch-prediction optimization: built into 24H2+, and

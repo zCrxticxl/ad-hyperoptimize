@@ -541,6 +541,11 @@ pub static COMMANDS: &[(&str, Class, &str)] = &[
         Privileged,
         "reverts cmd_gameboost_start",
     ),
+    (
+        "cmd_gameboost_stop_all",
+        Privileged,
+        "reverts classic and quick boosts",
+    ),
     ("cmd_gameboost_get_status", Read, "app state"),
     ("cmd_gameboost_quick_boost", Privileged, "journaled changes"),
     (

@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
 import { api, fmtBytes } from "../api";
 import { Card, Spinner } from "../components/ui";
 import { useLang } from "../i18n";
@@ -213,6 +212,8 @@ function Chk({ checked, onChange, indeterminate = false }: { checked: boolean; o
       type="checkbox"
       checked={checked}
       onChange={onChange}
+      onClick={e => e.stopPropagation()}
+      onKeyDown={e => e.stopPropagation()}
       style={{ cursor: "pointer", accentColor: "var(--accent)", width: 14, height: 14, flexShrink: 0 }}
     />
   );
@@ -241,27 +242,9 @@ function LargestTab({ path, drives, currentRoot }: LargestTabProps) {
     setScanned(0);
     setSel(new Set());
 
-    // Subscribe to streaming progress events before starting the scan
-    let unlisten: (() => void) | null = null;
-    listen<{ scanned: number; files?: FileEntry[]; done: boolean }>(
-      "disk-scan-progress",
-      (evt) => {
-        if (pathRef.current !== scanPath) return; // stale scan from another drive
-        const p = evt.payload;
-        setScanned(p.scanned);
-        if (p.files && p.files.length > 0) {
-          // Show partial results immediately
-          setData(prev => ({
-            files:        p.files!,
-            folders:      prev?.folders ?? [],
-            fileCount:    p.scanned,
-            totalSize:    prev?.totalSize ?? 0,
-            totalSizeFmt: prev?.totalSizeFmt ?? "…",
-            capped:       false,
-          }));
-        }
-      }
-    ).then(fn => { unlisten = fn; });
+    setData(null);
+    setErr("");
+    // Only the invocation's own result may populate a destructive file list.
 
     // Full result arrives when scan completes
     api.diskLargest(scanPath, 50)
@@ -272,7 +255,6 @@ function LargestTab({ path, drives, currentRoot }: LargestTabProps) {
           setLoading(false);
           setScanned(0);
         }
-        unlisten?.();
       });
   }, [path]);
 
@@ -463,7 +445,7 @@ function DuplicatesTab({ path, drives, currentRoot }: DuplicatesTabProps) {
         </div>
       )}
       {loading && <><Spinner /> <span className="muted">{t("diskHashing")}</span></>}
-      {data && !loading && (
+      {data && (
         <>
           <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 14, alignItems: "center" }}>
             {[[t("diskDupesTitle"), data.groups.length], [t("diskDupesWasted"), data.totalWastedFmt], [t("diskDupesChecked"), data.checked.toLocaleString(lang === "de" ? "de-DE" : "en-US")]].map(([l, v]) => (
@@ -635,8 +617,8 @@ export default function DiskAnalyzer() {
         ))}
       </div>
 
-      {tab === "largest"    && <LargestTab    path={path} drives={drives} currentRoot={currentRoot} />}
-      {tab === "duplicates" && <DuplicatesTab path={path} drives={drives} currentRoot={currentRoot} />}
+      {tab === "largest"    && <LargestTab    key={path} path={path} drives={drives} currentRoot={currentRoot} />}
+      {tab === "duplicates" && <DuplicatesTab key={path} path={path} drives={drives} currentRoot={currentRoot} />}
       {tab === "temp"       && <TempTab />}
       {tab === "organize"   && <Organizer />}
     </>

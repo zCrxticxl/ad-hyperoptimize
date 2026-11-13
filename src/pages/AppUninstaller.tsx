@@ -47,6 +47,7 @@ export default function AppUninstaller({ admin }: { admin: boolean }) {
     setLoadErr("");
     try {
       const d = await api.uninstallerList();
+      if (d.error) throw new Error(d.error);
       const fresh: any[] = d.apps ?? [];
       // Keep rows of apps uninstalled in this session so their leftovers can
       // still be scanned after they vanish from the registry list.
@@ -99,6 +100,7 @@ export default function AppUninstaller({ admin }: { admin: boolean }) {
     setScanning(app.name);
     try {
       const d = await api.scanLeftovers(app.name, app.publisher ?? "", app.installLocation ?? "");
+      if (d.error) throw new Error(d.error);
       const items: any[] = d.leftovers ?? [];
       setLeftovers(prev => ({ ...prev, [app.name]: items }));
       setSelLeft(prev => ({ ...prev, [app.name]: new Set<string>() }));
@@ -182,7 +184,7 @@ export default function AppUninstaller({ admin }: { admin: boolean }) {
               const appLog = log[app.name];
               const appLeft = leftovers[app.name] ?? [];
               const appSel = selLeft[app.name] ?? new Set<string>();
-              const wasLaunched = st?.state === "launched";
+              const wasLaunched = st?.state === "launched" && app.removed === true;
 
               return (
                 <div key={key} style={{ borderBottom: "1px solid var(--border)", padding: "8px 0", opacity: app.removed ? 0.75 : 1 }}>

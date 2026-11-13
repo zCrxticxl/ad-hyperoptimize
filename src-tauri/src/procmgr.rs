@@ -215,6 +215,7 @@ pub fn perm_set(exe: String, priority: String) -> Result<Value, String> {
         }
         let d = prio_to_dword(&priority)
             .ok_or("ungültige Priorität (RealTime ist dauerhaft nicht erlaubt)")?;
+        let _engine = crate::tweaks::engine_guard()?;
         // Journaled like every other registry change: the previous value
         // (another tool's override, or none) is restorable from the history.
         let path = format!("{IFEO}\\{exe}\\PerfOptions");

@@ -4,6 +4,33 @@ All notable changes to AD HyperOptimize are documented here. The in-app
 changelog is generated from this file, and each GitHub release uses the matching
 section below as its release notes.
 
+## v1.7.2 - Recovery, security and navigation fixes
+
+### Recovery and reliability
+- Serialize journaled transactions across app processes and prevent rollback deadlocks in scheduled tasks and GPU undo.
+- Preserve the original power plan across overlapping Quick Boosts and prevent conflicting game-profile ownership across app instances.
+- Validate process creation time before restoring priorities; refuse unsafe PID-only restoration from legacy Quick Boost records.
+- Keep recording samples after a failed save so persistence can be retried.
+- Keep game-profile recovery available after failed restoration and respect subsequent manual power-plan changes.
+
+### Security
+- Update the updater dependency to resolve zip 9.5.0 and its security fixes.
+- Pin cleanup roots during deletion and retain empty directories instead of using a race-prone directory sweep.
+- Contain checked commands and descendants in Windows job objects, including inherited-output timeouts.
+- Verify applications are no longer installed before offering or deleting their leftovers.
+- Restrict journal-less registry undo to the affected values and derive broker pipe permissions from the requesting user.
+
+### Interface
+- Keep action feedback visible until operations finish and preserve WPR controls across navigation and cancellation failures.
+- Distinguish same-name startup entries and scheduled tasks in search results and focus the selected row.
+- Stop late hardware-monitor responses from restarting polling after leaving the page.
+- Await actual software-installation and self-update completion before allowing navigation or showing restart controls.
+- Correct disk-selection handling, restore-point deletion and recovery controls for active boosts.
+
+### Validation
+- Automated Windows backend tests and mocked frontend interaction tests cover recovery, navigation, process containment and transaction locking.
+- Elevated end-to-end workflows on disposable Windows 10/11 VMs were not run for this release.
+
 ## v1.7.1 — Gaming diagnostics, Deep check, ReBAR per game
 
 ### New: Gaming diagnostics (Monitoring & Benchmark)

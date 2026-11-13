@@ -518,10 +518,8 @@ fn verify_applied(t: &PrivacyTweak) -> Result<(), String> {
             "$s = Get-Service -Name '{service}' -ErrorAction Stop; $s.StartType.ToString(); $s.Status.ToString()"
         ))?;
         let mut lines = result.lines();
-        if lines.next().map_or(true, |mode| mode.trim() != "Disabled")
-            || lines
-                .next()
-                .map_or(true, |status| status.trim() != "Stopped")
+        if lines.next().is_none_or(|mode| mode.trim() != "Disabled")
+            || lines.next().is_none_or(|status| status.trim() != "Stopped")
         {
             return Err(format!("Privacy service {service} is still active"));
         }

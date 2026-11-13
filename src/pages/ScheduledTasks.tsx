@@ -46,7 +46,10 @@ export default function ScheduledTasks({ admin, focusId }: { admin: boolean; foc
   const [tab, setTab] = useState<Tab>("bloat");
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "path", dir: 1 });
-  useFeatureFocus(focusId, !!data);
+  useEffect(() => {
+    if (focusId) { setTab("all"); setSearch(""); }
+  }, [focusId]);
+  useFeatureFocus(focusId, !!data && (!focusId || (tab === "all" && !search)));
 
   const load = () =>
     api
@@ -217,7 +220,7 @@ export default function ScheduledTasks({ admin, focusId }: { admin: boolean; foc
                   const isThird = task.origin === "thirdparty";
                   const badgeTip = [task.author, task.exec].filter(Boolean).join("\n");
                   return (
-                    <tr key={key} data-focus-id={task.name} style={{ opacity: task.enabled ? 1 : 0.55 }}>
+                    <tr key={key} data-focus-id={JSON.stringify([task.path, task.name])} style={{ opacity: task.enabled ? 1 : 0.55 }}>
                       <td style={{ fontWeight: 600, minWidth: 220 }}>
                         {task.name}
                         {tab !== "third" && isThird && (

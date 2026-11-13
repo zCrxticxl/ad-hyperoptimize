@@ -34,9 +34,12 @@ mod optregistry;
 mod organizer;
 mod pdh;
 mod perftweaks;
+mod powerowner;
 mod powerplan;
 mod pregame;
 mod privacy;
+#[cfg(windows)]
+mod processjob;
 mod procmgr;
 mod profiles;
 mod ps;
@@ -52,6 +55,7 @@ mod softwareinstaller;
 mod startup;
 mod statestore;
 mod throttle;
+mod transaction;
 mod tweaks;
 mod uninstaller;
 mod updates;
@@ -1042,7 +1046,12 @@ async fn cmd_gameboost_stop(state: State<'_, AppState>) -> Result<String, String
 #[tauri::command]
 fn cmd_gameboost_get_status(state: State<'_, AppState>) -> Value {
     let pid = *state.boosted_pid.lock().unwrap_or_else(|e| e.into_inner());
-    serde_json::json!({ "pid": pid, "active": pid.is_some() || gameboost::boost_active() })
+    match gameboost::quick_entries() {
+        Ok(quick) => {
+            serde_json::json!({ "pid": pid, "active": pid.is_some() || gameboost::boost_active(), "quick": quick })
+        }
+        Err(e) => serde_json::json!({ "error": e }),
+    }
 }
 
 #[tauri::command(async)]
@@ -1057,6 +1066,17 @@ async fn cmd_gameboost_quick_boost_revert(restore_token: String) -> Result<Value
     tauri::async_runtime::spawn_blocking(move || gameboost::quick_boost_revert(restore_token))
         .await
         .map_err(|_| "game booster task panicked".to_string())?
+}
+
+#[tauri::command(async)]
+async fn cmd_gameboost_stop_all(state: State<'_, AppState>) -> Result<String, String> {
+    let result = tauri::async_runtime::spawn_blocking(gameboost::stop_all)
+        .await
+        .map_err(|_| "game booster task panicked".to_string())?;
+    if !gameboost::boost_active() {
+        *state.boosted_pid.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    }
+    result
 }
 
 // ---- uninstaller ----
@@ -1758,8 +1778,10 @@ async fn cmd_sw_check_installed() -> Value {
 }
 
 #[tauri::command]
-fn cmd_sw_install(winget_ids: Vec<String>, app: AppHandle) {
-    softwareinstaller::install_apps(winget_ids, app);
+async fn cmd_sw_install(winget_ids: Vec<String>, app: AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || softwareinstaller::install_apps(winget_ids, app))
+        .await
+        .map_err(|e| format!("Installation worker failed: {e}"))?
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -2024,6 +2046,7 @@ pub fn run() {
             cmd_gameboost_kill_background,
             cmd_gameboost_start,
             cmd_gameboost_stop,
+            cmd_gameboost_stop_all,
             cmd_gameboost_get_status,
             cmd_gameboost_quick_boost,
             cmd_gameboost_quick_boost_revert,

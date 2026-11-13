@@ -15,6 +15,7 @@ export default function GameBooster({ admin }: { admin: boolean }) {
   const [boostActive, setBoostActive] = useState(false);
   const [busy, setBusy]         = useState(false);
   const [log, setLog]           = useState("");
+  const [quickEntries, setQuickEntries] = useState<any[]>([]);
   const [qbToken, setQbToken]   = useState<Record<number, string>>({});
   const [qbConfirm, setQbConfirm] = useState<number | null>(null);
   const [qbBusy, setQbBusy]     = useState<number | null>(null);
@@ -32,7 +33,9 @@ export default function GameBooster({ admin }: { admin: boolean }) {
       setGames(g.games ?? []);
       setBg(b.procs ?? []);
       setBoosted(status?.pid ?? null);
+      if (status?.error) throw new Error(status.error);
       setBoostActive(!!status?.active);
+      setQuickEntries(status?.quick ?? []);
     } catch (e: any) {
       setLoadErr(String(e));
     } finally { setLoading(false); }
@@ -62,7 +65,7 @@ export default function GameBooster({ admin }: { admin: boolean }) {
     setQbBusy(g.Id);
     try {
       const r = await api.quickBoostStart(g.Name);
-      setQbToken(prev => ({ ...prev, [g.Id]: r.restoreToken }));
+      setQbToken(prev => ({ ...prev, [r.pid]: r.restoreToken }));
       const closed = (r.killedBackground ?? []).join(", ");
       // e.g. priority change denied by anti-cheat: report it, don't hide it.
       const skippedRaw = r.skipped;
@@ -73,7 +76,7 @@ export default function GameBooster({ admin }: { admin: boolean }) {
       if (skipped) msg += ` · ${t("gameboostSkipped")}: ${skipped}`;
       setLog(msg);
     } catch (e: any) { setLog(String(e)); }
-    finally { setQbBusy(null); setQbConfirm(null); }
+    finally { setQbBusy(null); setQbConfirm(null); await refresh(); }
   };
 
   const undoQuickBoost = async (g: any) => {
@@ -85,7 +88,7 @@ export default function GameBooster({ admin }: { admin: boolean }) {
       setQbToken(prev => { const n = { ...prev }; delete n[g.Id]; return n; });
       setLog(t("gameboostQuickBoostUndone"));
     } catch (e: any) { setLog(String(e)); }
-    finally { setQbBusy(null); }
+    finally { setQbBusy(null); await refresh(); }
   };
 
   return (
@@ -166,15 +169,13 @@ export default function GameBooster({ admin }: { admin: boolean }) {
         ))}
         <div className="row" style={{ marginTop: 10, gap: 8 }}>
           <button className="btn small ghost" onClick={refresh} disabled={loading}>↺ {t("gameboostRefresh")}</button>
-          {boostActive && (
+          {(boostActive || quickEntries.length > 0) && (
             <button
               className="btn small ghost danger"
               disabled={busy}
               onClick={() => act(async () => {
-                const r = await api.gameboostStop();
-                setBoosted(null);
-                setBoostActive(false);
-                return r;
+                try { return await api.gameboostStopAll(); }
+                finally { setQbToken({}); await refresh(); }
               })}
             >
               ⏹ {t("gameboostStopAllBoosts")}
@@ -182,6 +183,14 @@ export default function GameBooster({ admin }: { admin: boolean }) {
           )}
         </div>
       </Card>
+
+      {quickEntries.map(entry => <div className="row" key={entry.id}>
+        <span>{entry.tweak_name}</span>
+        <button className="btn small ghost" disabled={busy || qbBusy !== null} onClick={() => act(async () => {
+          try { await api.quickBoostRevert(entry.id); setQbToken({}); return t("gameboostQuickBoostUndone"); }
+          finally { await refresh(); }
+        })}>{t("gameboostQuickBoostUndo")}</button>
+      </div>)}
 
       {/* Background killers */}
       <Card title={`${t("gameboostBgProcsToKill")} (${bg.length} ${t("gameboostFound")})`}>

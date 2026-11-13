@@ -158,6 +158,7 @@ pub(crate) fn is_valid_task_ident(s: &str) -> bool {
 }
 
 pub fn toggle(path: String, name: String, enable: bool) -> Result<Value, String> {
+    let _engine = crate::tweaks::engine_guard()?;
     if !crate::ps::is_admin() {
         return Err("Scheduled Tasks ändern benötigt Adminrechte.".into());
     }
@@ -231,7 +232,7 @@ pub fn toggle(path: String, name: String, enable: bool) -> Result<Value, String>
             })
             .map(|_| ())
         } else {
-            crate::tweaks::revert_entry(&entry_id).map(|_| ())
+            crate::tweaks::revert_entry_locked(&entry_id, &_engine).map(|_| ())
         };
         return Err(match closed {
             Ok(()) => format!("Toggle fehlgeschlagen: {error}"),
