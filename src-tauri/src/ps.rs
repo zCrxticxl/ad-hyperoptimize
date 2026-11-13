@@ -708,6 +708,7 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
+    #[allow(clippy::zombie_processes)] // This fixture must exit before its descendant to test containment.
     fn inherited_pipe_helper() {
         match std::env::var("AD_PIPE_HELPER").as_deref() {
             Ok("parent") => {
