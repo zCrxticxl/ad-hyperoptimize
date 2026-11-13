@@ -4,7 +4,7 @@ All notable changes to AD HyperOptimize are documented here. The in-app
 changelog is generated from this file, and each GitHub release uses the matching
 section below as its release notes.
 
-## v1.7.0 — Gaming diagnostics, Deep check, ReBAR per game
+## v1.7.1 — Gaming diagnostics, Deep check, ReBAR per game
 
 ### New: Gaming diagnostics (Monitoring & Benchmark)
 - Before you play: shows what competes with a game right now (Windows Update, Defender scan, indexing, .NET optimization, sync, updaters) and pauses what can be paused safely until you resume.
