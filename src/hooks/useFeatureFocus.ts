@@ -1,23 +1,21 @@
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 
-/**
- * Deep-link highlight (shared): when a page is opened with a target feature id
- * and its data is ready, scroll to + flash the matching `[data-focus-id]` row.
- * `ready` must flip to true once the page's data has loaded so the element
- * exists before we scroll to it.
- */
+/** Scroll to the requested feature once its row is available. */
 export function useFeatureFocus(focusId: string | undefined, ready: boolean) {
-  const done = useRef(false);
   useEffect(() => {
-    if (!focusId || done.current || !ready) return;
-    done.current = true;
-    requestAnimationFrame(() => {
-      // Ids come from backend catalogs and search; escape them so a quote or
-      // bracket cannot break (or widen) the attribute selector.
-      const el = document.querySelector(`[data-focus-id="${CSS.escape(focusId)}"]`);
+    if (!focusId || !ready) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let el: Element | null = null;
+    const frame = requestAnimationFrame(() => {
+      el = document.querySelector(`[data-focus-id="${CSS.escape(focusId)}"]`);
       el?.scrollIntoView({ behavior: "smooth", block: "center" });
       el?.classList.add("feature-focus");
-      setTimeout(() => el?.classList.remove("feature-focus"), 2200);
+      timer = setTimeout(() => el?.classList.remove("feature-focus"), 2200);
     });
+    return () => {
+      cancelAnimationFrame(frame);
+      clearTimeout(timer);
+      el?.classList.remove("feature-focus");
+    };
   }, [focusId, ready]);
 }

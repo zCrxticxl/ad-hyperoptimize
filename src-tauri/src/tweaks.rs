@@ -252,6 +252,7 @@ fn refuse_untrusted(entry: &JournalEntry, upto: usize) -> Result<(), String> {
             ChangeItem::ServiceStartup { service, prev, .. } => {
                 format!("service {service} startup = {prev}")
             }
+            ChangeItem::QuickPower { .. } => "Release Quick Boost power plan".into(),
             ChangeItem::Command { revert, .. } => revert.clone(),
         })
         .collect();
@@ -1198,7 +1199,7 @@ fn hex_encode(bytes: &[u8]) -> String {
 
 #[cfg(any(windows, test))]
 fn hex_decode(s: &str) -> Option<Vec<u8>> {
-    if s.len() % 2 != 0 {
+    if !s.len().is_multiple_of(2) {
         return None;
     }
     (0..s.len())
@@ -1387,8 +1388,27 @@ fn vals_eq(a: &RegVal, b: &RegVal) -> bool {
 /// running between an apply's capture and its mutations marks the entry
 /// reverted while the mutations still land afterwards.
 static ENGINE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-pub(crate) fn engine_guard() -> Result<std::sync::MutexGuard<'static, ()>, String> {
-    ENGINE_LOCK.lock().map_err(|e| format!("engine lock: {e}"))
+pub(crate) struct EngineGuard {
+    _file: std::fs::File,
+    _local: std::sync::MutexGuard<'static, ()>,
+}
+
+pub(crate) fn engine_guard() -> Result<EngineGuard, String> {
+    let local = ENGINE_LOCK
+        .lock()
+        .map_err(|e| format!("engine lock: {e}"))?;
+    let file = crate::transaction::lock_at(&safety::state_dir()?.join("engine.lock"))?;
+    Ok(EngineGuard {
+        _file: file,
+        _local: local,
+    })
+}
+
+pub(crate) fn power_guard() -> Result<EngineGuard, String> {
+    if !crate::ps::is_admin() {
+        return Err("Boosts and game profiles require administrator rights so all app instances share the protected recovery state. Restart the app as administrator.".into());
+    }
+    engine_guard()
 }
 
 // Known Windows default startup types for every service we touch in the
@@ -1944,6 +1964,7 @@ pub(crate) fn apply_item(item: &ChangeItem) -> Result<(), String> {
         #[cfg(not(windows))]
         ChangeItem::Registry { .. } => Err("Windows only".into()),
         ChangeItem::ServiceStartup { service, new, .. } => service_set_start(service, new),
+        ChangeItem::QuickPower { owner } => crate::powerowner::acquire(owner),
         ChangeItem::Command { applied, .. } => run_cmdline(applied),
     }
 }
@@ -1968,6 +1989,7 @@ pub(crate) fn revert_item(item: &ChangeItem) -> Result<(), String> {
         ChangeItem::ServiceStartup { service, prev, .. } => service_set_start(service, prev),
         // bcdedit fails on `/deletevalue` of an absent element: an element
         // already in its recorded previous state needs no command.
+        ChangeItem::QuickPower { owner } => crate::powerowner::release(owner),
         ChangeItem::Command { revert, .. } if crate::bootopt::revert_is_noop(revert) => Ok(()),
         ChangeItem::Command { revert, .. } => run_cmdline(revert),
     }
@@ -1999,7 +2021,7 @@ pub(crate) fn rollback_entry_items(entry_id: &str, items: &[ChangeItem]) -> Resu
 /// Undo the most recent non-reverted journal entry for a tweak.
 /// If no journal entry exists but the tweak is currently active (detected via
 /// live registry / service state), falls back to a synthesized force-revert:
-///   • RegSet  → imports the newest .reg backup, then verifies the value changed
+///   • RegSet  → resets only the affected value to its known Windows default
 ///   • Service → resets to the known Windows default startup type
 ///   • Cmd     → only uncaptured helper commands; captured ones need the journal
 /// Tweaks with no live signal ("unknown") or a captured Cmd return an error:
@@ -2028,18 +2050,12 @@ pub fn revert(tweak_id: &str) -> Result<Value, String> {
             // Not run; the catalog's Windows defaults are used instead below.
             return Ok(Some(Err(entry.id.clone())));
         }
-        for offset in (0..stop).rev() {
-            match revert_item(&entry.items[offset]) {
-                Ok(()) => entry.reverted_items += 1,
-                Err(e) => return Err(format!("partial revert: {e} — retry to resume")),
-            }
-        }
-        entry.reverted = true;
+        resume_revert(entry, revert_item)?;
         Ok(Some(Ok(entry.id.clone())))
     })?;
     match outcome {
         Some(Ok(id)) => return Ok(json!({ "entryId": id, "status": "reverted" })),
-        Some(Err(untrusted_id)) => return revert_untrusted(&untrusted_id, tweak_id),
+        Some(Err(untrusted_id)) => return revert_untrusted(&untrusted_id, tweak_id, &_engine),
         None => {}
     }
 
@@ -2161,13 +2177,8 @@ fn force_revert(tweak_id: &str) -> Result<Value, String> {
                 if !matches!(reg_read(root, path, name)?, Some(ref cur) if vals_eq(cur, value)) {
                     return Ok(()); // this value is not (or no longer) the tweak's
                 }
-                if let Some(backup) = safety::latest_backup_for(root, path) {
-                    let _ = crate::ps::exec("reg.exe", &["import", &backup]);
-                    if !matches!(reg_read(root, path, name)?, Some(ref cur) if vals_eq(cur, value))
-                    {
-                        return Ok(()); // the backup held the earlier value
-                    }
-                }
+                // A key backup includes unrelated settings. Without a trusted
+                // value-level journal, only reset this value to its known default.
                 let default = windows_default(path, name).ok_or_else(|| {
                     format!("no known Windows default for {root}\\{path}\\{name}")
                 })?;
@@ -2223,7 +2234,12 @@ fn force_revert(tweak_id: &str) -> Result<Value, String> {
 /// (Quick Boost on two different games at once) each get an independent,
 /// unambiguous undo handle.
 pub fn revert_entry(entry_id: &str) -> Result<Value, String> {
-    let _engine = engine_guard()?;
+    let engine = engine_guard()?;
+    revert_entry_locked(entry_id, &engine)
+}
+
+/// Roll back within an existing transaction without reacquiring its lock.
+pub(crate) fn revert_entry_locked(entry_id: &str, _engine: &EngineGuard) -> Result<Value, String> {
     let outcome = safety::with_journal(|journal| {
         let entry = journal
             .iter_mut()
@@ -2242,13 +2258,7 @@ pub fn revert_entry(entry_id: &str) -> Result<Value, String> {
         if let Err(refusal) = refuse_untrusted(entry, stop) {
             return Ok(Err((entry.tweak_id.clone(), refusal)));
         }
-        for offset in (0..stop).rev() {
-            match revert_item(&entry.items[offset]) {
-                Ok(()) => entry.reverted_items += 1,
-                Err(e) => return Err(format!("partial revert: {e} — retry to resume")),
-            }
-        }
-        entry.reverted = true;
+        resume_revert(entry, revert_item)?;
         Ok(Ok(entry.id.clone()))
     })?;
     match outcome {
@@ -2258,12 +2268,30 @@ pub fn revert_entry(entry_id: &str) -> Result<Value, String> {
         Err((tweak_id, refusal)) => {
             let known = catalog().iter().any(|t| t.id == tweak_id) || tweak_id.starts_with("gpu:");
             if known {
-                revert_untrusted(entry_id, &tweak_id)
+                revert_untrusted(entry_id, &tweak_id, _engine)
             } else {
                 Err(refusal)
             }
         }
     }
+}
+
+fn resume_revert(
+    entry: &mut JournalEntry,
+    mut restore: impl FnMut(&ChangeItem) -> Result<(), String>,
+) -> Result<(), String> {
+    let attempted = entry.attempted.min(entry.items.len());
+    let stop = attempted - entry.reverted_items.min(attempted);
+    for offset in (0..stop).rev() {
+        let item = &entry.items[offset];
+        if entry.tweak_id == "quickBoost" && !crate::gameboost::safe_quick_revert(item) {
+            return Err("Partial recovery: legacy Quick Boost priority has no verifiable process identity. Priority was not changed; previously restored steps are retained.".into());
+        }
+        restore(item).map_err(|e| format!("partial revert: {e}; retry to resume"))?;
+        entry.reverted_items += 1;
+    }
+    entry.reverted = true;
+    Ok(())
 }
 
 /// Marks a journal entry as done without running it.
@@ -2279,9 +2307,9 @@ pub(crate) fn close_entry(entry_id: &str) -> Result<(), String> {
 /// Undo for an entry whose recorded steps cannot be verified: the catalog
 /// defaults are applied (they do not come from the untrusted file), then the
 /// entry is closed. "Not active" also closes it: there is nothing left to do.
-fn revert_untrusted(entry_id: &str, tweak_id: &str) -> Result<Value, String> {
+fn revert_untrusted(entry_id: &str, tweak_id: &str, engine: &EngineGuard) -> Result<Value, String> {
     let res = match tweak_id.strip_prefix("gpu:") {
-        Some(gpu_id) => crate::gputweaks::reset_to_defaults(gpu_id)
+        Some(gpu_id) => crate::gputweaks::reset_to_defaults_locked(gpu_id, engine)
             .map(|m| json!({ "status": "force_reverted", "message": m })),
         None => force_revert(tweak_id),
     };
@@ -2306,6 +2334,108 @@ pub fn history() -> Value {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn locked_undo_child() {
+        let Some(dir) = std::env::var_os("AD_TEST_LOCKED_UNDO_DIR") else {
+            return;
+        };
+        crate::safety::use_test_state_dir(dir.into());
+        let entry: super::JournalEntry = serde_json::from_value(serde_json::json!({
+            "id": "task-test", "tweak_id": "task:test", "tweak_name": "test", "time": "test",
+            "items": [], "attempted": 0, "reverted": false, "backup_files": []
+        }))
+        .unwrap();
+        crate::safety::append_entry(entry).unwrap();
+        let untrusted: super::JournalEntry = serde_json::from_value(serde_json::json!({
+            "id": "gpu-test", "tweak_id": "gpu:unknown-test-id", "tweak_name": "test", "time": "test",
+            "items": [{"kind": "Command", "applied": "must-not-run", "revert": "must-not-run"}],
+            "attempted": 1, "untrusted": true, "reverted": false, "backup_files": []
+        })).unwrap();
+        crate::safety::append_entry(untrusted).unwrap();
+        let engine = super::engine_guard().unwrap();
+        assert_eq!(
+            super::revert_entry_locked("task-test", &engine).unwrap()["status"],
+            "reverted"
+        );
+        assert!(crate::safety::load_journal().unwrap()[0].reverted);
+        assert!(super::revert_entry_locked("gpu-test", &engine)
+            .unwrap_err()
+            .contains("Unknown GPU tweak"));
+        assert!(!crate::safety::load_journal().unwrap()[1].reverted);
+        assert!(
+            super::ENGINE_LOCK.try_lock().is_err(),
+            "rollback must retain transaction ownership"
+        );
+    }
+
+    #[test]
+    fn locked_undo_completes_without_reacquiring_transaction() {
+        use std::time::{Duration, Instant};
+        let dir = std::env::temp_dir().join(format!("ad-locked-undo-{}", rand::random::<u64>()));
+        std::fs::create_dir(&dir).unwrap();
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "tweaks::tests::locked_undo_child", "--nocapture"])
+            .env("AD_TEST_LOCKED_UNDO_DIR", &dir)
+            .spawn()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let status = loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                break Some(status);
+            }
+            if Instant::now() >= deadline {
+                child.kill().unwrap();
+                child.wait().unwrap();
+                break None;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        std::fs::remove_dir_all(dir).unwrap();
+        assert!(
+            status.is_some_and(|status| status.success()),
+            "locked undo failed or deadlocked"
+        );
+    }
+
+    #[test]
+    fn legacy_quick_undo_keeps_partial_progress_without_touching_reused_pid() {
+        let mut entry: super::JournalEntry = serde_json::from_value(serde_json::json!({
+            "id": "legacy", "tweak_id": "quickBoost", "tweak_name": "old", "time": "test",
+            "items": [
+                {"kind": "Command", "applied": "old", "revert": "powershell -Command Get-Process -Id 42 | ForEach-Object { $_.PriorityClass = 'Normal' }"},
+                {"kind": "Command", "applied": format!("powercfg /setactive {}", crate::gameprofile::PLAN_HIGH_PERFORMANCE), "revert": format!("powercfg /setactive {}", crate::gameprofile::PLAN_BALANCED)}
+            ], "reverted": false, "backup_files": []
+        })).unwrap();
+        let mut calls = 0;
+        assert!(super::resume_revert(&mut entry, |_| {
+            calls += 1;
+            Ok(())
+        })
+        .unwrap_err()
+        .contains("process identity"));
+        assert_eq!(calls, 1);
+        assert_eq!(entry.reverted_items, 1);
+        assert!(!entry.reverted);
+        assert!(
+            super::resume_revert(&mut entry, |_| panic!("must not replay a restored step"))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn failed_restore_does_not_advance_journal_progress() {
+        let mut entry: super::JournalEntry = serde_json::from_value(serde_json::json!({
+            "id": "test", "tweak_id": "test", "tweak_name": "test", "time": "test",
+            "items": [{"kind": "Command", "applied": "test", "revert": "test"}],
+            "reverted": false, "backup_files": []
+        }))
+        .unwrap();
+        assert!(super::resume_revert(&mut entry, |_| Err("denied".into())).is_err());
+        assert_eq!(entry.reverted_items, 0);
+        super::resume_revert(&mut entry, |_| Ok(())).unwrap();
+        assert!(entry.reverted);
+    }
+
     #[test]
     fn ucpd_blocked_values_get_a_clear_message() {
         let item = |path: &str, name: &str| ChangeItem::Registry {

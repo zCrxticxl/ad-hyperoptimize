@@ -317,6 +317,7 @@ fn sanitize_entry(entry: &mut JournalEntry) -> bool {
     let mut trusted = true;
     for item in &mut entry.items {
         match item {
+            ChangeItem::QuickPower { .. } => trusted = false,
             ChangeItem::Registry {
                 root, path, name, ..
             } => {

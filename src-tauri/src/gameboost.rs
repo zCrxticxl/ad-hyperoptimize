@@ -213,6 +213,16 @@ fn set_active_plan(guid: &str) -> Result<(), String> {
 }
 
 pub fn boost_start(pid: u32) -> Result<String, String> {
+    let _guard = tweaks::power_guard()?;
+    boost_start_locked(pid)
+}
+
+fn boost_start_locked(pid: u32) -> Result<String, String> {
+    if !quick_entries()?.is_empty() || crate::gameprofile::has_recovery() {
+        return Err(
+            "Stop Quick Boosts and revert the game profile before starting a classic boost".into(),
+        );
+    }
     // A second boost must not overwrite the saved pre-boost state with
     // already-boosted values (the stop would then "restore" the boost).
     if boost_state_path()?.exists() {
@@ -239,7 +249,9 @@ pub fn boost_start(pid: u32) -> Result<String, String> {
 
     // Write-ahead: persist the pre-boost state BEFORE changing anything, so
     // a partial apply (or a crash mid-apply) is still restorable by stop.
-    save_boost_state(&prev_plan, prev_toast.as_deref(), prev_game_mode)?;
+    let priority = capture_priority(pid)?;
+    save_boost_state(&prev_plan, prev_toast.as_deref(), prev_game_mode, &priority)?;
+    let priority_apply = priority_script(&priority, "High", false)?;
 
     // Power plan: an installed Ultimate Performance scheme if present,
     // otherwise High Performance. A failure here aborts and restores.
@@ -248,7 +260,7 @@ pub fn boost_start(pid: u32) -> Result<String, String> {
         None => (PLAN_HIGH_PERFORMANCE.to_string(), "High Performance"),
     };
     if let Err(e) = set_active_plan(&target_plan) {
-        return Err(match boost_stop() {
+        return Err(match boost_stop_locked() {
             Ok(_) => format!("Game boost failed ({e}); settings restored"),
             Err(re) => format!("Game boost failed ({e}); restore incomplete ({re})"),
         });
@@ -261,8 +273,7 @@ $skipped = @()
 # Boost target process. Anti-cheat protected games (BattlEye, EAC, Vanguard)
 # deny priority changes; that is a skipped step, not a failed boost.
 try {{
-    $p = Get-Process -Id {pid} -EA Stop
-    $p.PriorityClass = [System.Diagnostics.ProcessPriorityClass]::High
+    {priority_apply}
 }} catch {{ $skipped += "priority ($($_.Exception.Message))" }}
 
 # Enable Game Mode
@@ -281,7 +292,7 @@ else {{ "Game boost active for PID {pid} ({plan_label})" }}
     );
     match ps::run(&script) {
         Ok(out) => Ok(out.trim().to_string()),
-        Err(e) => Err(match boost_stop() {
+        Err(e) => Err(match boost_stop_locked() {
             Ok(_) => format!("Game boost failed ({}); settings restored", e.trim()),
             Err(re) => format!(
                 "Game boost failed ({}); restore incomplete ({re})",
@@ -298,19 +309,20 @@ fn save_boost_state(
     prev_plan: &str,
     prev_toast: Option<&str>,
     prev_game_mode: Option<u32>,
+    priority: &Value,
 ) -> Result<(), String> {
     let path = boost_state_path()?;
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
-    let v =
-        json!({ "prevPlan": prev_plan, "prevToast": prev_toast, "prevGameMode": prev_game_mode });
+    let v = json!({ "prevPlan": prev_plan, "prevToast": prev_toast, "prevGameMode": prev_game_mode, "priority": priority });
     std::fs::write(&path, serde_json::to_string(&v).unwrap_or_default())
         .map_err(|e| format!("saving boost state failed: {e}"))
 }
 
 /// Pre-boost state as saved by boost_start.
 struct BoostState {
+    priority: Value,
     plan: String,
     toast: Option<String>,
     /// None: not recorded (state written by an older version, leave Game
@@ -320,6 +332,7 @@ struct BoostState {
 
 fn parse_boost_state(v: &Value) -> BoostState {
     BoostState {
+        priority: v["priority"].clone(),
         plan: v["prevPlan"].as_str().unwrap_or_default().to_string(),
         toast: v["prevToast"].as_str().map(str::to_string),
         game_mode: match v.get("prevGameMode") {
@@ -351,9 +364,15 @@ fn remove_boost_state() {
 }
 
 pub fn boost_stop() -> Result<String, String> {
+    let _guard = tweaks::power_guard()?;
+    boost_stop_locked()
+}
+
+fn boost_stop_locked() -> Result<String, String> {
     // No recorded state means there is nothing we changed to restore. Never
     // guess a "Balanced" plan the user may never have had.
     let Some(BoostState {
+        priority,
         plan: prev_plan,
         toast: prev_toast,
         game_mode: prev_game_mode,
@@ -369,6 +388,17 @@ pub fn boost_stop() -> Result<String, String> {
             );
         }
         return Ok("No active game boost; nothing to restore".into());
+    };
+
+    let priority_result = if priority.is_null() {
+        Ok(String::new())
+    } else {
+        priority_script(
+            &priority,
+            priority["priority"].as_str().unwrap_or_default(),
+            true,
+        )
+        .and_then(|script| ps::run(&script))
     };
 
     // The plan guid is embedded in a script, so only a real GUID is accepted.
@@ -415,6 +445,7 @@ if ($errs.Count) {{ Write-Error ('Game boost stopped, but: ' + ($errs -join '; '
         // State is only consumed once the exact restore succeeded, so a retry
         // after a failure still restores the captured values (never defaults).
         Ok(s) => {
+            priority_result?;
             remove_boost_state();
             Ok(s.trim().to_string())
         }
@@ -456,6 +487,37 @@ fn ps_expr(expr: String) -> String {
     format!("powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command {expr}")
 }
 
+/// Only the exact identity-guarded shape emitted by this version may restore
+/// a process priority. A PID in a legacy journal cannot identify today's process.
+pub(crate) fn safe_quick_revert(item: &ChangeItem) -> bool {
+    match item {
+        ChangeItem::QuickPower { .. } => true,
+        ChangeItem::Command { applied, revert } => {
+            if applied == &format!("powercfg /setactive {PLAN_HIGH_PERFORMANCE}") {
+                return revert
+                    .strip_prefix("powercfg /setactive ")
+                    .is_some_and(ps::is_guid);
+            }
+            let prefix = ps_expr("Get-Process -Id ".into());
+            let Some(rest) = revert.strip_prefix(&prefix) else {
+                return false;
+            };
+            let Some((pid, rest)) = rest.split_once(" -ErrorAction SilentlyContinue | ForEach-Object { if ($_.StartTime.ToUniversalTime().Ticks.ToString() -eq '") else { return false };
+            let Some((created, rest)) = rest.split_once("') { $_.PriorityClass = '") else {
+                return false;
+            };
+            let Some(priority) = rest.strip_suffix("' } }") else {
+                return false;
+            };
+            pid.parse::<u32>().is_ok_and(|p| p > 0)
+                && !created.is_empty()
+                && created.bytes().all(|b| b.is_ascii_digit())
+                && valid_priority(priority)
+        }
+        _ => false,
+    }
+}
+
 /// Resolve a process name (with or without ".exe") to a live PID.
 fn find_pid_by_name(name: &str) -> Result<u32, String> {
     let base = strip_exe(name);
@@ -474,6 +536,28 @@ fn find_pid_by_name(name: &str) -> Result<u32, String> {
 
 /// Whitelist a captured .NET ProcessPriorityClass name; the value is
 /// interpolated into a revert script.
+fn capture_priority(pid: u32) -> Result<Value, String> {
+    ps::run_json(&format!("$p = Get-Process -Id {pid} -EA Stop; @{{ pid = $p.Id; created = $p.StartTime.ToUniversalTime().Ticks.ToString(); priority = $p.PriorityClass.ToString() }} | ConvertTo-Json -Compress"))
+}
+
+fn priority_script(v: &Value, target: &str, restoring: bool) -> Result<String, String> {
+    let pid = v["pid"]
+        .as_u64()
+        .filter(|p| *p <= u32::MAX as u64)
+        .ok_or("Invalid process id")?;
+    let created = v["created"].as_str().ok_or("Missing process identity")?;
+    if created.is_empty() || !created.bytes().all(|b| b.is_ascii_digit()) || !valid_priority(target)
+    {
+        return Err("Invalid priority snapshot".into());
+    }
+    let missing = if restoring {
+        "SilentlyContinue"
+    } else {
+        "Stop"
+    };
+    Ok(format!("$p = Get-Process -Id {pid} -EA {missing}; if ($p -and $p.StartTime.ToUniversalTime().Ticks.ToString() -eq '{created}') {{ $p.PriorityClass = '{target}' }}"))
+}
+
 fn valid_priority(s: &str) -> bool {
     matches!(
         s,
@@ -486,7 +570,17 @@ fn valid_priority(s: &str) -> bool {
 /// everything into one journal entry first; returns its id as the restore
 /// token plus any skipped steps.
 pub fn quick_boost_start(process_name: String) -> Result<Value, String> {
+    let _guard = tweaks::power_guard()?;
+    if boost_active() || crate::gameprofile::has_recovery() {
+        return Err("Stop the classic boost and revert the game profile before Quick Boost".into());
+    }
     let pid = find_pid_by_name(&process_name)?;
+    if quick_entries()?
+        .iter()
+        .any(|e| e.id.starts_with(&format!("quickBoost-{pid}-")))
+    {
+        return Err("This process already has a recoverable Quick Boost; undo it first".into());
+    }
     let mut skipped: Vec<String> = Vec::new();
 
     // ---- snapshot current state ----
@@ -494,8 +588,15 @@ pub fn quick_boost_start(process_name: String) -> Result<Value, String> {
     // changing the priority class. Probe with a no-op write of the current
     // value: if that is denied, the priority step is skipped instead of
     // failing (and rolling back) the whole boost.
+    let creation = ps::run(&format!(
+        "(Get-Process -Id {pid} -EA Stop).StartTime.ToUniversalTime().Ticks.ToString()"
+    ))?;
+    let creation = creation.trim();
+    if creation.is_empty() || !creation.bytes().all(|b| b.is_ascii_digit()) {
+        return Err("Invalid process creation time".into());
+    }
     let captured_priority = ps::run(&format!(
-        "$p = Get-Process -Id {pid} -ErrorAction Stop; $c = $p.PriorityClass; $p.PriorityClass = $c; $c.ToString()"
+        "$p = Get-Process -Id {pid} -ErrorAction Stop; if ($p.StartTime.ToUniversalTime().Ticks.ToString() -ne '{creation}') {{ throw 'Process changed' }}; $c = $p.PriorityClass; $p.PriorityClass = $c; $c.ToString()"
     ))
     .map(|s| s.trim().to_string());
     let prev_priority = match captured_priority {
@@ -513,8 +614,11 @@ pub fn quick_boost_start(process_name: String) -> Result<Value, String> {
         }
     };
 
-    let prev_plan = get_active_plan_guid()
-        .ok_or("could not read the active power plan; Quick Boost not started")?;
+    let owner = format!(
+        "quick-{}-{}",
+        pid,
+        chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+    );
 
     // ---- build reversible items (write-ahead, nothing applied yet) ----
     // Command items are executed via tweaks::apply_item → run_cmdline, which
@@ -527,17 +631,14 @@ pub fn quick_boost_start(process_name: String) -> Result<Value, String> {
     if let Some(prev_priority) = &prev_priority {
         items.push(ChangeItem::Command {
             applied: ps_expr(format!(
-                "(Get-Process -Id {pid} -ErrorAction Stop).PriorityClass = 'High'"
+                "$p = Get-Process -Id {pid} -ErrorAction Stop; if ($p.StartTime.ToUniversalTime().Ticks.ToString() -ne '{creation}') {{ throw 'Process changed' }}; $p.PriorityClass = 'High'"
             )),
             revert: ps_expr(format!(
-                "Get-Process -Id {pid} -ErrorAction SilentlyContinue | ForEach-Object {{ $_.PriorityClass = '{prev_priority}' }}"
+                "Get-Process -Id {pid} -ErrorAction SilentlyContinue | ForEach-Object {{ if ($_.StartTime.ToUniversalTime().Ticks.ToString() -eq '{creation}') {{ $_.PriorityClass = '{prev_priority}' }} }}"
             )),
         });
     }
-    items.push(ChangeItem::Command {
-        applied: format!("powercfg /setactive {PLAN_HIGH_PERFORMANCE}"),
-        revert: format!("powercfg /setactive {prev_plan}"),
-    });
+    items.push(ChangeItem::QuickPower { owner });
 
     // ---- write-ahead journal entry; its id is the restore token ----
     let entry_id = format!(
@@ -602,6 +703,30 @@ pub fn quick_boost_start(process_name: String) -> Result<Value, String> {
     }))
 }
 
+pub fn quick_entries() -> Result<Vec<JournalEntry>, String> {
+    Ok(safety::load_journal()?
+        .into_iter()
+        .filter(|e| e.tweak_id == "quickBoost" && !e.reverted)
+        .collect())
+}
+
+pub fn stop_all() -> Result<String, String> {
+    let mut errors = Vec::new();
+    if let Err(e) = boost_stop() {
+        errors.push(e);
+    }
+    for entry in quick_entries()? {
+        if let Err(e) = quick_boost_revert(entry.id) {
+            errors.push(e);
+        }
+    }
+    if errors.is_empty() {
+        Ok("All boosts stopped".into())
+    } else {
+        Err(errors.join("; "))
+    }
+}
+
 /// Undo a single Quick Boost invocation via its restore token.
 pub fn quick_boost_revert(restore_token: String) -> Result<Value, String> {
     tweaks::revert_entry(&restore_token)
@@ -610,6 +735,36 @@ pub fn quick_boost_revert(restore_token: String) -> Result<Value, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn old_pid_only_undo_is_refused_and_identity_check_must_be_exact() {
+        let command = |script: &str| ChangeItem::Command {
+            applied: String::new(),
+            revert: ps_expr(script.into()),
+        };
+        assert!(!safe_quick_revert(&command("Get-Process -Id 42 -ErrorAction SilentlyContinue | ForEach-Object { $_.PriorityClass = 'Normal' }")));
+        let safe = "Get-Process -Id 42 -ErrorAction SilentlyContinue | ForEach-Object { if ($_.StartTime.ToUniversalTime().Ticks.ToString() -eq '123456') { $_.PriorityClass = 'Normal' } }";
+        assert!(safe_quick_revert(&command(safe)));
+        assert!(!safe_quick_revert(&command(&format!("{safe}; exit"))));
+        assert!(!safe_quick_revert(&command(&safe.replace("123456", "abc"))));
+        assert!(!safe_quick_revert(&command(
+            &safe.replace("Normal", "Normal'; exit; '")
+        )));
+    }
+
+    #[test]
+    fn priority_restore_requires_creation_identity_and_valid_target() {
+        let snapshot = json!({ "pid": 42, "created": "123456789012345678", "priority": "Normal" });
+        let script = priority_script(&snapshot, "Normal", true).unwrap();
+        assert!(script
+            .contains("StartTime.ToUniversalTime().Ticks.ToString() -eq '123456789012345678'"));
+        assert!(script.contains("SilentlyContinue"));
+        assert!(priority_script(&snapshot, "Normal'; exit", true).is_err());
+        assert!(priority_script(&json!({"pid": 42}), "Normal", true).is_err());
+        assert!(parse_boost_state(&json!({"prevPlan": "legacy"}))
+            .priority
+            .is_null());
+    }
 
     #[test]
     fn candidates_match_exactly_not_by_substring() {

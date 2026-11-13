@@ -199,6 +199,7 @@ export default function HwMonitor() {
   const [ts, setTs] = useState<string>("");
   const [err, setErr] = useState("");
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const mounted = useRef(false);
   const errStreak = useRef(0);
   // A slow hwFull() must not stack up: skip poll ticks while one is in flight.
   const inFlight = useRef(false);
@@ -207,7 +208,7 @@ export default function HwMonitor() {
   // polled (and the error not re-flashed) every 10s; a successful load — e.g.
   // via the manual "refresh now" link — resumes it.
   const startPolling = () => {
-    if (timer.current === null) timer.current = setInterval(load, 10_000);
+    if (mounted.current && timer.current === null) timer.current = setInterval(load, 10_000);
   };
   const stopPolling = () => {
     if (timer.current !== null) { clearInterval(timer.current); timer.current = null; }
@@ -219,6 +220,7 @@ export default function HwMonitor() {
     setBusy(true);
     try {
       const d = await api.hwFull();
+      if (!mounted.current) return;
       setData(d);
       setTs(new Date().toLocaleTimeString());
       setErr("");
@@ -235,9 +237,10 @@ export default function HwMonitor() {
   };
 
   useEffect(() => {
+    mounted.current = true;
     load();
     startPolling();
-    return () => stopPolling();
+    return () => { mounted.current = false; stopPolling(); };
   }, []);
 
   return (

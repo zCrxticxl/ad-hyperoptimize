@@ -11,6 +11,12 @@ use std::sync::{Mutex, OnceLock};
 static JOURNAL_LOCK: Mutex<()> = Mutex::new(());
 static STATE_DIR: OnceLock<Result<PathBuf, String>> = OnceLock::new();
 
+/// Only for isolated test subprocesses, before any state initialization.
+#[cfg(test)]
+pub(crate) fn use_test_state_dir(path: PathBuf) {
+    assert!(STATE_DIR.set(Ok(path)).is_ok());
+}
+
 /// Where privileged state lives: the journal, registry backups and state files
 /// that undo executes or imports with admin rights. Elevated, that is an
 /// admin-only folder under %ProgramData% (see statestore.rs); data left in the
@@ -29,6 +35,8 @@ fn resolve_state_dir() -> Result<PathBuf, String> {
     if ps::is_admin() {
         let dir = protected_state_dir()?;
         crate::statestore::ensure_secure_dir(&dir)?;
+        let _engine = crate::transaction::lock_at(&dir.join("engine.lock"))?;
+        let _journal = crate::transaction::lock_at(&dir.join("journal.lock"))?;
         crate::statestore::migrate_legacy(&app_data_dir(), &dir);
         return Ok(dir);
     }
@@ -72,6 +80,9 @@ pub fn app_data_dir() -> PathBuf {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(tag = "kind")]
 pub enum ChangeItem {
+    QuickPower {
+        owner: String,
+    },
     Registry {
         root: String, // "HKLM" | "HKCU"
         path: String,
@@ -184,6 +195,7 @@ pub fn with_journal<R>(
     let _g = JOURNAL_LOCK
         .lock()
         .map_err(|e| format!("journal lock: {e}"))?;
+    let _file = crate::transaction::lock_at(&state_dir()?.join("journal.lock"))?;
     let mut j = load_journal()?;
     let r = f(&mut j);
     save_journal(&j)?;
@@ -242,6 +254,7 @@ fn backup_prefix(root: &str, path: &str) -> String {
 /// True for `<prefix><YYYYMMDD-HHMMSS>.reg` of exactly this key. A plain
 /// prefix match also hit backups of subkeys (`Key\Sub` → `Key_Sub_…`), and
 /// force-revert then imported the wrong key.
+#[cfg(test)]
 fn is_backup_of(file_name: &str, root: &str, path: &str) -> bool {
     file_name
         .strip_prefix(&backup_prefix(root, path))
@@ -283,28 +296,6 @@ pub fn write_user_file(path: &Path, content: &[u8]) -> Result<(), String> {
         let _ = fs::remove_file(&tmp);
         format!("{}: {e}", path.display())
     })
-}
-
-/// Newest `.reg` backup for a registry key, or None. Used by the force-revert
-/// path to restore prior state instead of blindly deleting values.
-pub fn latest_backup_for(root: &str, path: &str) -> Option<String> {
-    let mut best: Option<(std::time::SystemTime, String)> = None;
-    for entry in fs::read_dir(state_dir().ok()?.join("backups"))
-        .ok()?
-        .flatten()
-    {
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if !is_backup_of(&name, root, path) {
-            continue;
-        }
-        let Ok(modified) = entry.metadata().and_then(|m| m.modified()) else {
-            continue;
-        };
-        if best.as_ref().map_or(true, |(t, _)| modified > *t) {
-            best = Some((modified, entry.path().to_string_lossy().into_owned()));
-        }
-    }
-    best.map(|(_, p)| p)
 }
 
 /// Export a registry key with reg.exe before touching it. Returns backup path.
@@ -419,10 +410,8 @@ pub fn list_restore_points() -> serde_json::Value {
 
 /// Delete a restore point by sequence number.
 ///
-/// `SystemRestore.DeleteRestorePoint(SequenceNumber)` is the documented WMI
-/// API for exactly this. The old code called `.Delete()` on the *class*
-/// object (which always fails) and then fell back to `vssadmin … /oldest`,
-/// deleting the oldest shadow copy instead of the selected point.
+/// Uses SRRemoveRestorePoint for the selected sequence, never a shadow-copy
+/// age heuristic or a nonexistent WMI deletion method.
 pub fn delete_restore_point(sequence_number: u32) -> Result<String, String> {
     if !ps::is_admin() {
         return Err("Administrator rights required.".into());
@@ -431,8 +420,15 @@ pub fn delete_restore_point(sequence_number: u32) -> Result<String, String> {
         r#"
 $rp = Get-ComputerRestorePoint | Where-Object {{ $_.SequenceNumber -eq {sequence_number} }}
 if (-not $rp) {{ throw "Restore point {sequence_number} not found" }}
-$result = ([wmiclass]'root\default:SystemRestore').DeleteRestorePoint({sequence_number})
-if ($result.ReturnValue -ne 0) {{ throw "DeleteRestorePoint failed (code $($result.ReturnValue))" }}
+Add-Type -TypeDefinition @'
+using System.Runtime.InteropServices;
+public static class RestorePointNative {{
+    [DllImport("srclient.dll", ExactSpelling = true)]
+    public static extern uint SRRemoveRestorePoint(uint sequence);
+}}
+'@
+$result = [RestorePointNative]::SRRemoveRestorePoint({sequence_number})
+if ($result -ne 0) {{ throw "SRRemoveRestorePoint failed (code $result)" }}
 "Deleted restore point {sequence_number}"
 "#
     );

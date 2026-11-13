@@ -115,21 +115,11 @@ fn install_succeeded(first_line: &str) -> bool {
     )
 }
 
-pub fn install_apps(winget_ids: Vec<String>, app: AppHandle) {
+pub fn install_apps(winget_ids: Vec<String>, app: AppHandle) -> Result<(), String> {
     if INSTALLING.swap(true, Ordering::SeqCst) {
-        for id in &winget_ids {
-            let _ = app.emit(
-                "sw-install-progress",
-                json!({
-                    "wingetId": id,
-                    "status":   "error",
-                    "message":  "Another installation is already running",
-                }),
-            );
-        }
-        return;
+        return Err("Another installation is already running".into());
     }
-    std::thread::spawn(move || {
+    {
         let _guard = InstallGuard;
         let known: std::collections::HashSet<String> = catalog_ids().into_iter().collect();
         let mut seen = std::collections::HashSet::new();
@@ -208,7 +198,8 @@ pub fn install_apps(winget_ids: Vec<String>, app: AppHandle) {
                 "message":  format!("Finished installing {} app(s)", seen.len()),
             }),
         );
-    });
+    }
+    Ok(())
 }
 
 #[cfg(test)]

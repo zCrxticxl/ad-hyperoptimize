@@ -100,9 +100,8 @@ export default function Latency() {
                 catch (e: any) { setTrace(String(e)); }
               }} />
               <ActionBtn label={t("cancel")} className="btn ghost" onRun={async () => {
-                try { setTrace(await api.wprCancel()); }
+                try { setTrace(await api.wprCancel()); setRecording(false); }
                 catch (e: any) { setTrace(String(e)); }
-                finally { setRecording(false); }
               }} />
             </>
           )}

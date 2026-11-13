@@ -1,4 +1,13 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke as tauriInvoke, InvokeArgs } from "@tauri-apps/api/core";
+import { trackOperation } from "./lib/pendingOperations";
+
+// Passive reads and polling must never hold navigation open.
+const actionCommands = new Set(`apply_tweak revert_tweak revert_entry run_cleanup defender_quick_scan uninstall_app scan_leftovers clean_leftovers ctxmenu_toggle ctxmenu_disable_all ctxmenu_enable_all powerplan_set powerplan_unlock_ultimate powerplan_delete powerplan_create timer_set timer_reset msi_set net_tweak net_reset_all pagefile_set_auto pagefile_set_custom pagefile_disable perf_undo debloater_remove_uwp debloater_remove_provisioned debloater_tweak_apply debloater_tweak_revert drivers_install_winget drivers_scan_windows_update gameboost_kill_background gameboost_start gameboost_stop gameboost_stop_all gameboost_quick_boost gameboost_quick_boost_revert disable_scheduled_task enable_scheduled_task defender_set_realtime defender_set_cloud hosts_disable_entries hosts_enable_entries security_disable_driver security_enable_driver security_remove_driver run_benchmark fps_import fps_delete profile_apply profile_revert startup_toggle proc_kill proc_priority proc_affinity perm_priority_set perm_priority_remove update_apps install_driver_updates latency_counters session_start session_stop session_analyze session_delete pregame_pause pregame_resume power_fix leftover_reset irq_set rebar_set stall_probe wpr_start wpr_stop wpr_cancel gpu_tweak_apply gpu_tweak_revert regclean_scan regclean_clean regclean_restore privacy_apply privacy_revert service_set_startup service_control health_run boot_tweak_apply boot_tweak_revert disk_largest disk_duplicates disk_delete disk_move organizer_preview organizer_apply organizer_undo schedtask_toggle generate_report clear_cache game_switcher_configure game_apply_preset game_revert create_restore_point delete_restore_point optimize_apply reset_retired`.split(" ").map(name => `cmd_${name}`));
+
+function invoke<T>(command: string, args?: InvokeArgs): Promise<T> {
+  const run = () => tauriInvoke<T>(command, args);
+  return actionCommands.has(command) ? trackOperation(run) : run();
+}
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 
 export const api = {
@@ -61,7 +70,11 @@ export const api = {
   hwProfile: () => invoke<any>("cmd_hw_profile"),
   swCatalog: () => invoke<any>("cmd_sw_catalog"),
   swCheckInstalled: () => invoke<any>("cmd_sw_check_installed"),
-  swInstall: (wingetIds: string[]) => invoke<void>("cmd_sw_install", { wingetIds }),
+  swInstall: (wingetIds: string[], onProgress?: (progress: { wingetId: string; status: string; message: string }) => void) => trackOperation(async () => {
+    const unlisten = onProgress ? await listen<{ wingetId: string; status: string; message: string }>("sw-install-progress", event => onProgress(event.payload)) : undefined;
+    try { await invoke<void>("cmd_sw_install", { wingetIds }); }
+    finally { unlisten?.(); }
+  }),
   // debloater
   debloaterUwpList: () => invoke<any>("cmd_debloater_uwp_list"),
   debloaterRemoveUwp: (packageFullName: string) => invoke<string>("cmd_debloater_remove_uwp", { packageFullName }),
@@ -83,7 +96,8 @@ export const api = {
   gameboostKillBackground: (pids: number[]) => invoke<string>("cmd_gameboost_kill_background", { pids }),
   gameboostStart: (pid: number) => invoke<string>("cmd_gameboost_start", { pid }),
   gameboostStop: () => invoke<string>("cmd_gameboost_stop"),
-  gameboostGetStatus: () => invoke<{ pid: number | null; active: boolean }>("cmd_gameboost_get_status"),
+  gameboostStopAll: () => invoke<string>("cmd_gameboost_stop_all"),
+  gameboostGetStatus: () => invoke<{ pid: number | null; active: boolean; quick?: { id: string; tweak_name: string }[]; error?: string }>("cmd_gameboost_get_status"),
   quickBoostStart: (processName: string) => invoke<any>("cmd_gameboost_quick_boost", { processName }),
   quickBoostRevert: (restoreToken: string) => invoke<any>("cmd_gameboost_quick_boost_revert", { restoreToken }),
   // hosts

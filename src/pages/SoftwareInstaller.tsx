@@ -1,5 +1,4 @@
 import React, { useEffect, useState, useMemo } from "react";
-import { listen } from "@tauri-apps/api/event";
 import { api } from "../api";
 import { Card, Spinner } from "../components/ui";
 import { useLang } from "../i18n";
@@ -82,12 +81,8 @@ export default function SoftwareInstaller({ admin }: { admin: boolean }) {
     })();
   }, []);
 
-  // listen for install progress events
-  useEffect(() => {
-    const unlisten = listen<any>("sw-install-progress", e => {
-      const { wingetId, status, message } = e.payload;
+  const onInstallProgress = ({ wingetId, status, message }: { wingetId: string; status: string; message: string }) => {
       if (wingetId === "__done__") {
-        setInstalling(false);
         setLog(message);
         return;
       }
@@ -100,9 +95,7 @@ export default function SoftwareInstaller({ admin }: { admin: boolean }) {
           installed: status === "done" ? true : prev[wingetId]?.installed,
         },
       }));
-    });
-    return () => { unlisten.then(fn => fn()); };
-  }, []);
+  };
 
   const filtered = useMemo(() =>
     cat === "all" ? apps : apps.filter(a => a.category === cat),
@@ -139,7 +132,8 @@ export default function SoftwareInstaller({ admin }: { admin: boolean }) {
       return n;
     });
     try {
-      await api.swInstall([...selected]);
+      await api.swInstall([...selected], onInstallProgress);
+      setInstalling(false);
     } catch (e: any) {
       setInstalling(false);
       setLog(String(e));

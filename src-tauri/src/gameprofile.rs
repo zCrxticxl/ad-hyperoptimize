@@ -15,6 +15,23 @@ use tauri::Emitter;
 /// Guards against `start()` spawning more than one polling thread
 /// (e.g. if app setup ever runs twice, or a future reload path calls it again).
 static STARTED: AtomicBool = AtomicBool::new(false);
+static AUTO_LEASE: Mutex<Option<std::fs::File>> = Mutex::new(None);
+
+fn profile_lease() -> Result<Option<std::fs::File>, String> {
+    if AUTO_LEASE.lock().map_err(|e| e.to_string())?.is_some() {
+        return Ok(None);
+    }
+    let path = crate::safety::state_dir()?.join("game-switcher.lock");
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)
+        .map_err(|e| e.to_string())?;
+    file.try_lock().map_err(|e| format!("Game profiles are controlled by another app instance, or the ownership lock is unavailable: {e}"))?;
+    Ok(Some(file))
+}
 
 /// Lock helper that recovers from a poisoned mutex instead of panicking.
 /// A panic while some other holder was mutating state must not permanently
@@ -34,6 +51,8 @@ pub struct SwitcherState {
     pub default_preset: String, // "performance" | "balanced" | "quality"
     pub active_game: Option<String>, // game id
     pub prev_plan_guid: Option<String>, // power plan before game launched
+    #[serde(default)]
+    pub suppressed_games: Vec<String>,
 }
 
 pub type SharedState = Arc<Mutex<SwitcherState>>;
@@ -44,6 +63,7 @@ pub fn new_state() -> SharedState {
         default_preset: "performance".into(),
         active_game: None,
         prev_plan_guid: None,
+        suppressed_games: Vec::new(),
     }))
 }
 
@@ -56,6 +76,12 @@ pub fn start(state: SharedState, app: tauri::AppHandle) {
         loop {
             thread::sleep(Duration::from_secs(3));
 
+            if !lock(&state).enabled {
+                continue;
+            }
+            let Ok(_guard) = crate::tweaks::power_guard() else {
+                continue;
+            };
             let (enabled, current_game, preset) = {
                 let s = lock(&state);
                 (s.enabled, s.active_game.clone(), s.default_preset.clone())
@@ -64,43 +90,53 @@ pub fn start(state: SharedState, app: tauri::AppHandle) {
                 continue;
             }
 
-            let running = get_process_names();
+            let Ok(running) = get_process_names() else {
+                continue;
+            };
+            let suppressed = {
+                let mut s = lock(&state);
+                s.suppressed_games.retain(|id| {
+                    gamedb::get_all().iter().any(|g| {
+                        g.id == id.as_str()
+                            && g.processes.iter().any(|p| running.contains(&p.to_string()))
+                    })
+                });
+                s.suppressed_games.clone()
+            };
 
             // Detect a known game in the running process list
-            let detected = gamedb::get_all()
-                .iter()
-                .find(|g| g.processes.iter().any(|p| running.contains(&p.to_string())));
+            let detected = gamedb::get_all().iter().find(|g| {
+                !suppressed.iter().any(|id| id == g.id)
+                    && g.processes.iter().any(|p| running.contains(&p.to_string()))
+            });
 
             match (detected, current_game) {
                 // New game launched
                 (Some(game), None) => {
-                    {
-                        let mut s = lock(&state);
-                        s.active_game = Some(game.id.to_string());
-                    }
                     let result = record_prev_plan(Some(&state))
                         .and_then(|_| apply_power_plan_for_preset(game, &preset));
+                    if result.is_ok() {
+                        lock(&state).active_game = Some(game.id.to_string());
+                    }
                     emit_detected(&app, game, &preset, result);
                 }
 
                 // Active game no longer running, revert
                 (None, Some(id)) => {
-                    {
-                        let mut s = lock(&state);
-                        s.active_game = None;
-                    }
                     let r = revert_power_plan(&state);
+                    if r.is_ok() {
+                        lock(&state).active_game = None;
+                    }
                     let _ = app.emit("game-exited", json!({ "id": id, "error": r.err() }));
                 }
 
                 // Different game detected (switched without closing first)
                 (Some(game), Some(ref cid)) if game.id != cid.as_str() => {
-                    {
-                        let mut s = lock(&state);
-                        s.active_game = Some(game.id.to_string());
-                        // keep the previous plan recorded at the original launch
+                    let result = record_prev_plan(Some(&state))
+                        .and_then(|_| apply_power_plan_for_preset(game, &preset));
+                    if result.is_ok() {
+                        lock(&state).active_game = Some(game.id.to_string());
                     }
-                    let result = apply_power_plan_for_preset(game, &preset);
                     emit_detected(&app, game, &preset, result);
                 }
 
@@ -145,6 +181,7 @@ pub fn cmd_game_switcher_status(state: &SharedState) -> Value {
         "enabled":       s.enabled,
         "defaultPreset": s.default_preset,
         "activeGame":    s.active_game,
+        "canRevert": has_recovery(),
     })
 }
 
@@ -154,16 +191,59 @@ pub fn cmd_game_switcher_configure(
     enabled: bool,
     default_preset: String,
 ) -> Value {
-    let mut s = lock(state);
-    s.enabled = enabled;
-    s.default_preset = default_preset;
+    let _guard = match crate::tweaks::power_guard() {
+        Ok(g) => g,
+        Err(e) => return json!({ "error": e }),
+    };
+    let lease = match profile_lease() {
+        Ok(lease) => lease,
+        Err(e) => return json!({ "error": e }),
+    };
+    if enabled {
+        if let Some(lease) = lease {
+            *AUTO_LEASE.lock().unwrap_or_else(|e| e.into_inner()) = Some(lease);
+        }
+    }
+    if let Err(e) = configure_state(state, enabled, default_preset, || revert_power_plan(state)) {
+        return json!({ "error": e });
+    }
+    if !enabled {
+        *AUTO_LEASE.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    }
     json!({ "ok": true })
+}
+
+fn configure_state(
+    state: &SharedState,
+    enabled: bool,
+    default_preset: String,
+    restore: impl FnOnce() -> Result<Option<String>, String>,
+) -> Result<(), String> {
+    let auto_owned = {
+        let mut s = lock(state);
+        s.enabled = enabled;
+        s.default_preset = default_preset;
+        s.active_game.is_some()
+    };
+    if !enabled && auto_owned {
+        restore()?;
+        lock(state).active_game = None;
+    }
+    Ok(())
 }
 
 /// Manually apply a preset for a specific game. The plan active before the
 /// first manual/automatic apply is recorded (and persisted) so revert restores
 /// the user's real plan rather than a guessed Balanced.
 pub fn cmd_game_apply_preset(game_id: String, preset: String) -> Value {
+    let _guard = match crate::tweaks::power_guard() {
+        Ok(g) => g,
+        Err(e) => return json!({ "error": e }),
+    };
+    let _lease = match profile_lease() {
+        Ok(lease) => lease,
+        Err(e) => return json!({ "error": e }),
+    };
     match gamedb::get_all().iter().find(|g| g.id == game_id.as_str()) {
         None => json!({ "error": format!("Unknown game: {game_id}") }),
         Some(game) => {
@@ -178,9 +258,36 @@ pub fn cmd_game_apply_preset(game_id: String, preset: String) -> Value {
 /// Manually revert to the power plan that was active before the preset was
 /// applied. With nothing recorded this is an honest no-op.
 pub fn cmd_game_revert(state: &SharedState) -> Value {
+    let _guard = match crate::tweaks::power_guard() {
+        Ok(g) => g,
+        Err(e) => return json!({ "error": e }),
+    };
+    let _lease = match profile_lease() {
+        Ok(lease) => lease,
+        Err(e) => return json!({ "error": e }),
+    };
+    let running = match get_process_names() {
+        Ok(r) => r,
+        Err(_) => {
+            // Recovery must remain possible even if tasklist is unavailable.
+            // Disable automatic reapply when suppression cannot be established.
+            lock(state).enabled = false;
+            Vec::new()
+        }
+    };
+    lock(state).suppressed_games = gamedb::get_all()
+        .iter()
+        .filter(|g| g.processes.iter().any(|p| running.contains(&p.to_string())))
+        .map(|g| g.id.to_string())
+        .collect();
     let r = revert_power_plan(state);
     let mut s = lock(state);
-    s.active_game = None;
+    if r.is_ok() {
+        s.active_game = None;
+        if !s.enabled {
+            *AUTO_LEASE.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        }
+    }
     match r {
         Ok(Some(guid)) => json!({ "ok": true, "restoredPlan": guid }),
         Ok(None) => {
@@ -192,13 +299,10 @@ pub fn cmd_game_revert(state: &SharedState) -> Value {
 
 // ── Internal helpers ─────────────────────────────────────────────────────────
 
-fn get_process_names() -> Vec<String> {
-    // ps::exec: CREATE_NO_WINDOW + timeout — a raw Command here flashed a
-    // console window every poll interval.
-    let Ok(out) = ps::exec("tasklist.exe", &["/fo", "csv", "/nh"]) else {
-        return vec![];
-    };
-    out.lines()
+fn get_process_names() -> Result<Vec<String>, String> {
+    let out = ps::exec("tasklist.exe", &["/fo", "csv", "/nh"])?;
+    Ok(out
+        .lines()
         .filter_map(|line| {
             let first = if let Some(stripped) = line.strip_prefix('"') {
                 // tasklist /fo csv quotes fields containing commas
@@ -208,7 +312,7 @@ fn get_process_names() -> Vec<String> {
             };
             first.map(|s| s.trim_matches('"').to_lowercase())
         })
-        .collect()
+        .collect())
 }
 
 pub(crate) fn get_active_plan_guid() -> Option<String> {
@@ -277,6 +381,7 @@ fn has_battery() -> bool {
 const BATTERY_NOTE: &str = "unchanged (battery device: game profiles do not switch the power plan)";
 
 fn apply_power_plan_for_preset(game: &Game, preset: &str) -> Result<String, String> {
+    ensure_no_boost()?;
     if has_battery() {
         return Ok(BATTERY_NOTE.into());
     }
@@ -291,8 +396,11 @@ fn apply_power_plan_for_preset(game: &Game, preset: &str) -> Result<String, Stri
         "high_performance" => (PLAN_HIGH_PERFORMANCE.to_string(), "high_performance".into()),
         _ => (PLAN_BALANCED.to_string(), "balanced".into()),
     };
+    let (prev, _) = load_prev_record()?.ok_or("Previous power plan was not recorded")?;
+    // Keep recovery possible if applying or saving the applied marker fails.
+    write_prev_record(&prev, None)?;
     set_power_plan(&guid)?;
-    note_applied_plan(&guid);
+    write_prev_record(&prev, Some(&guid))?;
     Ok(label)
 }
 
@@ -309,9 +417,14 @@ fn prev_plan_path() -> Result<std::path::PathBuf, String> {
 /// Knowing the applied plan lets a stale record be detected: if the active
 /// plan is no longer the one the app set, the user changed it since, and
 /// restoring the old record would silently override their choice.
-fn load_prev_record() -> Option<(String, Option<String>)> {
-    let raw = std::fs::read_to_string(prev_plan_path().ok()?).ok()?;
-    parse_prev_record(&raw)
+fn load_prev_record() -> Result<Option<(String, Option<String>)>, String> {
+    match std::fs::read_to_string(prev_plan_path()?) {
+        Ok(raw) => parse_prev_record(&raw)
+            .map(Some)
+            .ok_or_else(|| "Invalid game-profile recovery record".into()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(format!("Reading game-profile recovery: {e}")),
+    }
 }
 
 fn parse_prev_record(raw: &str) -> Option<(String, Option<String>)> {
@@ -336,7 +449,7 @@ fn write_prev_record(prev: &str, applied: Option<&str>) -> Result<(), String> {
         Some(a) => format!("{prev}|{a}"),
         None => prev.to_string(),
     };
-    std::fs::write(&path, body).map_err(|e| format!("saving previous plan failed: {e}"))
+    crate::safety::write_user_file(&path, body.as_bytes())
 }
 
 /// True when a record exists whose applied plan is no longer active.
@@ -344,15 +457,11 @@ fn record_is_stale(applied: Option<&str>, active: Option<&str>) -> bool {
     matches!((applied, active), (Some(a), Some(now)) if !a.eq_ignore_ascii_case(now))
 }
 
-fn note_applied_plan(guid: &str) {
-    if let Some((prev, _)) = load_prev_record() {
-        let _ = write_prev_record(&prev, Some(guid));
-    }
-}
-
-fn clear_prev_plan() {
-    if let Ok(path) = prev_plan_path() {
-        let _ = std::fs::remove_file(path);
+fn clear_prev_plan() -> Result<(), String> {
+    match std::fs::remove_file(prev_plan_path()?) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(format!("Removing game-profile recovery: {e}")),
     }
 }
 
@@ -360,12 +469,24 @@ fn clear_prev_plan() {
 /// already recorded (a second apply must not overwrite the user's original
 /// plan with an already-applied game plan). A stale record (the user switched
 /// plans after the app's apply) is replaced by the current plan.
+pub(crate) fn has_recovery() -> bool {
+    prev_plan_path().is_ok_and(|p| p.exists())
+}
+
+fn ensure_no_boost() -> Result<(), String> {
+    if crate::gameboost::boost_active() || !crate::gameboost::quick_entries()?.is_empty() {
+        return Err("Stop active boosts before applying a game profile".into());
+    }
+    Ok(())
+}
+
 fn record_prev_plan(state: Option<&SharedState>) -> Result<(), String> {
+    ensure_no_boost()?;
     if has_battery() {
         return Ok(()); // nothing is switched, so nothing to restore
     }
     let active = get_active_plan_guid();
-    let prev = match load_prev_record() {
+    let prev = match load_prev_record()? {
         Some((g, applied)) if !record_is_stale(applied.as_deref(), active.as_deref()) => g,
         _ => {
             let g = active.ok_or("could not read the active power plan")?;
@@ -383,25 +504,36 @@ fn record_prev_plan(state: Option<&SharedState>) -> Result<(), String> {
 /// when the user switched plans after the app's apply (their choice wins).
 /// The record is only cleared after the restore succeeded.
 fn revert_power_plan(state: &SharedState) -> Result<Option<String>, String> {
-    let record = load_prev_record();
+    let record = load_prev_record()?;
+    let result = restore_record(
+        record,
+        get_active_plan_guid().as_deref(),
+        set_power_plan,
+        clear_prev_plan,
+    )?;
+    lock(state).prev_plan_guid = None;
+    Ok(result)
+}
+
+fn restore_record(
+    record: Option<(String, Option<String>)>,
+    active: Option<&str>,
+    set_plan: impl FnOnce(&str) -> Result<(), String>,
+    clear: impl FnOnce() -> Result<(), String>,
+) -> Result<Option<String>, String> {
     if let Some((_, applied)) = &record {
-        if record_is_stale(applied.as_deref(), get_active_plan_guid().as_deref()) {
-            lock(state).prev_plan_guid = None;
-            clear_prev_plan();
+        if record_is_stale(applied.as_deref(), active) {
+            clear()?;
             return Ok(None);
         }
     }
-    let recorded = lock(state)
-        .prev_plan_guid
-        .clone()
-        .filter(|g| ps::is_guid(g))
-        .or(record.map(|(g, _)| g));
+    // Disk is authoritative: another app instance may already have restored it.
+    let recorded = record.map(|(g, _)| g);
     let Some(guid) = recorded else {
         return Ok(None);
     };
-    set_power_plan(&guid)?;
-    lock(state).prev_plan_guid = None;
-    clear_prev_plan();
+    set_plan(&guid)?;
+    clear()?;
     Ok(Some(guid))
 }
 
@@ -416,6 +548,80 @@ fn plan_label_for_preset(game: &Game, preset: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn disabling_auto_switcher_preserves_recovery_on_failure_and_retries() {
+        let state = new_state();
+        lock(&state).enabled = true;
+        lock(&state).active_game = Some("game".into());
+        assert!(configure_state(&state, false, "balanced".into(), || Err(
+            "restore failed".into()
+        ))
+        .is_err());
+        assert!(!lock(&state).enabled);
+        assert_eq!(lock(&state).active_game.as_deref(), Some("game"));
+        configure_state(&state, false, "balanced".into(), || {
+            Ok(Some(PLAN_BALANCED.into()))
+        })
+        .unwrap();
+        assert!(lock(&state).active_game.is_none());
+        configure_state(&state, false, "balanced".into(), || {
+            panic!("no active auto profile to restore")
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn restore_respects_manual_changes_and_does_not_clear_failed_recovery() {
+        let record = || Some((PLAN_BALANCED.into(), Some(PLAN_HIGH_PERFORMANCE.into())));
+        assert!(restore_record(
+            record(),
+            Some(PLAN_HIGH_PERFORMANCE),
+            |_| Err("powercfg failed".into()),
+            || panic!("must retain record")
+        )
+        .is_err());
+        assert!(restore_record(
+            record(),
+            Some(PLAN_HIGH_PERFORMANCE),
+            |_| Ok(()),
+            || Err("cannot remove record".into())
+        )
+        .is_err());
+        assert_eq!(
+            restore_record(
+                record(),
+                Some(PLAN_BALANCED),
+                |_| panic!("manual plan wins"),
+                || Ok(())
+            )
+            .unwrap(),
+            None
+        );
+        assert_eq!(
+            restore_record(
+                None,
+                Some(PLAN_HIGH_PERFORMANCE),
+                |_| panic!("no record"),
+                || panic!("no record")
+            )
+            .unwrap(),
+            None
+        );
+        assert_eq!(
+            restore_record(
+                record(),
+                Some(PLAN_HIGH_PERFORMANCE),
+                |guid| {
+                    assert_eq!(guid, PLAN_BALANCED);
+                    Ok(())
+                },
+                || Ok(())
+            )
+            .unwrap(),
+            Some(PLAN_BALANCED.into())
+        );
+    }
 
     const LIST_DE: &str = "Bestehende Energieschemen (* Aktiv)\n-----------------------------------\nGUID des Energieschemas: 381b4222-f694-41f0-9685-ff5bb260df2e  (Ausbalanciert)\nGUID des Energieschemas: 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c  (Höchstleistung) *\nGUID des Energieschemas: d1a87a2d-32c1-4791-aad7-5902b0d8a2d5  (Ultimative Leistung)\n";
 

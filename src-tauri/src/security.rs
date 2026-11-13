@@ -401,6 +401,7 @@ fn parse_maps_reporting(s: &str) -> Option<u8> {
 }
 
 pub fn defender_set_realtime(enabled: bool) -> Result<String, String> {
+    let _engine = crate::tweaks::engine_guard()?;
     if !enabled {
         ensure_defender_unlocked()?;
     }
@@ -438,6 +439,7 @@ pub fn defender_set_realtime(enabled: bool) -> Result<String, String> {
 }
 
 pub fn defender_set_cloud(enabled: bool) -> Result<String, String> {
+    let _engine = crate::tweaks::engine_guard()?;
     if !enabled {
         ensure_defender_unlocked()?;
     }

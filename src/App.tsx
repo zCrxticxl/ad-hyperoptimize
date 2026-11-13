@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { pendingOperations } from "./lib/pendingOperations";
 import { check as checkUpdate } from "@tauri-apps/plugin-updater";
 import { api } from "./api";
 import { LangProvider, useLang, LANG_NAMES, Lang, plural, TKey } from "./i18n";
@@ -199,6 +200,7 @@ function AppInner() {
   const { lang, setLang, t } = useLang();
   const nav = buildNav(t);
   const [route, setRoute] = useState<Route>({ tool: "dashboard" });
+  const [visited, setVisited] = useState<Route[]>([{ tool: "dashboard" }]);
   const [admin, setAdmin] = useState<boolean | null>(null);
   const broker = useBroker();
   const [unlocking, setUnlocking] = useState(false);
@@ -225,7 +227,17 @@ function AppInner() {
   const searchRef = useRef<HTMLInputElement>(null);
   const updateChecked = useRef(false);
 
+  const pending = useSyncExternalStore(pendingOperations.subscribe, pendingOperations.getSnapshot);
+  const [navigationBlocked, setNavigationBlocked] = useState(false);
+  const canNavigate = () => {
+    if (!pendingOperations.getSnapshot()) { setNavigationBlocked(false); return true; }
+    setNavigationBlocked(true);
+    setQuery("");
+    return false;
+  };
+
   const setMode = (next: Mode) => {
+    if (!canNavigate()) return;
     setModeState(next);
     try { localStorage.setItem(MODE_KEY, next); } catch {}
   };
@@ -260,7 +272,9 @@ function AppInner() {
   const findTool = (toolId: string) => nav.flatMap((g) => g.items).find((i) => i.id === toolId);
 
   const openTool = (id: string, target?: string) => {
+    if (!canNavigate()) return;
     setQuery("");
+    setVisited(prev => [...prev.filter(r => (r.tool === "autoopt" || r.tool === "latency") && r.tool !== id), { tool: id, target }]);
     setRoute({ tool: id, target });
     // "Recently used", prepend, dedupe, cap at 6, persist.
     setRecents((prev) => {
@@ -300,7 +314,9 @@ function AppInner() {
         const desc = descK.map((k) => it[k]).find((v) => typeof v === "string" && v) || "";
         acc.push({
           tool,
-          id: idK.map((k) => it[k]).find((v) => typeof v === "string" && v) || "",
+          id: tool === "startup" ? JSON.stringify([it.scope, it.name])
+            : tool === "schedtasks" ? JSON.stringify([it.path, it.name])
+            : idK.map((k) => it[k]).find((v) => typeof v === "string" && v) || "",
           name,
           desc,
           // Match against every name variant (e.g. both service name and
@@ -342,7 +358,7 @@ function AppInner() {
     if (mode !== "beginner") return;
     if (!findTool(route.tool)?.basic) {
       setModeNotice(true);
-      setRoute({ tool: "dashboard" });
+      openTool("dashboard");
     }
   }, [mode]);
 
@@ -474,8 +490,9 @@ function AppInner() {
         </aside>
 
         <main className="content">
-          {/* Search overrides whatever tool is open. */}
-          {normalizedQuery ? (
+          {navigationBlocked && pending > 0 && <div className="warn-banner" role="status">{lang === "de" ? "Aktion läuft. Bitte vor dem Seitenwechsel den Abschluss abwarten." : "An operation is running. Please wait for it to finish before changing pages."}</div>}
+          {/* Keep the current tool mounted while searching. */}
+          {normalizedQuery && (
             <>
               <div className="view-head"><h1>{t("navSearchResults")}</h1><p>{allResults.length} · “{query}”</p></div>
               {allResults.length === 0 ? <div className="nav-empty">{t("navNoMatch")}</div> : (
@@ -498,7 +515,9 @@ function AppInner() {
                 </div>
               )}
             </>
-          ) : activeSection && activeTool ? (
+          )}
+          <div hidden={!!normalizedQuery}>
+          {activeSection && activeTool ? (
             <>
               <div className="section-head">
                 <div className="section-title">
@@ -532,7 +551,7 @@ function AppInner() {
                   ))}
                 </div>
               )}
-              <div className="page-content" role="tabpanel" key={`${route.tool}:${route.target ?? ""}`}><ToolErrorBoundary resetKey={route.tool}>{renderTool(route.tool, mode, admin, openTool, setMode, route.target, broker.connected)}</ToolErrorBoundary></div>
+              {visited.map(page => <div className="page-content" role="tabpanel" hidden={page.tool !== route.tool} key={page.tool}><ToolErrorBoundary resetKey={page.tool}>{renderTool(page.tool, mode, admin, openTool, setMode, page.target, broker.connected)}</ToolErrorBoundary></div>)}
 
               {route.tool === "dashboard" && (
                 <section className="home-quick" aria-labelledby="home-quick-title">
@@ -551,6 +570,7 @@ function AppInner() {
               )}
             </>
           ) : null}
+          </div>
         </main>
       </div>
     </div>
