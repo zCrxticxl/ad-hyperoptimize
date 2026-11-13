@@ -551,6 +551,8 @@ mod tests {
         let root = base.join("root");
         fs::create_dir_all(&root).unwrap();
         fs::write(root.join("old.tmp"), "old").unwrap();
+        // Match clean(): resolve the approved boundary before pinning it.
+        let root = fs::canonicalize(root).unwrap();
         let approved = super::safe_delete::ApprovedRoot::open(&root).unwrap();
         assert!(fs::rename(&root, base.join("moved")).is_err());
         assert!(fs::rename(&base, base.with_extension("moved")).is_err());
@@ -620,6 +622,7 @@ mod tests {
         let outside = base.join("outside");
         fs::create_dir_all(root.join("sub")).unwrap();
         fs::create_dir_all(&outside).unwrap();
+        let root = fs::canonicalize(root).unwrap();
         let inside_file = root.join("sub").join("old.tmp");
         fs::write(&inside_file, "x").unwrap();
         let keep = outside.join("keep.txt");
