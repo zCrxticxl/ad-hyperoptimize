@@ -117,6 +117,7 @@ $msg
         tweak_id: "perftweaks:timer".into(),
         tweak_name: "Timer Resolution task".into(),
         origin: None,
+        session: None,
         time: chrono::Local::now().to_rfc3339(),
         items: vec![
             crate::safety::ChangeItem::Registry {
@@ -287,6 +288,7 @@ pub(crate) fn apply_journaled(
         tweak_id: tweak_id.into(),
         tweak_name: name.into(),
         origin: None,
+        session: None,
         time: chrono::Local::now().to_rfc3339(),
         items: items.clone(),
         reverted: false,

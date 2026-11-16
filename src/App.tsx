@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import "./components/diagnostics.css";
 import { pendingOperations } from "./lib/pendingOperations";
 import { check as checkUpdate } from "@tauri-apps/plugin-updater";
 import { api } from "./api";
@@ -102,14 +103,14 @@ export const buildNav: NavBuilder = (t) => [
   { id: "monitor", group: t("navSecMonitor"), icon: "📈", desc: t("secDescMonitor"), accent: "slate", items: [
     { id: "hardware", icon: "🧩", label: t("navHardware"), desc: t("toolDescHardware"), basic: true, keywords: "hardware specs cpu gpu ram komponenten" },
     { id: "monitor", icon: "📈", label: t("navMonitor"), desc: t("toolDescMonitor"), basic: true, keywords: "monitor live metrics usage auslastung" },
-    { id: "gamediag", icon: "🎯", label: t("navGameDiag"), desc: t("toolDescGameDiag"), basic: true, keywords: "stutter ruckler throttling drosselung diagnose fps lag monitor hdr maus polling audio ssd" },
+    { id: "gamediag", icon: "🎯", label: t("navGameDiag"), desc: t("toolDescGameDiag"), basic: true, keywords: "stutter ruckler throttling drosselung diagnose fps lag monitor hdr maus polling audio ssd network netzwerk ping jitter paketverlust wlan display reflex vsync limiter frame generation" },
     { id: "hwmonitor", icon: "🌡️", label: t("navHwMonitor"), desc: t("toolDescHwMonitor"), keywords: "sensors temps temperature lüfter fans" },
     { id: "benchmark", icon: "🏁", label: t("navBenchmark"), desc: t("toolDescBenchmark"), basic: true, keywords: "benchmark test score messen" },
     { id: "pcconfig", icon: "🛠️", label: t("navPcConfig"), desc: t("toolDescPcConfig"), keywords: "pc build configurator upgrade bottleneck" },
   ] },
   { id: "recovery", group: t("navSecRecovery"), icon: "🛟", desc: t("secDescRecovery"), accent: "green", items: [
     { id: "restorepoints", icon: "🛟", label: t("navRestorePoints"), desc: t("toolDescRestorePoints"), basic: true, keywords: "restore backup undo rückgängig wiederherstellen safety" },
-    { id: "reports", icon: "📄", label: t("navReports"), desc: t("toolDescReports"), basic: true, keywords: "reports export log journal berichte" },
+    { id: "reports", icon: "📄", label: t("navReports"), desc: t("toolDescReports"), basic: true, keywords: "reports export log journal berichte recovery timeline wiederherstellung sitzung verlauf undo" },
     { id: "updates", icon: "🔄", label: t("navUpdates"), desc: t("toolDescUpdates"), basic: true, keywords: "update upgrade version aktualisieren" },
     { id: "settings", icon: "⚙️", label: t("navSettings"), desc: t("toolDescSettings"), basic: true, keywords: "settings einstellungen options options sprache language" },
     { id: "changelog", icon: "📜", label: t("navChangelog"), desc: t("toolDescChangelog"), basic: true, keywords: "changelog changes release notes version update neu neuigkeiten versionsverlauf" },

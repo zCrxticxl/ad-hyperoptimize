@@ -4,67 +4,61 @@ on:
   push:
     tags:
       - 'v*'
-  # Release the version on main without pushing a tag by hand: the job tags
-  # the commit as v<tauri.conf.json version> itself.
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish after verification (false validates without creating a tag or release)
+        type: boolean
+        default: false
+
+concurrency:
+  group: release-publication
+  cancel-in-progress: false
 
 jobs:
   release:
-    # A manual run publishes only from main.
     if: github.event_name == 'push' || github.ref == 'refs/heads/main'
     permissions:
       contents: write
-    runs-on: windows-latest
+    # Hosted Windows images disable Defender and exclude their build drives.
+    # Use a clean, disposable Windows runner with active Defender instead.
+    runs-on: ${{ vars.WINDOWS_RELEASE_RUNNER || 'adho-release' }}
+    timeout-minutes: 90
+    env:
+      WINDOWS_SIGNING_THUMBPRINT: ${{ vars.WINDOWS_SIGNING_THUMBPRINT }}
+      WINDOWS_TIMESTAMP_URL: ${{ vars.WINDOWS_TIMESTAMP_URL }}
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      # Fail before anything is built or published: a tag on the wrong commit
-      # once published a "v1.7.0" release with 1.6.4 installers, because the
-      # version check only ran after the upload.
-      - name: Verify tag matches app version
+      - name: Require a commit from main
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git merge-base --is-ancestor $env:GITHUB_SHA origin/main
+          if ($LASTEXITCODE -ne 0) { throw 'Only commits reachable from main may be signed.' }
+
+      - name: Verify version and required release credentials
         shell: pwsh
         env:
           REF_NAME: ${{ github.ref_name }}
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: |
-          $ErrorActionPreference = 'Stop'
+          . ./scripts/release/Release.Common.ps1
+          Assert-SigningIdentity $env:WINDOWS_SIGNING_THUMBPRINT $env:WINDOWS_TIMESTAMP_URL
+          if (!$env:WINDOWS_CERTIFICATE -or !$env:WINDOWS_CERTIFICATE_PASSWORD -or !$env:TAURI_SIGNING_PRIVATE_KEY) {
+            throw 'Windows code-signing and updater credentials are required. Unsigned releases are not published.'
+          }
           $conf = (Get-Content 'src-tauri/tauri.conf.json' -Raw | ConvertFrom-Json).version
-          $tag = if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') { $conf } else { $env:REF_NAME.TrimStart('v') }
+          $tag = if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') { "v$conf" } else { $env:REF_NAME }
           $pkg = (Get-Content 'package.json' -Raw | ConvertFrom-Json).version
           $cargo = ((Select-String -Path 'src-tauri/Cargo.toml' -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1).Matches[0].Groups[1].Value)
-          foreach ($pair in @(@('tauri.conf.json', $conf), @('package.json', $pkg), @('Cargo.toml', $cargo))) {
-            if ($pair[1] -ne $tag) {
-              Write-Error "Tag 'v$tag' does not match $($pair[0]) version '$($pair[1])'. Tag the commit that carries the version bump."
-              exit 1
-            }
-          }
-          Write-Host "Tag v$tag matches tauri.conf.json, package.json and Cargo.toml."
-          "TAG_NAME=v$tag" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-
-      - name: Create tag (manual run)
-        if: github.event_name == 'workflow_dispatch'
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $tag = $env:TAG_NAME
-          $lines = @(git ls-remote --tags origin "refs/tags/$tag" "refs/tags/$tag^{}")
-          if ($LASTEXITCODE -ne 0) { Write-Error "git ls-remote failed"; exit 1 }
-          if ($lines.Count -gt 0) {
-            # An annotated tag also lists its commit as the peeled ^{} line.
-            $line = ($lines | Where-Object { $_ -like '*^{}' } | Select-Object -First 1)
-            if (!$line) { $line = $lines[0] }
-            $sha = ($line -split '\s+')[0]
-            if ($sha -ne $env:GITHUB_SHA) {
-              Write-Error "Tag $tag already exists on $sha, not on $env:GITHUB_SHA. Bump the version first."
-              exit 1
-            }
-            Write-Host "Tag $tag already points at this commit."
-            exit 0
-          }
-          git tag $tag $env:GITHUB_SHA
-          git push origin "refs/tags/$tag"
-          if ($LASTEXITCODE -ne 0) { Write-Error "Pushing tag $tag failed"; exit 1 }
-          Write-Host "Created tag $tag on $env:GITHUB_SHA."
+          if ($tag -cne "v$conf" -or $pkg -cne $conf -or $cargo -cne $conf) { throw 'Tag and app versions differ.' }
+          "TAG_NAME=$tag" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
 
       - uses: actions/setup-node@v4
         with:
@@ -73,221 +67,111 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      # No rust-cache in the release job: a cache restored from another
-      # (PR/branch) run must never feed a signed release build.
-
-      # Third-party install scripts run BEFORE the signing certificate is in
-      # the certificate store, so a compromised dependency's lifecycle
-      # script cannot use or export it.
+      # No cross-branch binary cache and no signing key during dependency/build scripts.
       - name: Install frontend dependencies
         run: npm ci
 
-      - name: Import Windows code-signing certificate
+      - name: Test release gates
+        shell: pwsh
+        run: ./scripts/release/tests/Release.Tests.ps1
+
+      - name: Build application without installers
+        shell: pwsh
+        run: |
+          npm run tauri -- build --no-bundle --ci -- --locked
+          if ($LASTEXITCODE -ne 0) { throw 'Application build failed.' }
+
+      - name: Import approved signing identity
         shell: pwsh
         env:
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-          WINDOWS_TIMESTAMP_URL: ${{ vars.WINDOWS_TIMESTAMP_URL }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE) -or [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD) -or [string]::IsNullOrWhiteSpace($env:WINDOWS_TIMESTAMP_URL)) {
-            "WINDOWS_CODE_SIGNING=false" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-            Write-Host 'Windows code-signing secrets are not configured; creating an unsigned release.'
-            exit 0
-          }
-          $certPath = Join-Path $env:RUNNER_TEMP 'ad-hyperoptimize-signing.pfx'
-          [System.IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
-          try {
-            $password = ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -Force -AsPlainText
-            $certificate = Import-PfxCertificate -FilePath $certPath -CertStoreLocation Cert:\CurrentUser\My -Password $password
-            if (!$certificate -or !$certificate.Thumbprint) { throw 'Certificate import did not return a thumbprint.' }
-            "WINDOWS_CERT_THUMBPRINT=$($certificate.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+        run: ./scripts/release/Initialize-Signing.ps1
 
-            $configPath = 'src-tauri/tauri.conf.json'
-            $config = Get-Content $configPath -Raw | ConvertFrom-Json
-            $config.bundle.windows | Add-Member -NotePropertyName certificateThumbprint -NotePropertyValue $certificate.Thumbprint -Force
-            $config.bundle.windows | Add-Member -NotePropertyName digestAlgorithm -NotePropertyValue 'sha256' -Force
-            $config.bundle.windows | Add-Member -NotePropertyName timestampUrl -NotePropertyValue $env:WINDOWS_TIMESTAMP_URL -Force
-            $utf8NoBom = New-Object System.Text.UTF8Encoding $false
-            [System.IO.File]::WriteAllText((Resolve-Path $configPath), ($config | ConvertTo-Json -Depth 32), $utf8NoBom)
-            "WINDOWS_CODE_SIGNING=true" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          } finally {
-            Remove-Item -LiteralPath $certPath -Force -ErrorAction SilentlyContinue
-          }
-
-      # Release notes come from the matching CHANGELOG.md section (single source
-      # of truth, same content the app shows). Never fails: on any problem it
-      # falls back to the tag's commit message via the expression below.
-      - name: Extract release notes from CHANGELOG.md
+      - name: Sign and verify application before packaging
         shell: pwsh
-        env:
-          HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
-        run: |
-          $ErrorActionPreference = 'Continue'
-          $notes = ''
-          try {
-            $ver = $env:TAG_NAME.TrimStart('v')
-            if (Test-Path 'CHANGELOG.md') {
-              $collecting = $false
-              $out = New-Object System.Collections.Generic.List[string]
-              foreach ($line in Get-Content 'CHANGELOG.md') {
-                if ($line -match '^##\s+v?([0-9][^\s]*)') {
-                  if ($collecting) { break }
-                  if ($Matches[1].TrimStart('v') -eq $ver) { $collecting = $true; continue }
-                }
-                if ($collecting) { $out.Add($line) }
-              }
-              $notes = ($out -join "`n").Trim()
-            }
-          } catch { $notes = '' }
-          if ([string]::IsNullOrWhiteSpace($notes)) { $notes = $env:HEAD_COMMIT_MESSAGE }
-          "RELEASE_NOTES<<__CHANGELOG_EOF__`n$notes`n__CHANGELOG_EOF__" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+        run: ./scripts/release/Sign-WindowsBinary.ps1 -Path src-tauri/target/release/ad-hyperoptimize.exe
 
-      - name: Build & publish release
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      - name: Package and sign Windows installers
+        shell: pwsh
+        run: |
+          npm run tauri -- bundle --ci --bundles nsis,msi --config "$env:RUNNER_TEMP/adho-signing.json"
+          if ($LASTEXITCODE -ne 0) { throw 'Signed installer packaging failed.' }
+
+      - name: Verify application and installer signatures
+        shell: pwsh
+        run: ./scripts/release/Test-ReleaseSignatures.ps1
+
+      - name: Scan final application and installers with Defender
+        shell: pwsh
+        run: ./scripts/release/Test-ReleaseDefender.ps1
+
+      - name: Preserve release verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          tagName: ${{ env.TAG_NAME }}
-          releaseName: 'AD HyperOptimize ${{ env.TAG_NAME }}'
-          releaseBody: ${{ env.RELEASE_NOTES || github.event.head_commit.message }}
-          releaseDraft: false
-          prerelease: false
+          name: release-verification-${{ github.run_id }}
+          path: release-evidence/
+          if-no-files-found: warn
+          retention-days: 90
 
-      - name: Verify Authenticode signatures
-        if: env.WINDOWS_CODE_SIGNING == 'true'
+      - name: Extract release notes
+        if: github.event_name == 'push' || inputs.publish
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $artifacts = Get-ChildItem 'src-tauri/target/release/bundle' -Recurse -File | Where-Object { $_.Extension -in '.exe', '.msi' }
-          if (!$artifacts) { throw 'No Windows installer artifacts were found to verify.' }
-          foreach ($artifact in $artifacts) {
-            $signature = Get-AuthenticodeSignature -FilePath $artifact.FullName
-            if ($signature.Status -ne 'Valid') { throw "Invalid Authenticode signature for $($artifact.Name): $($signature.Status)" }
+          $version = $env:TAG_NAME.Substring(1)
+          $notes = [System.Collections.Generic.List[string]]::new()
+          $collecting = $false
+          foreach ($line in Get-Content CHANGELOG.md) {
+            if ($line -match '^##\s+v?([0-9][^\s]*)') {
+              if ($collecting) { break }
+              if ($Matches[1] -ceq $version) { $collecting = $true; continue }
+            }
+            if ($collecting) { $notes.Add($line) }
+          }
+          $text = ($notes -join "`n").Trim()
+          if (!$text) { $text = "AD HyperOptimize $env:TAG_NAME" }
+          $delimiter = [guid]::NewGuid().ToString('N')
+          "RELEASE_NOTES<<$delimiter`n$text`n$delimiter" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Create tag after successful verification (manual run)
+        if: github.event_name == 'workflow_dispatch' && inputs.publish
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = $env:TAG_NAME
+          $lines = @(git ls-remote --tags origin "refs/tags/$tag" "refs/tags/$tag^{}")
+          if ($LASTEXITCODE -ne 0) { throw 'git ls-remote failed.' }
+          if ($lines.Count) {
+            $line = $lines | Where-Object { $_ -like '*^{}' } | Select-Object -First 1
+            if (!$line) { $line = $lines[0] }
+            if (($line -split '\s+')[0] -cne $env:GITHUB_SHA) { throw 'Existing tag points to another commit. Bump the version.' }
+          } else {
+            git tag $tag $env:GITHUB_SHA
+            if ($LASTEXITCODE -ne 0) { throw 'Tag creation failed.' }
+            git push origin "refs/tags/$tag"
+            if ($LASTEXITCODE -ne 0) { throw 'Tag push failed.' }
           }
 
-      - name: Publish SHA-256 checksums
+      - name: Stage, verify uploaded digests and publish
+        if: github.event_name == 'push' || inputs.publish
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $artifacts = Get-ChildItem 'src-tauri/target/release/bundle' -Recurse -File | Where-Object { $_.Extension -in '.exe', '.msi' } | Sort-Object FullName
-          if (!$artifacts) { throw 'No Windows installer artifacts were found to checksum.' }
-          $lines = foreach ($artifact in $artifacts) {
-            $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $artifact.FullName).Hash.ToLowerInvariant()
-            "$hash  $($artifact.Name)"
-          }
-          [System.IO.File]::WriteAllLines((Join-Path $PWD 'SHA256SUMS.txt'), [string[]]$lines, (New-Object System.Text.UTF8Encoding $false))
-          gh release upload $env:TAG_NAME 'SHA256SUMS.txt' --clobber
-
-      - name: Generate latest.json
-        shell: pwsh
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          # Version of truth = tauri.conf.json, NOT the git tag name.
-          # A mismatched/duplicate tag previously caused the manifest to
-          # advertise a version the built binary didn't actually contain,
-          # producing an infinite "update available" loop.
-          $conf    = Get-Content "src-tauri/tauri.conf.json" -Raw | ConvertFrom-Json
-          $version = $conf.version
-          # Tag via env var, never an inline expression expansion in the script body.
-          $tag     = $env:TAG_NAME
-          if ($tag.TrimStart('v') -ne $version) {
-            Write-Error "Tag '$tag' does not match tauri.conf.json version '$version' — aborting to avoid a mismatched release."
-            exit 1
-          }
+        run: ./scripts/release/Publish-Release.ps1
 
-          # ── 1. Find local NSIS installer ──────────────────────────────────
-          $exe = Get-ChildItem "src-tauri/target/release/bundle/nsis/*-setup.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
-          if (!$exe) { Write-Error "No NSIS installer found in bundle/nsis/"; exit 1 }
-          Write-Host "Local installer: $($exe.FullName)"
-
-          # ── 2. Find or generate .sig ──────────────────────────────────────
-          $sigFile = Get-Item "$($exe.FullName).sig" -ErrorAction SilentlyContinue
-          if (!$sigFile) {
-            Write-Host "No .sig found — signing now..."
-            $signArgs = @("signer", "sign")
-            if ($env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD) {
-              $signArgs += @("--password", $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD)
-            }
-            $signArgs += $exe.FullName
-            & npm run tauri -- @signArgs
-            if ($LASTEXITCODE -ne 0) { Write-Error "Signing failed (exit $LASTEXITCODE)"; exit 1 }
-            $sigFile = Get-Item "$($exe.FullName).sig" -ErrorAction SilentlyContinue
-          }
-          if (!$sigFile) { Write-Error "No .sig file after signing — check TAURI_SIGNING_PRIVATE_KEY secret"; exit 1 }
-          $sig = (Get-Content $sigFile.FullName -Raw).Trim()
-          Write-Host "Signature OK (length=$($sig.Length))"
-
-          # ── 3. Get EXACT asset URL from GitHub API (retry up to 6×10s) ───
-          # Do NOT rely on local filename — Tauri replaces spaces with dots.
-          $url = $null
-          for ($i = 1; $i -le 6; $i++) {
-            try {
-              $rel = gh api "repos/zCrxticxl/ad-hyperoptimize/releases/tags/$tag" 2>$null | ConvertFrom-Json
-              $asset = $rel.assets | Where-Object { $_.name -match '-setup\.exe$' } | Select-Object -First 1
-              if ($asset -and $asset.browser_download_url) {
-                $url = $asset.browser_download_url.Trim()
-                Write-Host "Asset URL (attempt $i): $url"
-                break
-              }
-            } catch { Write-Host "API attempt $i failed: $_" }
-            Write-Host "Retrying in 10s..."
-            Start-Sleep -Seconds 10
-          }
-          if (!$url) { Write-Error "Could not retrieve setup.exe URL from GitHub API after 6 attempts"; exit 1 }
-
-          # ── 4. Verify the URL actually returns 200 ───────────────────────
-          try {
-            $r = Invoke-WebRequest -Uri $url -Method Head -UseBasicParsing -TimeoutSec 30
-            if ($r.StatusCode -ne 200) { Write-Error "URL returned HTTP $($r.StatusCode)"; exit 1 }
-            Write-Host "URL verified: HTTP $($r.StatusCode)"
-          } catch { Write-Error "URL unreachable: $_"; exit 1 }
-
-          # ── 5. Build manifest ─────────────────────────────────────────────
-          $pubDate = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
-          $manifest = [ordered]@{
-            version  = $version
-            notes    = $env:RELEASE_NOTES   # env var — safe against quotes/newlines
-            pub_date = $pubDate
-            platforms = [ordered]@{
-              "windows-x86_64" = [ordered]@{
-                signature = $sig
-                url       = $url
-              }
-            }
-          }
-          $json = $manifest | ConvertTo-Json -Depth 5
-
-          # ── 6. Write WITHOUT BOM (serde_json fails on BOM) ───────────────
-          $utf8NoBom = New-Object System.Text.UTF8Encoding $false
-          [System.IO.File]::WriteAllText("$PWD/latest.json", $json, $utf8NoBom)
-
-          # ── 7. Verify the file is valid JSON ─────────────────────────────
-          $null = Get-Content "latest.json" -Raw | ConvertFrom-Json
-          Write-Host "latest.json OK — version=$version url=$url"
-
-          # ── 8. Upload ─────────────────────────────────────────────────────
-          gh release upload $tag "latest.json" --clobber
-          Write-Host "✓ latest.json uploaded to $tag"
-
-      # Always remove the signing certificate (and its private key) from the
-      # runner's store, also when an earlier step failed or was cancelled.
-      - name: Remove code-signing certificate
+      - name: Remove imported signing certificates
         if: always()
         shell: pwsh
         run: |
-          $thumb = $env:WINDOWS_CERT_THUMBPRINT
-          if ([string]::IsNullOrWhiteSpace($thumb)) { Write-Host 'No signing certificate was imported.'; exit 0 }
-          $item = Get-Item -LiteralPath "Cert:\CurrentUser\My\$thumb" -ErrorAction SilentlyContinue
-          if ($item) {
-            Remove-Item -LiteralPath "Cert:\CurrentUser\My\$thumb" -DeleteKey -Force -ErrorAction Stop
-            Write-Host 'Signing certificate removed.'
+          $ErrorActionPreference = 'Stop'
+          foreach ($thumb in ($env:IMPORTED_SIGNING_THUMBPRINTS -split ',' | Where-Object { $_ })) {
+            if ($thumb -notmatch '^[0-9A-Fa-f]{40}$') { throw 'Invalid imported certificate identity.' }
+            $path = "Cert:\CurrentUser\My\$thumb"
+            if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -DeleteKey -Force }
           }
+          $pfx = Join-Path $env:RUNNER_TEMP 'ad-hyperoptimize-signing.pfx'
+          if (Test-Path -LiteralPath $pfx) { Remove-Item -LiteralPath $pfx -Force }

@@ -209,7 +209,7 @@ fn is_protected_inner(path: &Path, allow_root: bool) -> bool {
 
 /// `std::fs::canonicalize` returns `\\?\C:\…` on Windows; strip it back to
 /// `C:\…`. `\\?\UNC\…` and other verbatim device forms yield `None`.
-fn strip_verbatim_prefix(p: &Path) -> Option<String> {
+pub(crate) fn strip_verbatim_prefix(p: &Path) -> Option<String> {
     let s = p.to_string_lossy();
     match s.strip_prefix(r"\\?\") {
         Some(rest) if rest.len() >= 2 && rest.as_bytes()[1] == b':' => Some(rest.to_string()),

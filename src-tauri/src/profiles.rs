@@ -117,6 +117,8 @@ fn bench_suite() -> Value {
 /// Apply a whole profile. Optionally benchmark before/after.
 /// Per-tweak failures don't abort the rest, they're reported.
 pub fn apply(profile_id: &str, with_bench: bool) -> Result<Value, String> {
+    let engine = tweaks::engine_guard()?;
+    let _session = crate::recovery::SessionScope::new(&format!("Profile: {profile_id}"));
     let p = PROFILES
         .iter()
         .find(|p| p.id == profile_id)
@@ -156,7 +158,7 @@ pub fn apply(profile_id: &str, with_bench: bool) -> Result<Value, String> {
         }
         match status.get(*id).map(|s| s.1.as_str()) {
             Some("applied") => skipped.push(json!(id)),
-            _ => match tweaks::apply(id) {
+            _ => match tweaks::apply_locked(id, &engine) {
                 // An entry that already existed (applied manually or by
                 // another profile) stays with its owner: re-tagging it would
                 // make this profile's revert undo someone else's change.
@@ -174,7 +176,7 @@ pub fn apply(profile_id: &str, with_bench: bool) -> Result<Value, String> {
                         match tag {
                             Ok(()) => applied.push(json!(id)),
                             Err(e) => {
-                                let rollback = tweaks::revert_entry(entry_id).err();
+                                let rollback = tweaks::revert_entry_locked(entry_id, &engine).err();
                                 failed.push(
                                     json!({ "id": id, "error": e, "rollbackError": rollback }),
                                 );

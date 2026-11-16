@@ -6,6 +6,7 @@ use serde_json::{json, Value};
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Monitor {
+    pub id: String,
     pub name: String,
     /// DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY.
     pub tech: u32,
@@ -16,6 +17,7 @@ pub struct Monitor {
     pub hdr_supported: bool,
     pub hdr_on: bool,
     pub bits_per_channel: u32,
+    pub color_known: bool,
 }
 
 pub fn connection(tech: u32) -> &'static str {
@@ -54,19 +56,24 @@ pub fn vrr_windowed(dx_settings: Option<&str>) -> Option<bool> {
     let s = dx_settings?;
     s.split(';')
         .find_map(|kv| kv.trim().strip_prefix("VRROptimizeEnable="))
-        .map(|v| v.trim() == "1")
+        .and_then(|v| match v.trim() {
+            "1" => Some(true),
+            "0" => Some(false),
+            _ => None,
+        })
 }
 
 pub fn monitor_json(m: &Monitor) -> Value {
     json!({
+        "id": m.id,
         "name": m.name,
         "connection": connection(m.tech),
         "width": m.width,
         "height": m.height,
         "hz": (m.hz * 100.0).round() / 100.0,
         "maxHz": m.max_hz,
-        "hdrSupported": m.hdr_supported,
-        "hdrOn": m.hdr_on,
+        "hdrSupported": if m.color_known { Some(m.hdr_supported) } else { None },
+        "hdrOn": if m.color_known { Some(m.hdr_on) } else { None },
         "bitsPerChannel": m.bits_per_channel,
         "hints": hints(m),
     })
@@ -290,6 +297,10 @@ mod ffi {
                 String::new()
             };
             out.push(Monitor {
+                id: format!(
+                    "{}:{}:{}",
+                    p.target.adapter.high, p.target.adapter.low, p.target.id
+                ),
                 name: if name.is_empty() {
                     "Display".into()
                 } else {
@@ -307,6 +318,7 @@ mod ffi {
                 hdr_supported: color_ok && ac.value & 1 != 0,
                 hdr_on: color_ok && ac.value & 2 != 0,
                 bits_per_channel: if color_ok { ac.bpc } else { 0 },
+                color_known: color_ok,
             });
         }
         Ok(out)

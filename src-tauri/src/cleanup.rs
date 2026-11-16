@@ -162,8 +162,15 @@ fn root_allowed(root: &Path, per_user: bool) -> bool {
     let Some(home) = dirs::home_dir() else {
         return false;
     };
+    // Cleanup rechecks canonical Windows paths, unlike disk-analyzer input.
+    // Normalize only the local-drive prefix; UNC/device roots stay refused.
+    let Some(protection_path) = crate::diskanalyzer::strip_verbatim_prefix(root) else {
+        return false;
+    };
     match (fs::canonicalize(root), fs::canonicalize(home)) {
-        (Ok(r), Ok(h)) => is_inside(&r, &h) && !crate::diskanalyzer::is_protected(root),
+        (Ok(r), Ok(h)) => {
+            is_inside(&r, &h) && !crate::diskanalyzer::is_protected(Path::new(&protection_path))
+        }
         _ => false,
     }
 }
@@ -667,6 +674,41 @@ mod tests {
 mod root_tests {
     use super::{cat_paths, cat_roots, is_inside, CATS};
     use std::path::Path;
+
+    #[cfg(windows)]
+    #[test]
+    fn per_user_root_accepts_canonical_path_and_deletes_scanned_file() {
+        let home = dirs::home_dir().unwrap();
+        let root = home.join(format!("ad-clean-canonical-{}", rand::random::<u64>()));
+        std::fs::create_dir(&root).unwrap();
+        let file = root.join("shader.dxcache");
+        std::fs::write(&file, b"shader cache").unwrap();
+
+        assert!(super::root_allowed(&root, true));
+        let canonical = std::fs::canonicalize(&root).unwrap();
+        let allowed = super::root_allowed(&canonical, true);
+        if !allowed {
+            std::fs::remove_dir_all(&root).unwrap();
+        }
+        assert!(allowed, "canonical per-user root was rejected");
+        let approved = super::safe_delete::ApprovedRoot::open(&canonical).unwrap();
+        let mut files = Vec::new();
+        super::walk(&root, std::time::Duration::ZERO, &mut files);
+        assert_eq!(files, vec![(file.clone(), 12)]);
+        approved.delete_file(&files[0].0).unwrap();
+        assert!(!file.exists());
+        drop(approved);
+        std::fs::remove_dir(&root).unwrap();
+        assert!(!super::root_allowed(&home, true));
+        assert!(!super::root_allowed(
+            &std::fs::canonicalize(&home).unwrap(),
+            true
+        ));
+        assert!(!super::root_allowed(
+            &std::fs::canonicalize(crate::ps::windows_dir()).unwrap(),
+            true
+        ));
+    }
 
     #[test]
     fn per_user_roots_must_stay_inside_the_profile() {

@@ -102,7 +102,16 @@ fn trusted_env(windows: &str) -> Vec<(&'static str, String)> {
 fn wait_with_timeout(
     child: &mut Child,
     timeout: Duration,
+    terminate: impl FnMut(&mut Child) -> std::io::Result<()>,
+) -> Result<(std::process::ExitStatus, Vec<u8>, Vec<u8>), String> {
+    wait_with_cancel(child, timeout, terminate, None)
+}
+
+fn wait_with_cancel(
+    child: &mut Child,
+    timeout: Duration,
     mut terminate: impl FnMut(&mut Child) -> std::io::Result<()>,
+    external_cancel: Option<&std::sync::atomic::AtomicBool>,
 ) -> Result<(std::process::ExitStatus, Vec<u8>, Vec<u8>), String> {
     struct CancelOnDrop(std::sync::Arc<std::sync::atomic::AtomicBool>);
     impl Drop for CancelOnDrop {
@@ -124,6 +133,13 @@ fn wait_with_timeout(
 
     let deadline = Instant::now() + timeout;
     let status = loop {
+        if external_cancel.is_some_and(|flag| flag.load(std::sync::atomic::Ordering::SeqCst)) {
+            terminate(child).map_err(|e| format!("cancellation failed: {e}"))?;
+            child
+                .wait()
+                .map_err(|e| format!("reaping cancelled command: {e}"))?;
+            return Err("cancelled".into());
+        }
         match child.try_wait() {
             Ok(Some(st)) => break st,
             Ok(None) => {}
@@ -151,7 +167,9 @@ fn wait_with_timeout(
     while t_out.as_ref().is_some_and(|h| !h.is_finished())
         || t_err.as_ref().is_some_and(|h| !h.is_finished())
     {
-        if Instant::now() >= deadline {
+        if Instant::now() >= deadline
+            || external_cancel.is_some_and(|flag| flag.load(std::sync::atomic::Ordering::SeqCst))
+        {
             terminate(child)
                 .map_err(|e| format!("command output timed out; termination failed: {e}"))?;
             return Err(format!(
@@ -273,6 +291,15 @@ fn run_captured(
     what: &str,
     timeout: Duration,
 ) -> Result<(std::process::ExitStatus, String, String), String> {
+    run_captured_cancel(cmd, what, timeout, None)
+}
+
+fn run_captured_cancel(
+    cmd: &mut Command,
+    what: &str,
+    timeout: Duration,
+    cancel: Option<&std::sync::atomic::AtomicBool>,
+) -> Result<(std::process::ExitStatus, String, String), String> {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -289,7 +316,11 @@ fn run_captured(
     let terminate = |_: &mut Child| job.terminate();
     #[cfg(not(windows))]
     let terminate = |child: &mut Child| child.kill();
-    let (status, out, err) = wait_with_timeout(&mut child, timeout, terminate)?;
+    let (status, out, err) = if let Some(flag) = cancel {
+        wait_with_cancel(&mut child, timeout, terminate, Some(flag))?
+    } else {
+        wait_with_timeout(&mut child, timeout, terminate)?
+    };
     Ok((
         status,
         String::from_utf8_lossy(&out).into_owned(),
@@ -299,17 +330,39 @@ fn run_captured(
 
 /// Run a PowerShell script, return stdout. Errors carry stderr.
 pub fn run(script: &str) -> Result<String, String> {
+    run_with(script, CMD_TIMEOUT)
+}
+
+fn powershell_command(script: &str) -> Command {
     let mut cmd = Command::new(powershell_exe());
+    // Inline commands do not require overriding the user's script-file policy.
     cmd.args([
         "-NoProfile",
         "-NonInteractive",
-        "-ExecutionPolicy",
-        "Bypass",
         "-Command",
         &format!("{PS_UTF8_PROLOGUE}{script}"),
     ]);
     configure(&mut cmd);
-    run_checked(&mut cmd, "powershell", CMD_TIMEOUT).map(|(out, _)| out)
+    cmd
+}
+
+/// Bounded diagnostics only. Cancellation terminates the entire contained job.
+pub(crate) fn run_cancellable(
+    script: &str,
+    cancel: &std::sync::atomic::AtomicBool,
+) -> Result<String, String> {
+    let mut cmd = powershell_command(script);
+    let (status, out, err) = run_captured_cancel(
+        &mut cmd,
+        "network diagnostic",
+        Duration::from_secs(60),
+        Some(cancel),
+    )?;
+    if status.success() {
+        Ok(out)
+    } else {
+        Err(format!("network diagnostic failed ({status}): {err}"))
+    }
 }
 
 /// Like [`run`], but the status of the script's last command does not
@@ -328,17 +381,7 @@ fn settled(script: &str) -> String {
 /// Like [`run`], but with the long timeout for operations that legitimately
 /// take minutes (winget install/upgrade, WU driver install, DISM/SFC checks).
 pub fn run_long(script: &str) -> Result<String, String> {
-    let mut cmd = Command::new(powershell_exe());
-    cmd.args([
-        "-NoProfile",
-        "-NonInteractive",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-Command",
-        &format!("{PS_UTF8_PROLOGUE}{script}"),
-    ]);
-    configure(&mut cmd);
-    run_checked(&mut cmd, "powershell", CMD_TIMEOUT_LONG).map(|(out, _)| out)
+    run_with(script, CMD_TIMEOUT_LONG)
 }
 
 /// Run a PowerShell pipeline and parse `ConvertTo-Json` output.
@@ -382,16 +425,7 @@ fn run_json_with(script: &str, timeout: Duration) -> Result<serde_json::Value, S
 }
 
 fn run_with(script: &str, timeout: Duration) -> Result<String, String> {
-    let mut cmd = Command::new(powershell_exe());
-    cmd.args([
-        "-NoProfile",
-        "-NonInteractive",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-Command",
-        &format!("{PS_UTF8_PROLOGUE}{script}"),
-    ]);
-    configure(&mut cmd);
+    let mut cmd = powershell_command(script);
     run_checked(&mut cmd, "powershell", timeout).map(|(out, _)| out)
 }
 
@@ -560,6 +594,25 @@ pub fn is_guid(s: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn inline_commands_preserve_script_without_policy_override() {
+        let script = "Get-MpComputerStatus; 'spaces and $quotes'";
+        let command = super::powershell_command(script);
+        let args: Vec<_> = command
+            .get_args()
+            .map(|arg| arg.to_str().unwrap())
+            .collect();
+        assert_eq!(
+            args,
+            [
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                &format!("{}{script}", super::PS_UTF8_PROLOGUE),
+            ]
+        );
+    }
+
     #[test]
     fn settled_script_ends_with_a_succeeding_statement() {
         assert_eq!(
@@ -762,6 +815,26 @@ mod tests {
         assert!(error.contains("timed out"), "{error}");
         std::thread::sleep(Duration::from_millis(2200));
         assert!(!marker.exists(), "descendant escaped command lifetime");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn explicit_cancellation_terminates_a_contained_command() {
+        use std::sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc,
+        };
+        let cancel = Arc::new(AtomicBool::new(false));
+        let signal = cancel.clone();
+        let worker = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(150));
+            signal.store(true, Ordering::SeqCst);
+        });
+        let started = Instant::now();
+        let result = super::run_cancellable("Start-Sleep -Seconds 30; 'must not finish'", &cancel);
+        worker.join().unwrap();
+        assert_eq!(result.unwrap_err(), "cancelled");
+        assert!(started.elapsed() < Duration::from_secs(5));
     }
 
     // wait_with_timeout / run_checked are the heart of the PS bridge: output

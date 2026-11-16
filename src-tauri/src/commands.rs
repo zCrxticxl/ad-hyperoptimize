@@ -46,6 +46,17 @@ pub static COMMANDS: &[(&str, Class, &str)] = &[
     ),
     ("cmd_dns_benchmark", Read, "DNS queries"),
     ("cmd_network_diag", Read, "adapter and route info"),
+    (
+        "cmd_network_start",
+        User,
+        "explicit bounded ICMP and optional HTTPS download test",
+    ),
+    ("cmd_network_status", Read, "app-owned diagnostic result"),
+    (
+        "cmd_network_cancel",
+        User,
+        "cancel app-owned diagnostic job",
+    ),
     ("cmd_start_monitor", Read, "performance counters"),
     ("cmd_stop_monitor", Read, "stops the app's own sampler"),
     ("cmd_analyze", ReadAdmin, "includes the security scan"),
@@ -84,6 +95,16 @@ pub static COMMANDS: &[(&str, Class, &str)] = &[
         "journal undo / force-revert. Routed to the broker when connected (phase 3)",
     ),
     ("cmd_history", Read, "journal (readable by decision)"),
+    (
+        "cmd_recovery_timeline",
+        Read,
+        "journal and typed live setting comparison",
+    ),
+    (
+        "cmd_recovery_undo",
+        Privileged,
+        "drift-checked session restoration, routed to broker",
+    ),
     (
         "cmd_revert_entry",
         Privileged,

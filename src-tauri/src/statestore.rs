@@ -348,6 +348,8 @@ fn sanitize_entry(entry: &mut JournalEntry) -> bool {
 fn merge_legacy(secure: &mut Vec<JournalEntry>, legacy: Vec<JournalEntry>) -> (usize, usize) {
     let (mut added, mut untrusted) = (0, 0);
     for mut entry in legacy {
+        // User-writable history cannot claim membership in a protected session.
+        entry.session = None;
         if secure.iter().any(|e| e.id == entry.id) {
             continue;
         }
@@ -859,6 +861,7 @@ mod tests {
             tweak_id: "auto_play_off".into(),
             tweak_name: "x".into(),
             origin: None,
+            session: None,
             time: String::new(),
             items: vec![
                 ChangeItem::Registry {
@@ -900,6 +903,7 @@ mod tests {
             tweak_id: tweak_id.into(),
             tweak_name: "x".into(),
             origin: None,
+            session: None,
             time: String::new(),
             items: vec![item],
             reverted: false,

@@ -124,6 +124,8 @@ pub struct JournalEntry {
     pub tweak_name: String,
     #[serde(default)]
     pub origin: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<crate::recovery::Session>,
     pub time: String,
     pub items: Vec<ChangeItem>,
     pub reverted: bool,
@@ -207,7 +209,8 @@ pub fn with_journal<R>(
 /// keeps an unambiguous restore token. The journal is pruned on append so it
 /// stays bounded: beyond 500 entries the oldest already-reverted ones are
 /// dropped first; entries with undo state are never dropped.
-pub fn append_entry(entry: JournalEntry) -> Result<String, String> {
+pub fn append_entry(mut entry: JournalEntry) -> Result<String, String> {
+    entry.session = Some(crate::recovery::current_session(&entry.tweak_name));
     with_journal(|j| {
         let mut id = entry.id.clone();
         let mut n = 1;

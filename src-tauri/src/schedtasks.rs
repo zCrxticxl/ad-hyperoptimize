@@ -197,6 +197,7 @@ pub fn toggle(path: String, name: String, enable: bool) -> Result<Value, String>
         tweak_id: format!("task:{path}{name}"),
         tweak_name: format!("Scheduled task: {name}"),
         origin: None,
+        session: None,
         time: chrono::Local::now().to_rfc3339(),
         items: vec![crate::safety::ChangeItem::Command {
             applied: format!("powershell -Command {apply_script}"),

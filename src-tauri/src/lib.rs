@@ -28,6 +28,7 @@ mod hwprofile;
 mod latency;
 mod leftovers;
 mod monitor;
+mod network;
 mod nvprofile;
 mod optimizer;
 mod optregistry;
@@ -43,6 +44,7 @@ mod processjob;
 mod procmgr;
 mod profiles;
 mod ps;
+mod recovery;
 mod regclean;
 mod report;
 mod safety;
@@ -124,6 +126,21 @@ async fn cmd_network_diag() -> Value {
         .unwrap_or_default()
 }
 
+#[tauri::command]
+fn cmd_network_start(load: bool) -> Result<String, String> {
+    network::start(load)
+}
+
+#[tauri::command]
+fn cmd_network_status(id: String) -> Result<Value, String> {
+    network::status(&id)
+}
+
+#[tauri::command]
+fn cmd_network_cancel(id: String) -> Result<(), String> {
+    network::cancel(&id)
+}
+
 // ---- monitoring ----
 #[tauri::command(async)]
 async fn cmd_start_monitor(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
@@ -188,6 +205,25 @@ async fn cmd_history() -> Value {
     tauri::async_runtime::spawn_blocking(tweaks::history)
         .await
         .unwrap_or_default()
+}
+
+#[tauri::command(async)]
+async fn cmd_recovery_timeline() -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(recovery::timeline)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command(async)]
+async fn cmd_recovery_undo(session_id: String) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        broker::route(broker::Request::RecoveryUndo {
+            session_id: session_id.clone(),
+        })
+        .unwrap_or_else(|| recovery::undo(&session_id))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command(async)]
@@ -1954,6 +1990,9 @@ pub fn run() {
             cmd_component_health,
             cmd_dns_benchmark,
             cmd_network_diag,
+            cmd_network_start,
+            cmd_network_status,
+            cmd_network_cancel,
             // monitor
             cmd_start_monitor,
             cmd_stop_monitor,
@@ -1964,6 +2003,8 @@ pub fn run() {
             cmd_apply_tweak,
             cmd_revert_tweak,
             cmd_history,
+            cmd_recovery_timeline,
+            cmd_recovery_undo,
             cmd_revert_entry,
             // safety
             cmd_create_restore_point,

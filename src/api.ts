@@ -1,5 +1,6 @@
 import { invoke as tauriInvoke, InvokeArgs } from "@tauri-apps/api/core";
 import { trackOperation } from "./lib/pendingOperations";
+import type { RecoverySession, NetworkResult } from "./lib/diagnosticTypes";
 
 // Passive reads and polling must never hold navigation open.
 const actionCommands = new Set(`apply_tweak revert_tweak revert_entry run_cleanup defender_quick_scan uninstall_app scan_leftovers clean_leftovers ctxmenu_toggle ctxmenu_disable_all ctxmenu_enable_all powerplan_set powerplan_unlock_ultimate powerplan_delete powerplan_create timer_set timer_reset msi_set net_tweak net_reset_all pagefile_set_auto pagefile_set_custom pagefile_disable perf_undo debloater_remove_uwp debloater_remove_provisioned debloater_tweak_apply debloater_tweak_revert drivers_install_winget drivers_scan_windows_update gameboost_kill_background gameboost_start gameboost_stop gameboost_stop_all gameboost_quick_boost gameboost_quick_boost_revert disable_scheduled_task enable_scheduled_task defender_set_realtime defender_set_cloud hosts_disable_entries hosts_enable_entries security_disable_driver security_enable_driver security_remove_driver run_benchmark fps_import fps_delete profile_apply profile_revert startup_toggle proc_kill proc_priority proc_affinity perm_priority_set perm_priority_remove update_apps install_driver_updates latency_counters session_start session_stop session_analyze session_delete pregame_pause pregame_resume power_fix leftover_reset irq_set rebar_set stall_probe wpr_start wpr_stop wpr_cancel gpu_tweak_apply gpu_tweak_revert regclean_scan regclean_clean regclean_restore privacy_apply privacy_revert service_set_startup service_control health_run boot_tweak_apply boot_tweak_revert disk_largest disk_duplicates disk_delete disk_move organizer_preview organizer_apply organizer_undo schedtask_toggle generate_report clear_cache game_switcher_configure game_apply_preset game_revert create_restore_point delete_restore_point optimize_apply reset_retired`.split(" ").map(name => `cmd_${name}`));
@@ -8,6 +9,7 @@ function invoke<T>(command: string, args?: InvokeArgs): Promise<T> {
   const run = () => tauriInvoke<T>(command, args);
   return actionCommands.has(command) ? trackOperation(run) : run();
 }
+actionCommands.add("cmd_recovery_undo");
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 
 export const api = {
@@ -18,6 +20,9 @@ export const api = {
   componentHealth: () => invoke<any>("cmd_component_health"),
   dnsBenchmark: () => invoke<any>("cmd_dns_benchmark"),
   networkDiag: () => invoke<any>("cmd_network_diag"),
+  networkStart: (load: boolean) => invoke<string>("cmd_network_start", { load }),
+  networkStatus: (id: string) => invoke<{ done: boolean; result: NetworkResult | null; error: string | null }>("cmd_network_status", { id }),
+  networkCancel: (id: string) => invoke<void>("cmd_network_cancel", { id }),
   startMonitor: () => invoke("cmd_start_monitor"),
   stopMonitor: () => invoke("cmd_stop_monitor"),
   listTweaks: () => invoke<any[]>("cmd_list_tweaks"),
@@ -27,6 +32,8 @@ export const api = {
   applyTweak: (id: string) => invoke<any>("cmd_apply_tweak", { id }),
   revertTweak: (id: string) => invoke<any>("cmd_revert_tweak", { id }),
   history: () => invoke<any[]>("cmd_history"),
+  recoveryTimeline: () => invoke<{ sessions: RecoverySession[] }>("cmd_recovery_timeline"),
+  recoveryUndo: (sessionId: string) => invoke<{ results: { id: string; ok: boolean; error: string | null }[] }>("cmd_recovery_undo", { sessionId }),
   revertEntry: (entryId: string) => invoke<any>("cmd_revert_entry", { entryId }),
   scanCleanup: (force = false) => invoke<any>("cmd_scan_cleanup", { force }),
   runCleanup: (ids: string[]) => invoke<any>("cmd_run_cleanup", { ids }),

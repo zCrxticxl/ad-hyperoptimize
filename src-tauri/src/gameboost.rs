@@ -650,6 +650,7 @@ pub fn quick_boost_start(process_name: String) -> Result<Value, String> {
         tweak_id: "quickBoost".into(),
         tweak_name: format!("Quick Boost ({process_name})"),
         origin: None,
+        session: None,
         time: chrono::Local::now().to_rfc3339(),
         items: items.clone(),
         reverted: false,
