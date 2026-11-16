@@ -601,6 +601,7 @@ pub fn apply(id: String) -> Result<Value, String> {
         tweak_id: format!("privacy:{id}"),
         tweak_name: t.name.to_string(),
         origin: None,
+        session: None,
         time: chrono::Local::now().to_rfc3339(),
         items: changes,
         reverted: false,

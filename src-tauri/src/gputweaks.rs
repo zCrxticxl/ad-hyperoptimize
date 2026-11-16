@@ -699,6 +699,7 @@ pub fn do_tweak(id: String, driver_key: String, applying: bool) -> Result<String
             tweak_id,
             tweak_name: tw.name.into(),
             origin: None,
+            session: None,
             time: chrono::Local::now().to_rfc3339(),
             items: items.clone(),
             reverted: false,

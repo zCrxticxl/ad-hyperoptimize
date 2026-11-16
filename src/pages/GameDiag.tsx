@@ -7,6 +7,7 @@ import { DisplayCard } from "../components/diag/DisplayCard";
 import { InputCard } from "../components/diag/InputCard";
 import { AudioCard } from "../components/diag/AudioCard";
 import { StorageCard } from "../components/diag/StorageCard";
+import { NetworkCard } from "../components/diag/NetworkCard";
 
 /** Gaming diagnostics: measurements that find real causes of low FPS and
  * stutter. Read-only; nothing here changes the system. */
@@ -20,6 +21,7 @@ export default function GameDiag({ admin }: { admin: boolean }) {
       <div className="mt"><ThrottleCard /></div>
       <div className="mt"><StutterCard /></div>
       <div className="mt"><DisplayCard /></div>
+      <div className="mt"><NetworkCard /></div>
       <div className="mt"><InputCard /></div>
       <div className="mt"><AudioCard /></div>
       <div className="mt"><StorageCard /></div>

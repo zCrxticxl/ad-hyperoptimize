@@ -41,6 +41,9 @@ pub enum Request {
     RevertEntry {
         entry_id: String,
     },
+    RecoveryUndo {
+        session_id: String,
+    },
     /// Optimize My PC: approved tweak ids, each re-checked by the engine.
     OptimizeApply {
         ids: Vec<String>,
@@ -104,6 +107,7 @@ pub fn request_ids_valid(req: &Request) -> bool {
             name.len() <= 256 && crate::ps::is_safe_ident(name)
         }
         Request::RevertEntry { entry_id } => valid_entry_id(entry_id),
+        Request::RecoveryUndo { session_id } => valid_entry_id(session_id),
         Request::OptimizeApply { ids, .. } => {
             ids.len() <= 256 && ids.iter().all(|i| valid_tweak_id(i))
         }
@@ -140,6 +144,7 @@ pub fn execute(req: &Request) -> Result<Value, String> {
         Request::ApplyTweak { id } => crate::tweaks::apply(id),
         Request::RevertTweak { id } => crate::tweaks::revert(id),
         Request::RevertEntry { entry_id } => crate::tweaks::revert_entry(entry_id),
+        Request::RecoveryUndo { session_id } => crate::recovery::undo(session_id),
         Request::OptimizeApply { ids, restore_point } => {
             Ok(crate::optimizer::apply(ids.clone(), *restore_point))
         }

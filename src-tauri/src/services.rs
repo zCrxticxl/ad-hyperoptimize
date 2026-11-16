@@ -223,6 +223,7 @@ pub fn set_startup(name: String, startup_type: String) -> Result<Value, String> 
     if !ps::is_admin() {
         return Err("Changing service startup requires administrator rights".into());
     }
+    let _engine = crate::tweaks::engine_guard()?;
     // Capture BEFORE any journal write: a service that cannot be queried
     // leaves no entry behind.
     let previous = current_startup(&name)?;
@@ -269,7 +270,6 @@ pub fn set_startup(name: String, startup_type: String) -> Result<Value, String> 
         new: startup_type.clone(),
     });
 
-    let _engine = crate::tweaks::engine_guard()?;
     let entry_id = crate::safety::append_entry(crate::safety::JournalEntry {
         id: format!(
             "service-{name}-{}",
@@ -278,6 +278,7 @@ pub fn set_startup(name: String, startup_type: String) -> Result<Value, String> 
         tweak_id: format!("service:{name}"),
         tweak_name: format!("Service startup: {name}"),
         origin: None,
+        session: None,
         time: chrono::Local::now().to_rfc3339(),
         items: items.clone(),
         reverted: false,

@@ -234,6 +234,7 @@ pub fn perm_set(exe: String, priority: String) -> Result<Value, String> {
             tweak_id: format!("permPriority:{}", exe.to_lowercase()),
             tweak_name: format!("Permanent priority: {exe} = {priority}"),
             origin: None,
+            session: None,
             time: chrono::Local::now().to_rfc3339(),
             items: vec![item.clone()],
             reverted: false,

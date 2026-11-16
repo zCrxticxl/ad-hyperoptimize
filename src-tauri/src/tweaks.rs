@@ -1742,7 +1742,11 @@ fn power_cmd_target(apply: &str) -> Option<u32> {
 /// Apply a tweak: backup → write-ahead journal → mutate. Returns the journal
 /// entry id so the UI can offer instant undo.
 pub fn apply(tweak_id: &str) -> Result<Value, String> {
-    let _engine = engine_guard()?;
+    let engine = engine_guard()?;
+    apply_locked(tweak_id, &engine)
+}
+
+pub(crate) fn apply_locked(tweak_id: &str, _engine: &EngineGuard) -> Result<Value, String> {
     let t = catalog()
         .into_iter()
         .find(|t| t.id == tweak_id)
@@ -1870,6 +1874,7 @@ pub fn apply(tweak_id: &str) -> Result<Value, String> {
         tweak_id: t.id.to_string(),
         tweak_name: t.name.to_string(),
         origin: None,
+        session: None,
         time: chrono::Local::now().to_rfc3339(),
         items: items.clone(),
         reverted: false,
@@ -2588,6 +2593,7 @@ mod tests {
             tweak_id: tweak.into(),
             tweak_name: tweak.into(),
             origin: None,
+            session: None,
             time: String::new(),
             items: vec![],
             reverted,

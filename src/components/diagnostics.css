@@ -1,0 +1,23 @@
+.diag-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; margin: 18px 0; }
+.diag-field { display: flex; flex-direction: column; gap: 7px; font-size: 12px; }
+.diag-field select, .diag-field input { width: 100%; min-width: 0; color: var(--text); background: var(--card2); border: 1px solid var(--border); border-radius: 7px; padding: 9px; }
+.diag-field select:focus-visible, .diag-field input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.diag-assistant { border-top: 1px solid var(--border); margin-top: 18px; padding-top: 12px; }
+.diag-advice { padding-left: 21px; line-height: 1.6; }
+.diag-advice li { margin: 9px 0; }
+.diag-error { color: var(--red); overflow-wrap: anywhere; }
+.diag-warning { color: var(--orange); }
+.diag-success { color: var(--green); }
+.diag-table { overflow-x: auto; }
+.diag-raw { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 340px; overflow-y: auto; }
+.recovery-timeline { border-left: 2px solid var(--border); margin: 18px 0 0 8px; padding-left: 20px; }
+.recovery-session { position: relative; padding: 12px 16px; background: var(--card2); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 18px; }
+.recovery-session::before { content: ""; position: absolute; left: -27px; top: 24px; width: 10px; height: 10px; border-radius: 50%; background: var(--accent); }
+.recovery-session h3 { margin: 0 0 6px; }
+.recovery-entry { border-top: 1px solid var(--border); padding: 12px 0; }
+.recovery-entry summary { cursor: pointer; line-height: 1.6; }
+.recovery-item { margin: 14px 0; padding: 12px; border: 1px solid var(--border); border-radius: 7px; }
+.recovery-item code { overflow-wrap: anywhere; }
+.recovery-values { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; font-size: 12px; }
+.recovery-values pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
+@media (max-width: 800px) { .recovery-values { grid-template-columns: 1fr; } }

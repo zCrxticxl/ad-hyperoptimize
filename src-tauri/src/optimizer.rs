@@ -1197,6 +1197,11 @@ pub fn reset_retired() -> Value {
 pub fn apply(ids: Vec<String>, create_restore_point: bool) -> Value {
     #[cfg(windows)]
     {
+        let engine = match crate::tweaks::engine_guard() {
+            Ok(guard) => guard,
+            Err(error) => return json!({ "error": error }),
+        };
+        let _session = crate::recovery::SessionScope::new("Optimize My PC");
         let system = match detect() {
             Ok(s) => s,
             Err(e) => return json!({ "error": format!("System detection failed: {e}") }),
@@ -1238,7 +1243,7 @@ pub fn apply(ids: Vec<String>, create_restore_point: bool) -> Value {
                 results.push(json!({ "id": id, "name": name, "outcome": Outcome::Skipped.as_str(), "detail": why }));
                 continue;
             }
-            let (outcome, detail) = match crate::tweaks::apply(id) {
+            let (outcome, detail) = match crate::tweaks::apply_locked(id, &engine) {
                 Err(e) => (Outcome::Failed, e),
                 Ok(v) if v["status"] == "already_applied" => {
                     (Outcome::Already, "Already applied.".to_string())

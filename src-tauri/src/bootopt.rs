@@ -451,6 +451,7 @@ pub fn apply_tweak(id: String) -> Result<Value, String> {
         tweak_id: tweak_journal_id(&id),
         tweak_name: format!("Boot: {}", t.name),
         origin: None,
+        session: None,
         time: chrono::Local::now().to_rfc3339(),
         items: vec![crate::safety::ChangeItem::Command {
             // run_cmdline splits on whitespace and execs bcdedit directly

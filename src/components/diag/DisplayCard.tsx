@@ -1,19 +1,25 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { api } from "../../api";
 import { Card, Spinner } from "../ui";
 import { useLang, TKey } from "../../i18n";
+import { DisplayAssistant } from "./DisplayAssistant";
 
 type Mon = {
-  name: string; connection: string; width: number; height: number; hz: number; maxHz: number;
-  hdrSupported: boolean; hdrOn: boolean; bitsPerChannel: number; hints: string[];
+  id: string; name: string; connection: string; width: number; height: number; hz: number; maxHz: number;
+  hdrSupported: boolean | null; hdrOn: boolean | null; bitsPerChannel: number; hints: string[];
 };
 
 /** Per monitor: connection, refresh rate vs. the highest offered, HDR, bit depth. */
 export function DisplayCard() {
   const { t } = useLang();
   const [data, setData] = useState<{ monitors: Mon[]; vrrWindowed: boolean | null; error?: string } | null>(null);
-  const load = () => { setData(null); api.displayCheck().then(setData).catch((e) => setData({ monitors: [], vrrWindowed: null, error: String(e) })); };
-  useEffect(load, []);
+  const request = useRef(0);
+  const load = () => {
+    const id = ++request.current;
+    api.displayCheck().then(value => { if (id === request.current) setData(value); })
+      .catch(e => { if (id === request.current) setData({ monitors: [], vrrWindowed: null, error: String(e) }); });
+  };
+  useEffect(() => { load(); return () => { request.current++; }; }, []);
   const conn = (c: string) => (c === "internal" || c === "other" || c === "indirect" ? t(`dispConn_${c}` as TKey) : c);
 
   return (
@@ -33,7 +39,7 @@ export function DisplayCard() {
               {m.width}×{m.height} @ {Math.round(m.hz)} Hz{m.maxHz > Math.round(m.hz) + 1 ? ` (${t("dispMax")} ${m.maxHz} Hz)` : ""}
             </span>
             <span className="muted" style={{ fontSize: 12 }}>
-              HDR: {m.hdrOn ? t("dispOn") : m.hdrSupported ? t("dispOffSupported") : t("dispUnsupported")}
+          HDR: {m.hdrOn == null ? t("diagUnknown") : m.hdrOn ? t("dispOn") : m.hdrSupported ? t("dispOffSupported") : t("dispUnsupported")}
               {m.bitsPerChannel > 0 ? ` · ${m.bitsPerChannel} Bit` : ""}
             </span>
           </div>
@@ -50,6 +56,7 @@ export function DisplayCard() {
         </div>
       )}
       {data && !data.error && <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>{t("dispGsyncNote")}</div>}
+      {data && <DisplayAssistant monitors={data.monitors} />}
     </Card>
   );
 }

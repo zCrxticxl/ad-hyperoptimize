@@ -1,42 +1,21 @@
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import { api } from "../api";
 import { Card, ActionBtn, RawJson } from "../components/ui";
 import { useLang } from "../i18n";
+import { RecoveryTimeline } from "../components/RecoveryTimeline";
 
 export default function Reports() {
   const { t } = useLang();
   const [report, setReport] = useState<any | null>(null);
-  const [history, setHistory] = useState<any[]>([]);
-  const [histErr, setHistErr] = useState("");
   const [restorePts, setRestorePts] = useState<any | null>(null);
   const [logs, setLogs] = useState<any | null>(null);
   const [health, setHealth] = useState<any | null>(null);
-  const [undoBusy, setUndoBusy] = useState<string | null>(null);
-  const [undoErr, setUndoErr] = useState<string>("");
-
-  const loadHistory = () => api.history().then(setHistory).catch((e: any) => { setHistErr(String(e)); setHistory([]); });
-
-  useEffect(() => {
-    loadHistory();
-  }, []);
-
-  const undoEntry = async (id: string, name: string) => {
-    // One undo at a time: entries can touch the same keys and must not interleave.
-    if (undoBusy) return;
-    if (!window.confirm(t("repUndoConfirm").replace("{name}", name || id))) return;
-    setUndoBusy(id);
-    setUndoErr("");
-    try {
-      await api.revertEntry(id);
-      await loadHistory();
-    } catch (e: any) { setUndoErr(String(e)); }
-    finally { setUndoBusy(null); }
-  };
 
   return (
     <>
       <h1 className="page-title">{t("repTitle")}</h1>
       <div className="page-sub">{t("repSub")}</div>
+      <RecoveryTimeline />
 
       <Card title={t("repGenerateReport")}>
         <div className="row">
@@ -55,40 +34,6 @@ export default function Reports() {
         <div className="muted mt">{t("repPrintHint")}</div>
       </Card>
 
-      <Card title={`${t("repChangeHistory")} (${history.length})`} style={{ marginTop: 14 }}>
-        {histErr && <div style={{ color: "var(--red)", fontSize: 12, marginBottom: 8 }}>{histErr}</div>}
-        <table className="tbl">
-          <thead><tr><th scope="col">{t("repTime")}</th><th scope="col">{t("repTweak")}</th><th scope="col">{t("repState")}</th><th scope="col">{t("repBackups")}</th><th scope="col"></th></tr></thead>
-          <tbody>
-            {[...history].reverse().map((h, i) => (
-              <tr key={h.id ?? i}>
-                <td className="muted">{new Date(h.time).toLocaleString()}</td>
-                <td>
-                  {h.tweak_name}
-                  {h.untrusted && (
-                    <span className="badge risk-High" style={{ marginLeft: 6 }} title={t("repUntrustedHint")}>
-                      {t("repUntrusted")}
-                    </span>
-                  )}
-                </td>
-                <td style={{ color: h.reverted ? "var(--muted)" : h.completed === false ? "var(--orange)" : "var(--green)" }}>
-                  {h.reverted ? t("repReverted") : h.completed === false ? t("repIncomplete") : t("repApplied")}
-                </td>
-                <td className="muted">{h.backup_files?.length ?? 0} {t("repRegFiles")}</td>
-                <td>
-                  {!h.reverted && h.id && (
-                    <button className="btn small ghost" disabled={undoBusy !== null} onClick={() => undoEntry(h.id, h.tweak_name)}>
-                      {undoBusy === h.id ? "…" : t("revert")}
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ))}
-            {history.length === 0 && <tr><td colSpan={5} className="muted">{t("repNoChanges")}</td></tr>}
-          </tbody>
-        </table>
-        {undoErr && <div className="muted" style={{ fontSize: 12, marginTop: 8, color: "var(--orange)" }}>{undoErr}</div>}
-      </Card>
 
       <div className="grid grid-2 mt">
         <Card title={t("repSystemRestorePoints")}>

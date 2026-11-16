@@ -470,6 +470,7 @@ mod tests {
             tweak_id: "catalog".into(),
             tweak_name: String::new(),
             origin: None,
+            session: None,
             time: String::new(),
             items: vec![ChangeItem::Registry {
                 root: "HKLM".into(),

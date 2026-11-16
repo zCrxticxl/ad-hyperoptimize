@@ -4,6 +4,31 @@ All notable changes to AD HyperOptimize are documented here. The in-app
 changelog is generated from this file, and each GitHub release uses the matching
 section below as its release notes.
 
+## v1.8.0 - Recovery timeline and gaming diagnostics
+
+### Recovery
+- Group journaled changes into sessions and show before, target and current registry/service values in Reports.
+- Restore supported session changes with conflict checks and persisted partial progress; preserve newer changes and show unsupported command records explicitly.
+- Keep profile and optimizer changes in one recovery session and serialize service-state capture with other changes.
+
+### Gaming diagnostics
+- Add a display and latency assistant with advice for refresh rate, VRR, VSync, frame limiters, Reflex/Anti-Lag and frame generation.
+- Add user-started network diagnostics for latency, jitter and packet loss, with an optional bounded download test and cancellation.
+- Distinguish unknown display capabilities from unsupported ones and ignore stale display responses.
+
+### PowerShell and Defender
+- Stop overriding execution policy for inline PowerShell commands.
+- Run Defender Quick Scan through the bounded command bridge instead of a nested detached process.
+- Verify Defender preference changes by reading them back and retain restore records when the outcome is uncertain.
+
+### Cleanup
+- Fix canonical Windows paths being rejected during per-user cleanup, which left shader caches untouched while reporting zero deleted and zero skipped files.
+
+### Release tooling
+- Require timestamped Windows signatures and signature verification before publication.
+- Add a documented Defender scan gate, artifact hash checks and draft-release verification before publishing.
+- Add a verification-only workflow mode. Signed release validation still requires a configured signing provider and a dedicated Defender-active Windows runner.
+
 ## v1.7.2 - Recovery, security and navigation fixes
 
 ### Recovery and reliability

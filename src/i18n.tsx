@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState } from "react";
+import { experienceDe, experienceEn } from "./locales/experience";
 import * as esLocale from "./locales/es";
 import * as frLocale from "./locales/fr";
 import * as ptLocale from "./locales/pt";
@@ -29,6 +30,7 @@ export function plural(n: number, one: string, many: string): string {
 // ── Translations ──────────────────────────────────────────────────────────────
 
 const de = {
+  ...experienceDe,
   // Common
   log: "Log",
   liveLog: "Live Log",
@@ -2034,6 +2036,7 @@ const de = {
 // ── English ───────────────────────────────────────────────────────────────────
 
 const en: typeof de = {
+  ...experienceEn,
   log: "Log",
   liveLog: "Live Log",
   loading: "Loading…",

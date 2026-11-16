@@ -185,12 +185,18 @@ pub fn remove_unsigned_driver(device_id: String) -> Result<String, String> {
     pnputil(&["/remove-device", &device_id])
 }
 
-/// Launch a Defender quick scan detached (survives this process).
+/// Keep the scan request inside the bounded command lifetime. A nested
+/// Start-Process would be killed when the outer command's job closes.
 pub fn defender_quick_scan() -> Result<String, String> {
-    ps::run(
-        "Start-Process powershell -WindowStyle Hidden -ArgumentList '-NoProfile','-Command','Start-MpScan -ScanType QuickScan'; 'OK'",
-    )
-    .map(|_| "Defender Quick Scan started, result will appear in Windows Security Center.".into())
+    ps::run_long("Start-MpScan -ScanType QuickScan -ErrorAction Stop")
+        .map(|_| {
+            "Defender Quick Scan command completed. Check Windows Security for findings.".into()
+        })
+        .map_err(|error| {
+            format!(
+                "Defender Quick Scan: {error}. Check Windows Security for the current scan status."
+            )
+        })
 }
 
 fn autoruns() -> Value {
@@ -315,20 +321,18 @@ pub fn enable_scheduled_task(task_path: String, task_name: String) -> Result<Str
 
 /// Tamper Protection locks Defender settings: Set-MpPreference then fails
 /// with an obscure Win32 error. Detect it up front so the user gets an
-/// actionable message instead. A failed probe is treated as "not locked" -
-/// the subsequent Set-MpPreference error still surfaces honestly.
-fn tamper_protection_active() -> bool {
-    ps::run("(Get-MpComputerStatus -ErrorAction Stop).IsTamperProtected")
-        .map(|s| s.trim().eq_ignore_ascii_case("true"))
-        .unwrap_or(false)
+/// actionable message instead. An unknown protection state is not permission
+/// to weaken it.
+fn tamper_protection_active() -> Result<bool, String> {
+    let value = ps::run("(Get-MpComputerStatus -ErrorAction Stop).IsTamperProtected")?;
+    parse_ps_bool(&value).ok_or_else(|| "Could not determine Tamper Protection status.".into())
 }
 
 fn ensure_defender_unlocked() -> Result<(), String> {
-    if tamper_protection_active() {
+    if tamper_protection_active()? {
         return Err(
-            "Tamper Protection is enabled, Defender settings are locked. \
-                    Disable \"Tamper Protection\" in Windows Security → Virus & threat \
-                    protection → Manage settings first."
+            "Windows Tamper Protection blocks this Defender change. Nothing was changed. \
+             Check Windows Security or your organization's security policy."
                 .into(),
         );
     }
@@ -343,6 +347,7 @@ fn journaled_defender_change(
     apply: &str,
     revert: &str,
     done_msg: &str,
+    verify: impl FnOnce() -> Result<bool, String>,
 ) -> Result<String, String> {
     use crate::safety::{self, ChangeItem, JournalEntry};
     let entry_id = safety::append_entry(JournalEntry {
@@ -353,6 +358,7 @@ fn journaled_defender_change(
         tweak_id: tweak_id.into(),
         tweak_name: tweak_name.into(),
         origin: None,
+        session: None,
         time: chrono::Local::now().to_rfc3339(),
         items: vec![ChangeItem::Command {
             applied: format!("powershell -Command {apply}"),
@@ -365,19 +371,31 @@ fn journaled_defender_change(
         reverted_items: 0,
         untrusted: false,
     })?;
-    let result = ps::run(apply);
+    let result = verify_defender_change(ps::run(apply), verify());
     safety::with_journal(|entries| {
         let entry = entries
             .iter_mut()
             .find(|e| e.id == entry_id)
             .ok_or("Defender journal entry missing")?;
         entry.completed = result.is_ok();
-        // Set-MpPreference -ErrorAction Stop is all-or-nothing: on failure
-        // nothing changed, so the entry must not offer an undo.
-        entry.reverted = result.is_err();
+        // A timeout or failed readback can occur AFTER the preference changed.
+        // Keep the write-ahead restore record open instead of discarding undo.
         Ok(())
     })?;
     result.map(|_| done_msg.to_string())
+}
+
+fn verify_defender_change(
+    applied: Result<String, String>,
+    readback: Result<bool, String>,
+) -> Result<(), String> {
+    match (applied, readback) {
+        (Ok(_), Ok(true)) => Ok(()),
+        (Ok(_), Ok(false)) => Err("Defender did not retain the requested preference. The restore record remains available.".into()),
+        (Ok(_), Err(error)) => Err(format!("Could not verify Defender preference: {error}. The restore record remains available.")),
+        (Err(error), Ok(_)) => Err(format!("{error}. The restore record remains available because the command may have changed the preference.")),
+        (Err(error), Err(read_error)) => Err(format!("{error}. Readback also failed: {read_error}. The restore record remains available.")),
+    }
 }
 
 /// Parse the captured DisableRealtimeMonitoring preference.
@@ -401,18 +419,21 @@ fn parse_maps_reporting(s: &str) -> Option<u8> {
 }
 
 pub fn defender_set_realtime(enabled: bool) -> Result<String, String> {
+    if !ps::is_admin() {
+        return Err("Administrator rights required to change Defender preferences.".into());
+    }
     let _engine = crate::tweaks::engine_guard()?;
     if !enabled {
         ensure_defender_unlocked()?;
     }
-    let prev_disabled = ps::run("(Get-MpPreference -ErrorAction Stop).DisableRealtimeMonitoring")
-        .ok()
-        .and_then(|s| parse_ps_bool(&s))
-        .ok_or("could not read the current Real-Time Protection setting; nothing changed")?;
+    let prev_disabled = parse_ps_bool(&ps::run(
+        "(Get-MpPreference -ErrorAction Stop).DisableRealtimeMonitoring",
+    )?)
+    .ok_or("could not read the current Real-Time Protection setting; nothing changed")?;
     let msg = if enabled {
-        "Real-Time Protection enabled"
+        "Real-Time Protection preference enabled. Windows Security shows the effective protection status."
     } else {
-        "Real-Time Protection disabled"
+        "Real-Time Protection preference disabled. Windows Security shows the effective protection status."
     };
     if prev_disabled != enabled {
         // Already in the requested state; nothing to change or journal.
@@ -435,18 +456,27 @@ pub fn defender_set_realtime(enabled: bool) -> Result<String, String> {
             ps_bool(prev_disabled)
         ),
         msg,
+        || {
+            let value = ps::run("(Get-MpPreference -ErrorAction Stop).DisableRealtimeMonitoring")?;
+            parse_ps_bool(&value)
+                .map(|disabled| disabled != enabled)
+                .ok_or_else(|| "Unknown Real-Time Protection preference".into())
+        },
     )
 }
 
 pub fn defender_set_cloud(enabled: bool) -> Result<String, String> {
+    if !ps::is_admin() {
+        return Err("Administrator rights required to change Defender preferences.".into());
+    }
     let _engine = crate::tweaks::engine_guard()?;
     if !enabled {
         ensure_defender_unlocked()?;
     }
-    let prev = ps::run("(Get-MpPreference -ErrorAction Stop).MAPSReporting")
-        .ok()
-        .and_then(|s| parse_maps_reporting(&s))
-        .ok_or("could not read the current Cloud Protection setting; nothing changed")?;
+    let prev = parse_maps_reporting(&ps::run(
+        "(Get-MpPreference -ErrorAction Stop).MAPSReporting",
+    )?)
+    .ok_or("could not read the current Cloud Protection setting; nothing changed")?;
     let msg = if enabled {
         "Cloud Protection enabled"
     } else {
@@ -469,12 +499,87 @@ pub fn defender_set_cloud(enabled: bool) -> Result<String, String> {
         // Restores the captured level instead of a hardcoded 2.
         &format!("Set-MpPreference -MAPSReporting {prev} -ErrorAction Stop"),
         msg,
+        || {
+            let value = ps::run("(Get-MpPreference -ErrorAction Stop).MAPSReporting")?;
+            parse_maps_reporting(&value)
+                .map(|level| level == val)
+                .ok_or_else(|| "Unknown Cloud Protection preference".into())
+        },
     )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn defender_change_requires_successful_matching_readback() {
+        assert!(verify_defender_change(Ok(String::new()), Ok(true)).is_ok());
+        for (applied, readback) in [
+            (Ok(String::new()), Ok(false)),
+            (Ok(String::new()), Err("readback failed".into())),
+            (Err("timeout after mutation".into()), Ok(true)),
+            (Err("timeout after mutation".into()), Ok(false)),
+            (
+                Err("timeout after mutation".into()),
+                Err("unavailable".into()),
+            ),
+        ] {
+            let error = verify_defender_change(applied, readback).unwrap_err();
+            assert!(error.contains("restore record remains available"));
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn defender_journal_child() {
+        let Some(dir) = std::env::var_os("AD_TEST_DEFENDER_JOURNAL_DIR") else {
+            return;
+        };
+        crate::safety::use_test_state_dir(dir.into());
+        for (id, command, matches) in [
+            ("readback-mismatch", "'inert fixture'", false),
+            ("command-failed", "throw 'fixture failure'", true),
+            ("verified", "'inert fixture'", true),
+        ] {
+            let result = journaled_defender_change(
+                id,
+                "inert journal fixture",
+                command,
+                "'inert restore fixture'",
+                "verified",
+                || Ok(matches),
+            );
+            let entries = crate::safety::load_journal().unwrap();
+            let entry = entries.iter().find(|entry| entry.tweak_id == id).unwrap();
+            assert!(!entry.reverted, "ambiguous outcomes must retain undo");
+            assert_eq!(entry.attempted, 1);
+            assert_eq!(entry.items.len(), 1);
+            assert_eq!(entry.completed, id == "verified");
+            assert_eq!(result.is_ok(), id == "verified");
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn defender_failures_keep_durable_restore_record() {
+        let dir = std::env::temp_dir()
+            .join("opencode")
+            .join(format!("defender-journal-{}", rand::random::<u64>()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "security::tests::defender_journal_child"])
+            .env("AD_TEST_DEFENDER_JOURNAL_DIR", &dir)
+            .output()
+            .unwrap();
+        std::fs::remove_dir_all(dir).unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 
     #[test]
     fn only_scanned_unsigned_devices_can_be_targeted() {

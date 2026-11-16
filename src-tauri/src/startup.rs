@@ -221,6 +221,7 @@ pub fn toggle(scope: String, name: String, enable: bool) -> Result<Value, String
             tweak_id: format!("startup:{scope}:{name}"),
             tweak_name: format!("Startup entry: {name}"),
             origin: None,
+            session: None,
             time: chrono::Local::now().to_rfc3339(),
             items: vec![crate::safety::ChangeItem::Registry {
                 root: root.into(),

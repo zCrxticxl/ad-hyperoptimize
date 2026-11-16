@@ -20,6 +20,9 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm test
+      - name: Test release rejection gates
+        shell: pwsh
+        run: ./scripts/release/tests/Release.Tests.ps1
 
   # The privileged Rust backend was never compiled in CI before — a broken
   # command or a bad tweak definition would only surface at release time.
